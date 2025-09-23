@@ -1,0 +1,20 @@
+{
+  "routerMap": [
+    {
+      "name": "NavDestinationPage",
+      "pageSourceFile": "src/main/ets/pages/NavDestinationPage.ets",
+      "buildFunction": "NavDestinationPageBuilder",
+      "data": {
+        "description" : "this is NavDestinationPage"
+      }
+    },
+    {
+      "name": "Settings",
+      "pageSourceFile": "src/main/ets/pages/Settings.ets",
+      "buildFunction": "SettingsBuilder",
+      "data": {
+        "description" : "this is SettingsPage"
+      }
+    }
+  ]
+}
