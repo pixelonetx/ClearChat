@@ -9,11 +9,15 @@ struct NavDestinationPage {
   pathStack: NavPathStack = new NavPathStack();
 
   build() {
-    NavDestination() {
+    Navigation() {
     }
     .title('NavDestinationPage')
-    .onReady((context: NavDestinationContext) => {
-      this.pathStack = context.pathStack;
+    .onAppear(() => {
+      this.pathStack.pushPathByName("Index", null, false);
     })
+    .hideNavBar(true)
+    // .onReady((context: NavDestinationContext) => {
+    //   this.pathStack = context.pathStack;
+    // })
   }
 }
