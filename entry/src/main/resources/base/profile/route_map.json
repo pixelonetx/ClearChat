@@ -1,11 +1,11 @@
 {
   "routerMap": [
     {
-      "name": "NavDestinationPage",
-      "pageSourceFile": "src/main/ets/pages/NavDestinationPage.ets",
-      "buildFunction": "NavDestinationPageBuilder",
+      "name": "Chat",
+      "pageSourceFile": "src/main/ets/pages/Chat.ets",
+      "buildFunction": "ChatBuilder",
       "data": {
-        "description" : "this is NavDestinationPage"
+        "description" : "this is Chat"
       }
     },
     {
@@ -14,6 +14,14 @@
       "buildFunction": "SettingsBuilder",
       "data": {
         "description" : "this is SettingsPage"
+      }
+    },
+    {
+      "name": "ModelSettings",
+      "pageSourceFile": "src/main/ets/pages/ModelSettings.ets",
+      "buildFunction": "ModelSettingsBuilder",
+      "data": {
+        "description" : "this is ModelSettings"
       }
     }
   ]
