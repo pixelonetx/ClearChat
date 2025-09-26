@@ -10,6 +10,88 @@ struct Chat {
   pathStack: NavPathStack = new NavPathStack();
   @State isInitialized: boolean = false;
 
+  @State arr: number[] = [1, 2, 3]
+  @State current: number = 1
+
+  @Builder
+    SideBarContainer() {
+      // 侧边栏内容
+      Column() {
+        Row() {
+          Text('对话列表')
+            .fontSize(20)
+            .fontWeight(FontWeight.Medium)
+            .layoutWeight(1)
+          Button() {
+            Image($r('app.media.close_sidebar'))
+              .size({width:24, height:24})
+          }
+          .type(ButtonType.Circle)
+          .size({width:48, height:48})
+          .onClick(()=>{})
+        }
+        .width('100%')
+        .height(56)
+
+        Row() {
+          Button() {
+            Text('新建对话')
+              .fontSize(16)
+          }
+          .width('90%')
+          .height(48)
+          .onClick(()=>{})
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .margin({top:12, bottom:12})
+
+        // 对话列表
+        if(1) { //this.conversations.length === 0
+          Column() {
+            Text('还没有对话记录')
+              .fontSize(14)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          Scroll() {
+            Column()
+              .width('100%')
+              .padding({left:16, right:16})
+              .alignItems(HorizontalAlign.Start)
+              .justifyContent(FlexAlign.Start)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .align(Alignment.TopStart)
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Off)
+        }
+
+        Column() {
+          Divider()
+          Button() {
+            Row({space:8}) {
+              Image($r('app.media.gearshape'))
+                .size({width:24, height:24})
+              Text('设置')
+                .fontSize(14)
+            }
+          }
+          .width('90%')
+          .height(48)
+          .onClick(()=>{})
+        }
+      }
+      .width(300)
+      .height('100%')
+      .alignItems(HorizontalAlign.Start)
+      .justifyContent(FlexAlign.Start)
+  }
+
+
   build() {
     NavDestination() {
       Column() {
