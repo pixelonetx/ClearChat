@@ -23,6 +23,14 @@
       "data": {
         "description" : "this is ModelSettings"
       }
+    },
+    {
+      "name": "About",
+      "pageSourceFile": "src/main/ets/pages/About.ets",
+      "buildFunction": "AboutBuilder",
+      "data": {
+        "description" : "this is About"
+      }
     }
   ]
 }

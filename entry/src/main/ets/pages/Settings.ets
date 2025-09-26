@@ -11,6 +11,10 @@ export function SettingsBuilder() {
 struct Settings {
   // 控制跳转的对象
   pathStack: NavPathStack = new NavPathStack();
+  @StorageProp('bottomRectHeight')
+  bottomRectHeight: number = 0;
+  @StorageProp('topRectHeight')
+  topRectHeight: number = 0;
 
   @Builder itemHead(text: string) {
     Text(text)
@@ -49,6 +53,9 @@ struct Settings {
               Text('模型设置')
             }.width('100%')
           }
+          .onClick(()=>{
+            this.pathStack.pushPathByName("ModelSettings", null);
+          })
           ListItem({ style: ListItemStyle.CARD }) {
             Row({space:8}) {
               Image($r('app.media.wifi'))
@@ -75,6 +82,9 @@ struct Settings {
               Text('关于')
             }.width('100%')
           }
+          .onClick(()=>{
+            this.pathStack.pushPathByName("About", null);
+          })
         }
         .margin({left:16, right:16})
         .divider({strokeWidth:1, startMargin:40, endMargin:10,color:Color.Gray})
@@ -82,6 +92,10 @@ struct Settings {
 
 
     }
+    .padding({
+      top: this.getUIContext().px2vp(this.topRectHeight),
+      bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+    })
     .title('设置')
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
