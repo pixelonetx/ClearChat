@@ -58,6 +58,10 @@ export default class EntryAbility extends UIAbility {
           AppStorage.setOrCreate('bottomRectHeight', bottomRectHeight);
         }
       });
+
+      let applicationContext = this.context.getApplicationContext();
+      applicationContext.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+
     });
   }
 

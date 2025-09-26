@@ -31,26 +31,29 @@ struct Settings {
             Row({space:8}) {
               Image($r('app.media.clock'))
                 .size({width:24, height:24})
-              Text('主题模式')
+                .fillColor($r('app.color.text_color'))
+              Text('主题模式').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
           ListItem({ style: ListItemStyle.CARD }) {
             Row({space:8}) {
               Image($r('app.media.info_circle'))
                 .size({width:24, height:24})
-              Text('字体大小')
+                .fillColor($r('app.color.text_color'))
+              Text('字体大小').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
         }
         .margin({left:16, right:16, top:16})
-        .divider({strokeWidth:1, startMargin:40, endMargin:10,color:Color.Gray})
+        .divider({strokeWidth:1, startMargin:10, endMargin:10,color:Color.Gray})
 
         ListItemGroup({header:this.itemHead('模型服务方')}) {
           ListItem({ style: ListItemStyle.CARD }) {
             Row({space:8}) {
               Image($r('app.media.square_grid_2x2'))
                 .size({width:24, height:24})
-              Text('模型设置')
+                .fillColor($r('app.color.text_color'))
+              Text('模型设置').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
           .onClick(()=>{
@@ -60,26 +63,29 @@ struct Settings {
             Row({space:8}) {
               Image($r('app.media.wifi'))
                 .size({width:24, height:24})
-              Text('联网搜索')
+                .fillColor($r('app.color.text_color'))
+              Text('联网搜索').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
         }
         .margin({left:16, right:16})
-        .divider({strokeWidth:1, startMargin:40, endMargin:10,color:Color.Gray})
+        .divider({strokeWidth:1, startMargin:10, endMargin:10,color:Color.Gray})
 
         ListItemGroup({header:this.itemHead('关于')}) {
           ListItem({ style: ListItemStyle.CARD }) {
             Row({space:8}) {
               Image($r('app.media.square_and_pencil'))
                 .size({width:24, height:24})
-              Text('意见反馈')
+                .fillColor($r('app.color.text_color'))
+              Text('意见反馈').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
           ListItem({ style: ListItemStyle.CARD }) {
             Row({space:8}) {
               Image($r('app.media.info_circle'))
                 .size({width:24, height:24})
-              Text('关于')
+                .fillColor($r('app.color.text_color'))
+              Text('关于').fontColor($r('app.color.text_color'))
             }.width('100%')
           }
           .onClick(()=>{
@@ -87,7 +93,7 @@ struct Settings {
           })
         }
         .margin({left:16, right:16})
-        .divider({strokeWidth:1, startMargin:40, endMargin:10,color:Color.Gray})
+        .divider({strokeWidth:1, startMargin:10, endMargin:10,color:Color.Gray})
       }
 
 

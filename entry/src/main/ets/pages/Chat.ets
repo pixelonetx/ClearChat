@@ -1,6 +1,4 @@
-import { LengthMetrics} from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
-import { window } from '@kit.ArkUI';
+
 const uiContext: UIContext | undefined = AppStorage.get('uiContext');
 let storage = uiContext?.getSharedLocalStorage();
 
@@ -44,12 +42,12 @@ struct Chat {
           }
           .width('100%')
           .height(56)
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
           Row() {
             Button() {
               Text('新建对话')
                 .fontSize(16)
+                .fontColor($r('app.color.text_color'))
             }
             .buttonStyle(ButtonStyleMode.NORMAL)
             .width('90%')
@@ -65,6 +63,7 @@ struct Chat {
             Column() {
               Text('还没有对话记录')
                 .fontSize(14)
+                .fontColor($r('app.color.text_color'))
             }
             .width('100%')
             .layoutWeight(1)
@@ -90,8 +89,10 @@ struct Chat {
               Row({space:8}) {
                 Image($r('app.media.gearshape'))
                   .size({width:24, height:24})
+                  .fillColor($r('app.color.text_color'))
                 Text('设置')
                   .fontSize(14)
+                  .fontColor($r('app.color.text_color'))
               }
             }
             .onClick(()=>{
@@ -102,7 +103,7 @@ struct Chat {
             .height(48)
           }
         }
-        .backgroundColor('#F1F3F5')
+        .backgroundColor($r('sys.color.ohos_id_color_sub_background'))
         .width(300)
         .height('100%')
         .alignItems(HorizontalAlign.Start)
@@ -143,6 +144,7 @@ struct Chat {
 
                     Text('AI')
                       .fontSize(18)
+                      .fontColor($r('app.color.text_color'))
                       .fontWeight(FontWeight.Medium)
                       .layoutWeight(1)
                       .textAlign(TextAlign.Center)
@@ -153,21 +155,23 @@ struct Chat {
                     Button() {
                       Image($r('app.media.chat_new_line'))
                         .size({ width: 24, height: 24 })
+                        .fillColor($r('app.color.text_color'))
                     }
+                    .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
                     .type(ButtonType.Circle)
                     .size({ width: 48, height: 48 })
                     .margin({ right: 8 })
-                    .backgroundColor(Color.White)
                     .onClick(() => {
                     })
 
                     Button() {
                       Image($r('app.media.more_fill'))
                         .size({ width: 24, height: 24 })
+                        .fillColor($r('app.color.text_color'))
                     }
+                    .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
                     .type(ButtonType.Circle)
                     .size({ width: 48, height: 48 })
-                    .backgroundColor(Color.White)
                     .onClick(() => {
                     })
                   }
@@ -181,8 +185,11 @@ struct Chat {
                     Column() {
                       Text('有什么可以帮忙的？')
                         .fontSize(18)
+                        .fontColor($r('app.color.text_color'))
                       if (1) { //!this.hasSettings
                         Button('配置API设置')
+                          .fontColor($r('app.color.text_color'))
+                          .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
                           .type(ButtonType.Capsule)
                           .margin({ top: 10 })
                           .buttonStyle(ButtonStyleMode.NORMAL)
@@ -223,6 +230,7 @@ struct Chat {
                   // 输入区域
                   Row() {
                     TextArea({ placeholder: '输入你的消息' }) //, text: this.inputText
+                      .fontColor($r('app.color.text_color'))
                       .layoutWeight(1)
                       .borderRadius(20)
                       .border({ width: 1, color: Color.Gray })
@@ -237,12 +245,13 @@ struct Chat {
                       } else {
                         Image($r('app.media.send_plane_line'))
                           .size({ width: 24, height: 24 })
+                          .fillColor($r('app.color.text_color'))
                       }
                     }
+                    .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
                     .type(ButtonType.Circle)
                     .size({ width: 40, height: 40 })
                     .margin({ left: 6 })
-                    .backgroundColor(Color.White)
 
                     // .enabled()
                     // .onClick()
@@ -272,9 +281,9 @@ struct Chat {
         width:24,
         height:24,
         icons: {
-          hidden: $r('app.media.close_sidebar'),
-          shown: $r('app.media.close_sidebar'),
-          switching: $r('app.media.close_sidebar')
+          hidden: $r('sys.symbol.close_sidebar'),
+          shown: $r('sys.symbol.open_sidebar'),
+          // switching: $r('sys.symbol.close_sidebar')
         }
       })
       .showSideBar(false)
@@ -282,12 +291,12 @@ struct Chat {
       // .maxSideBarWidth(300)
       // .minContentWidth(0)
       .onChange((value: boolean) => {})
-      .divider({
-        strokeWidth: '1vp',
-        color: Color.Gray,
-        startMargin: '4vp',
-        endMargin: '4vp'
-      })
+      // .divider({
+      //   strokeWidth: '1vp',
+      //   color: Color.Gray,
+      //   startMargin: '4vp',
+      //   endMargin: '4vp'
+      // })
     }
     .hideToolBar(true)
     .hideTitleBar(true)

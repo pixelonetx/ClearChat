@@ -16,6 +16,7 @@ struct About {
   build() {
     NavDestination() {
       Text('关于页')
+        .fontColor($r('app.color.text_color'))
     }
     .padding({
       top: this.getUIContext().px2vp(this.topRectHeight),
