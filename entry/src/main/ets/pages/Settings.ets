@@ -27,7 +27,7 @@ struct Settings {
     {
       title: '模型设置',
       child: [
-        { text: '服务商', to: 'ModelSettings' },
+        { text: '模型提供方', to: 'ModelSettings' },
         { text: '联网搜索', to: 'UnderlineTab' }
       ]
     }
