@@ -18,6 +18,8 @@ struct Chat {
   bottomRectHeight: number = 0;
   @StorageProp('topRectHeight')
   topRectHeight: number = 0;
+  @State showControlButton: boolean = true // 显示控制按钮开关
+  @State showSideBar: boolean = false // 显示侧边栏开关
 
 
   build() {
@@ -26,22 +28,35 @@ struct Chat {
         // 侧边栏内容
         Column() {
           Row() {
-            Text(' ')
+            Text('对话列表')
               .fontSize(20)
               .fontWeight(FontWeight.Medium)
               .layoutWeight(1)
-              .textAlign(TextAlign.End)
+              .textAlign(TextAlign.Start)
               .margin({right:24})
-            // Button() {
-            //   Image($r('app.media.close_sidebar'))
-            //     .size({width:24, height:24})
-            // }
-            // .type(ButtonType.Circle)
-            // .size({width:48, height:48})
-            // .onClick(()=>{})
+            Button() {
+              Image($r('app.media.open_sidebar'))
+                .size({width:24, height:24})
+                .fillColor($r('app.color.text_color'))
+            }
+            .type(ButtonType.Circle)
+            .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
+            .size({width:48, height:48})
+            .onClick(() => {
+              this.showControlButton = true
+              // this.showSideBar = false
+              // 动画-关闭侧边栏
+              animateTo({
+                duration: 500,
+                curve: Curve.FastOutSlowIn
+              }, () => {
+                this.showSideBar = false;
+              })
+            })
           }
           .width('100%')
           .height(56)
+          .padding({left:12, right:12})
 
           Row() {
             Button() {
@@ -85,6 +100,7 @@ struct Chat {
 
           Column() {
             Divider()
+              .margin({ bottom: 12 })
             Button() {
               Row({space:8}) {
                 Image($r('app.media.gearshape'))
@@ -132,15 +148,24 @@ struct Chat {
                 Column() {
                   // 标题栏
                   Row() {
-                    // Button() {
-                    //   Image($r('app.media.close_sidebar'))
-                    //     .size({ width: 24, height: 24 })
-                    // }
-                    // .type(ButtonType.Circle)
-                    // .size({ width: 48, height: 48 }) // 点击热区
-                    // .backgroundColor(Color.White)
-                    // .onClick(() => {
-                    // }) //展示侧栏
+                    Button() {
+                      Image($r('app.media.close_sidebar'))
+                        .size({ width: 24, height: 24 })
+                        .fillColor($r('app.color.text_color'))
+                    }
+                    .type(ButtonType.Circle)
+                    .size({ width: 48, height: 48 }) // 点击热区
+                    .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
+                    .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
+                    .onClick(() => {
+                      this.showControlButton = false;
+                      animateTo({
+                        duration: 300,
+                        curve: Curve.FastOutSlowIn
+                      }, () => {
+                        this.showSideBar = true;
+                      })
+                    }) //展示侧栏
 
                     Text('AI')
                       .fontSize(18)
@@ -252,7 +277,6 @@ struct Chat {
                     .type(ButtonType.Circle)
                     .size({ width: 40, height: 40 })
                     .margin({ left: 6 })
-
                     // .enabled()
                     // .onClick()
                   }
@@ -274,29 +298,22 @@ struct Chat {
           top: this.getUIContext().px2vp(this.topRectHeight),
           bottom: this.getUIContext().px2vp(this.bottomRectHeight)
         })
+        .onClick(() => {
+          if (this.showControlButton = true) {
+            animateTo({
+              duration: 500,
+              curve: Curve.FastOutSlowIn
+            }, () => {
+              this.showSideBar = false;
+            })
+          }
+        })
       }
-      .controlButton({
-        left:24,
-        top:this.getUIContext().px2vp(this.topRectHeight)+16,
-        width:24,
-        height:24,
-        icons: {
-          hidden: $r('sys.symbol.close_sidebar'),
-          shown: $r('sys.symbol.open_sidebar'),
-          // switching: $r('sys.symbol.close_sidebar')
-        }
+      .showControlButton(false)
+      .showSideBar(this.showSideBar)
+      .onChange((isShow: boolean) => {
+        this.showSideBar = isShow;
       })
-      .showSideBar(false)
-      // .minSideBarWidth(50)
-      // .maxSideBarWidth(300)
-      // .minContentWidth(0)
-      .onChange((value: boolean) => {})
-      // .divider({
-      //   strokeWidth: '1vp',
-      //   color: Color.Gray,
-      //   startMargin: '4vp',
-      //   endMargin: '4vp'
-      // })
     }
     .hideToolBar(true)
     .hideTitleBar(true)
