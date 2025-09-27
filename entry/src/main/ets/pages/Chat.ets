@@ -10,7 +10,7 @@ export function ChatBuilder() {
 }
 
 
-@Entry(storage)
+@Entry()
 @Component
 struct Chat {
   pathStack: NavPathStack = new NavPathStack();
