@@ -1,1081 +1,823 @@
-import promptAction from '@ohos.promptAction';
-import { AIProvider, AIModel, AppSettings, ChatMessage } from '../services/DataModels';
+import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { AppSettings, AIProvider, AIModel, ChatMessage } from '../services/DataModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManager } from '../services/NetworkManager';
+import { NativeDialogHelper } from '../components/NativeDialogHelper';
+import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
+import { ModelSettingsDialog } from '../components/ModelSettingsDialog';
+import { DatabaseError } from '../components/Errors';
 
-function deepCloneModel(model: AIModel): AIModel {
-  return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
+interface ErrorLike {
+  message?: string;
 }
 
-function deepCloneProvider(provider: AIProvider): AIProvider {
-  const cloned = new AIProvider(provider.id, provider.name, provider.displayName, provider.apiUrl, provider.apiKey);
-  cloned.models = provider.models.map(item => deepCloneModel(item));
-  cloned.isActive = provider.isActive;
-  return cloned;
-}
-
-function showToastSafely(message: string): void {
-  try {
-    promptAction.showToast({ message });
-  } catch (error) {
-    console.warn('Toast display failed:', error);
-  }
-}
-
-type DialogMode = 'create' | 'edit';
-
-interface ProviderDraft {
-  id: string;
-  name: string;
-  displayName: string;
-  apiUrl: string;
-  apiKey: string;
-}
-
-interface ModelDraft {
-  id: string;
-  displayName: string;
-  maxTokens: string;
-  temperature: string;
-}
-
-interface DeleteModelContext {
-  providerIndex: number;
-  modelIndex: number;
-  modelName: string;
-}
-
-function createProviderDraft(initial?: AIProvider | null): ProviderDraft {
-  if (!initial) {
-    return {
-      id: '',
-      name: '',
-      displayName: '',
-      apiUrl: '',
-      apiKey: ''
-    };
-  }
-
-  return {
-    id: initial.id,
-    name: initial.name,
-    displayName: initial.displayName,
-    apiUrl: initial.apiUrl,
-    apiKey: initial.apiKey
-  };
-}
-
-function createModelDraft(initial?: AIModel | null): ModelDraft {
-  if (!initial) {
-    return {
-      id: '',
-      displayName: '',
-      maxTokens: '4096',
-      temperature: '0.7'
-    };
-  }
-
-  return {
-    id: initial.id,
-    displayName: initial.displayName,
-    maxTokens: initial.maxTokens.toString(),
-    temperature: initial.temperature.toString()
-  };
-}
+type ErrorInput = Error | ErrorLike | string | number | boolean | null | undefined | object;
 
 // 跳转页面入口函数
 @Builder
 export function ModelSettingsBuilder() {
   ModelSettings();
 }
+
 @Entry
 @Component
 struct ModelSettings {
+  pathStack: NavPathStack = new NavPathStack();
+  @StorageProp('bottomRectHeight')
+  bottomRectHeight: number = 0;
+  @StorageProp('topRectHeight')
+  topRectHeight: number = 0;
+
+  @State isLoading: boolean = false;
+  @State isTesting: boolean = false;
+
+  // 新版本多服务商状态
   @State providers: AIProvider[] = [];
   @State currentProviderIndex: number = 0;
   @State activeProviderId: string = '';
   @State activeModelId: string = '';
-  @State isLoading: boolean = false;
-  @State testingProviderId: string = '';
+
 
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
-  @State private showProviderDialog: boolean = false;
-  @State private providerDialogMode: DialogMode = 'create';
-  @State private providerDialogIndex: number = -1;
-  @State private providerDraft: ProviderDraft = createProviderDraft();
-  private providerDialogInitialModels: AIModel[] = [];
-  private providerDialogWasActive: boolean = false;
 
-  @State private showModelDialog: boolean = false;
-  @State private modelDialogMode: DialogMode = 'create';
-  @State private modelDialogProviderIndex: number = -1;
-  @State private modelDialogIndex: number = -1;
-  @State private modelDraft: ModelDraft = createModelDraft();
-  private modelDialogWasActive: boolean = false;
-
-  @State private deleteModelContext: DeleteModelContext | null = null;
-
+  // bindSheet 状态
+  @State private isSettingsSheetVisible: boolean = false;
+  @State private activeSheetType: string = '';
+  @State private providerDraft: AIProvider | null = null;
+  @State private providerEditIndex: number = -1;
+  @State private modelDraft: AIModel | null = null;
+  @State private modelProviderIndex: number = -1;
+  @State private modelEditIndex: number = -1;
+  private hasLoadedSettings: boolean = false;
+  private isRefreshingSettings: boolean = false;
   async aboutToAppear() {
-    await this.loadSettings();
+    await this.ensureSettingsLoaded();
   }
 
-  private async loadSettings(): Promise<void> {
-    this.isLoading = true;
+  async onPageShow() {
+    await this.ensureSettingsLoaded(true);
+  }
+
+  private async ensureSettingsLoaded(force: boolean = false) {
+    if (this.isRefreshingSettings) {
+      return;
+    }
+
+    if (!force && this.hasLoadedSettings) {
+      return;
+    }
+
+    this.isRefreshingSettings = true;
     try {
-      const settings = await this.databaseManager.getSettings();
-      if (settings && settings.providers.length > 0) {
-        const clonedProviders = settings.providers.map(item => deepCloneProvider(item));
-        this.providers = clonedProviders;
-        const preferredProviderId = settings.activeProviderId && clonedProviders.some(provider => provider.id === settings.activeProviderId)
-          ? settings.activeProviderId
-          : clonedProviders[0].id;
-        this.updateActiveState(preferredProviderId, settings.activeModelId);
-      } else {
-        await this.initializeDefaultProviders();
+      this.hasLoadedSettings = await this.loadSettings();
+    } finally {
+      this.isRefreshingSettings = false;
+    }
+  }
+
+  private async fetchSettings(): Promise<AppSettings | null> {
+    try {
+      return await this.databaseManager.getSettings();
+    } catch (error) {
+      const normalizedError = this.ensureError(error as ErrorInput);
+      if (this.isDatabaseNotInitialized(normalizedError)) {
+        try {
+          const context = getContext(this) as common.UIAbilityContext;
+          await this.databaseManager.initDatabase(context);
+          return await this.databaseManager.getSettings();
+        } catch (initError) {
+          const normalizedInitError = this.ensureError(initError as ErrorInput);
+          console.error('Failed to initialize database while loading settings:', normalizedInitError);
+          throw normalizedInitError;
+        }
       }
+      throw normalizedError;
+    }
+  }
+
+  private isDatabaseNotInitialized(error: Error): boolean {
+    return error instanceof DatabaseError && error.message.includes('not initialized');
+  }
+
+  private ensureError(rawError: ErrorInput): Error {
+    if (rawError instanceof Error) {
+      return rawError;
+    }
+
+    if (typeof rawError === 'string') {
+      return new Error(rawError);
+    }
+
+    if (typeof rawError === 'number' || typeof rawError === 'boolean') {
+      return new Error(`${rawError}`);
+    }
+
+    if (rawError && typeof rawError === 'object') {
+  const potentialMessage = (rawError as ErrorLike).message;
+      if (typeof potentialMessage === 'string' && potentialMessage.length > 0) {
+        return new Error(potentialMessage);
+      }
+
+      try {
+        const serialized = JSON.stringify(rawError);
+        if (serialized && serialized !== '{}') {
+          return new Error(serialized);
+        }
+      } catch (serializationError) {
+        console.warn('Failed to serialize error object:', serializationError);
+      }
+    }
+
+    return new Error('Unknown error');
+  }
+
+
+  private cloneModel(model: AIModel): AIModel {
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
+  }
+
+  private cloneProvider(provider: AIProvider): AIProvider {
+    const clonedProvider = new AIProvider(provider.id, provider.name, provider.displayName, provider.apiUrl, provider.apiKey);
+    clonedProvider.isActive = provider.isActive;
+    clonedProvider.models = provider.models.map(model => this.cloneModel(model));
+    return clonedProvider;
+  }
+
+  // 构造可持久化的设置对象，所有改动仅在确认或显式保存后写入数据库
+  private buildSettingsPayload(): AppSettings {
+    const settings = new AppSettings();
+
+    if (this.providers.length > 0 && this.activeProviderId) {
+      const activeProvider = this.providers.find(p => p.id === this.activeProviderId);
+      if (activeProvider) {
+        settings.apiUrl = activeProvider.apiUrl;
+        settings.apiKey = activeProvider.apiKey;
+        const activeModel = activeProvider.models.find(m => m.id === this.activeModelId);
+        settings.modelName = activeModel?.name || '';
+      }
+    }
+
+    settings.providers = this.providers.map(provider => {
+      const cloned = this.cloneProvider(provider);
+      cloned.isActive = provider.id === this.activeProviderId;
+      return cloned;
+    });
+    settings.activeProviderId = this.activeProviderId;
+    settings.activeModelId = this.activeModelId;
+
+    return settings;
+  }
+
+  private async persistSettingsSilently() {
+    const settings = this.buildSettingsPayload();
+    await this.databaseManager.saveSettings(settings);
+  }
+
+  private showToast(message: string) {
+    try {
+      promptAction.showToast({ message });
+    } catch (toastError) {
+      console.error('Failed to show toast:', toastError);
+    }
+  }
+
+  private closeSettingsSheet() {
+    this.isSettingsSheetVisible = false;
+    this.resetSheetState();
+  }
+
+  private resetSheetState() {
+    if (!this.isSettingsSheetVisible) {
+      this.activeSheetType = '';
+      this.providerDraft = null;
+      this.providerEditIndex = -1;
+      this.modelDraft = null;
+      this.modelProviderIndex = -1;
+      this.modelEditIndex = -1;
+    }
+  }
+
+  private async handleProviderConfirm(provider: AIProvider) {
+    const clonedProvider = this.cloneProvider(provider);
+    let toastMessage = '服务商已添加并保存';
+
+    if (this.providerEditIndex >= 0 && this.providerEditIndex < this.providers.length) {
+      const newProviders = [...this.providers];
+      newProviders[this.providerEditIndex] = clonedProvider;
+      this.providers = newProviders;
+      toastMessage = '服务商已修改并保存';
+    } else {
+      this.providers = [...this.providers, clonedProvider];
+    }
+
+    try {
+      await this.persistSettingsSilently();
+      this.showToast(toastMessage);
+    } catch (error) {
+      console.error('Failed to save provider changes:', error);
+      this.showToast('保存设置失败');
+    } finally {
+      this.closeSettingsSheet();
+    }
+  }
+
+  private async handleModelConfirm(model: AIModel) {
+    if (this.modelProviderIndex < 0 || this.modelProviderIndex >= this.providers.length) {
+      this.showToast('未找到指定的服务商');
+      this.closeSettingsSheet();
+      return;
+    }
+
+    const provider = this.providers[this.modelProviderIndex];
+    const updatedModel = this.cloneModel(model);
+    const newProviders = [...this.providers];
+    const models = [...provider.models];
+    let toastMessage = '模型已添加并保存';
+
+    if (this.modelEditIndex >= 0 && this.modelEditIndex < models.length) {
+      models[this.modelEditIndex] = updatedModel;
+      toastMessage = '模型已修改并保存';
+    } else {
+      models.push(updatedModel);
+    }
+
+    newProviders[this.modelProviderIndex] = this.cloneProvider(provider);
+    newProviders[this.modelProviderIndex].models = models;
+    this.providers = newProviders;
+
+    try {
+      await this.persistSettingsSilently();
+      this.showToast(toastMessage);
+    } catch (error) {
+      console.error('Failed to save model changes:', error);
+      this.showToast('保存设置失败');
+    } finally {
+      this.closeSettingsSheet();
+    }
+  }
+
+  async loadSettings(): Promise<boolean> {
+    try {
+      const settings = await this.fetchSettings();
+      if (!settings) {
+        console.info('No settings found in database');
+        this.providers = [];
+        this.activeProviderId = '';
+        this.activeModelId = '';
+        this.currentProviderIndex = 0;
+        return true;
+      }
+
+      const storedProviders = settings.providers ?? [];
+
+      if (storedProviders.length === 0) {
+        this.providers = [];
+        this.activeProviderId = '';
+        this.activeModelId = '';
+        this.currentProviderIndex = 0;
+        console.info('Settings found but no providers configured.');
+        return true;
+      }
+
+      const activeIndex = storedProviders.findIndex(provider => provider.id === settings.activeProviderId);
+      const resolvedIndex = activeIndex >= 0 ? activeIndex : 0;
+      const resolvedProvider = storedProviders[resolvedIndex];
+      const resolvedModelId = (settings.activeModelId && resolvedProvider.models.some(model => model.id === settings.activeModelId))
+        ? settings.activeModelId
+        : (resolvedProvider.models[0]?.id || '');
+
+      this.providers = storedProviders.map(provider => this.cloneProvider(provider));
+      this.currentProviderIndex = resolvedIndex;
+      this.activeProviderId = resolvedProvider.id;
+      this.activeModelId = resolvedModelId;
+
+      console.info('Loaded providers from database:', storedProviders.length);
+      return true;
     } catch (error) {
       console.error('Failed to load settings:', error);
-      showToastSafely('加载设置失败，已恢复默认配置');
-      await this.initializeDefaultProviders();
+      this.showToast('加载设置失败');
+      return false;
+    }
+  }
+
+  // 保存所有设置（手动保存，显示提示）
+  async saveAllSettings() {
+    try {
+      this.isLoading = true;
+      await this.persistSettingsSilently();
+      this.showToast('设置已保存');
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      this.showToast('保存设置失败');
     } finally {
       this.isLoading = false;
     }
   }
 
-  private async initializeDefaultProviders(): Promise<void> {
-    const openaiProvider = new AIProvider('default_openai', 'openai', 'OpenAI', 'https://api.openai.com/v1', '');
-    openaiProvider.models = [
-      new AIModel('gpt-3.5-turbo', 'gpt-3.5-turbo', 'GPT-3.5 Turbo', 4096, 0.7),
-      new AIModel('gpt-4', 'gpt-4', 'GPT-4', 8192, 0.7)
-    ];
-    openaiProvider.isActive = true;
-
-    this.providers = [openaiProvider];
-    this.updateActiveState(openaiProvider.id, openaiProvider.models[0]?.id ?? '');
-    await this.autoSaveSettings();
+  // 添加服务商
+  addProvider() {
+    this.providerDraft = new AIProvider('', '', '');
+    this.providerEditIndex = -1;
+    this.activeSheetType = 'provider';
+    this.isSettingsSheetVisible = true;
   }
 
-  private async autoSaveSettings(): Promise<void> {
-    try {
-      const settings = new AppSettings();
-      settings.providers = this.providers.map(provider => deepCloneProvider(provider));
-      settings.activeProviderId = this.activeProviderId;
-      settings.activeModelId = this.activeModelId;
+  // 编辑服务商
+  editProvider(index: number) {
+    if (index >= 0 && index < this.providers.length) {
+      const provider = this.providers[index];
+      this.providerDraft = this.cloneProvider(provider);
+      this.providerEditIndex = index;
+      this.activeSheetType = 'provider';
+      this.isSettingsSheetVisible = true;
+    }
+  }
 
-      const activeProvider = this.providers.find(provider => provider.id === this.activeProviderId);
-      if (activeProvider) {
-        settings.apiUrl = activeProvider.apiUrl;
-        settings.apiKey = activeProvider.apiKey;
-        const activeModel = activeProvider.models.find(model => model.id === this.activeModelId);
-        if (activeModel) {
-          settings.modelName = activeModel.name;
+  // 删除服务商
+  async deleteProvider(index: number) {
+    if (index >= 0 && index < this.providers.length && this.providers.length > 1) {
+      const newProviders = [...this.providers];
+      const deletedProvider = newProviders.splice(index, 1)[0];
+      this.providers = newProviders;
+
+      // 如果删除的是当前活跃的服务商，切换到第一个
+      let savedByActiveSwitch = false;
+      if (deletedProvider.id === this.activeProviderId && this.providers.length > 0) {
+        const switched = await this.setActiveProvider(this.providers[0].id, this.providers[0].models[0]?.id || '');
+        savedByActiveSwitch = switched;
+      }
+
+      // 调整当前页签索引
+      if (this.currentProviderIndex >= this.providers.length) {
+        this.currentProviderIndex = this.providers.length - 1;
+      }
+
+      if (savedByActiveSwitch) {
+        this.showToast('服务商已删除并保存');
+      } else {
+        try {
+          await this.persistSettingsSilently();
+          this.showToast('服务商已删除并保存');
+        } catch (error) {
+          console.error('Failed to save after deleting provider:', error);
+          this.showToast('保存设置失败');
+        }
+      }
+    }
+  }
+
+  // 设置活跃的服务商和模型
+  async setActiveProvider(providerId: string, modelId: string): Promise<boolean> {
+    const providerIndex = this.providers.findIndex(provider => provider.id === providerId);
+    if (providerIndex === -1) {
+      this.showToast('未找到指定的服务商');
+      return false;
+    }
+
+    const provider = this.providers[providerIndex];
+    if (!provider.models || provider.models.length === 0) {
+      this.showToast('该服务商没有可用模型，请先添加模型');
+      return false;
+    }
+
+    const matchedModel = provider.models.find(model => model.id === modelId);
+    const resolvedModelId = matchedModel ? matchedModel.id : provider.models[0].id;
+
+    this.currentProviderIndex = providerIndex;
+    this.activeProviderId = providerId;
+    this.activeModelId = resolvedModelId;
+    try {
+      await this.persistSettingsSilently();
+      return true;
+    } catch (error) {
+      console.error('Failed to save active provider/model:', error);
+      this.showToast('保存设置失败');
+      return false;
+    }
+  }
+
+  // 添加模型
+  addModel(providerIndex: number) {
+    if (providerIndex >= 0 && providerIndex < this.providers.length) {
+      this.modelDraft = new AIModel('', '', '');
+      this.modelProviderIndex = providerIndex;
+      this.modelEditIndex = -1;
+      this.activeSheetType = 'model';
+      this.isSettingsSheetVisible = true;
+    }
+  }
+
+  // 编辑模型
+  editModel(providerIndex: number, modelIndex: number) {
+    if (providerIndex >= 0 && providerIndex < this.providers.length &&
+      modelIndex >= 0 && modelIndex < this.providers[providerIndex].models.length) {
+      const model = this.providers[providerIndex].models[modelIndex];
+      this.modelDraft = this.cloneModel(model);
+      this.modelProviderIndex = providerIndex;
+      this.modelEditIndex = modelIndex;
+      this.activeSheetType = 'model';
+      this.isSettingsSheetVisible = true;
+    }
+  }
+
+  // 删除模型
+  async deleteModel(providerIndex: number, modelIndex: number) {
+    if (providerIndex >= 0 && providerIndex < this.providers.length &&
+      modelIndex >= 0 && modelIndex < this.providers[providerIndex].models.length &&
+      this.providers[providerIndex].models.length > 1) {
+
+      const model = this.providers[providerIndex].models[modelIndex];
+
+      // 如果删除的是当前活跃的模型，切换到同一服务商的第一个模型
+      if (this.providers[providerIndex].id === this.activeProviderId && model.id === this.activeModelId) {
+        const remainingModels = this.providers[providerIndex].models.filter((_, i) => i !== modelIndex);
+        if (remainingModels.length > 0) {
+          this.activeModelId = remainingModels[0].id;
         }
       }
 
-      await this.databaseManager.saveSettings(settings);
-      console.info('Settings auto-saved successfully');
-    } catch (error) {
-      console.error('Failed to auto-save settings:', error);
-    }
-  }
+      // 删除模型
+      const newProviders = [...this.providers];
+      newProviders[providerIndex].models.splice(modelIndex, 1);
+      this.providers = newProviders;
 
-  private cloneProvidersList(): AIProvider[] {
-    return this.providers.map(provider => deepCloneProvider(provider));
-  }
-
-  private updateProviderDraft(update: Partial<ProviderDraft>): void {
-    const current = this.providerDraft;
-    const next: ProviderDraft = {
-      id: update.id !== undefined ? update.id : current.id,
-      name: update.name !== undefined ? update.name : current.name,
-      displayName: update.displayName !== undefined ? update.displayName : current.displayName,
-      apiUrl: update.apiUrl !== undefined ? update.apiUrl : current.apiUrl,
-      apiKey: update.apiKey !== undefined ? update.apiKey : current.apiKey
-    };
-    this.providerDraft = next;
-  }
-
-  private updateModelDraft(update: Partial<ModelDraft>): void {
-    const current = this.modelDraft;
-    const next: ModelDraft = {
-      id: update.id !== undefined ? update.id : current.id,
-      displayName: update.displayName !== undefined ? update.displayName : current.displayName,
-      maxTokens: update.maxTokens !== undefined ? update.maxTokens : current.maxTokens,
-      temperature: update.temperature !== undefined ? update.temperature : current.temperature
-    };
-    this.modelDraft = next;
-  }
-  private isProviderUnderTest(providerId: string): boolean {
-    return this.testingProviderId === providerId;
-  }
-
-  private isModelActive(providerId: string, modelId: string): boolean {
-    return this.activeProviderId === providerId && this.activeModelId === modelId;
-  }
-
-  private updateActiveState(providerId: string, modelId?: string): void {
-    if (this.providers.length === 0) {
-      this.activeProviderId = '';
-      this.activeModelId = '';
-      this.currentProviderIndex = 0;
-      return;
-    }
-
-    let resolvedProviderId = providerId;
-    const providersCopy = this.providers.map(provider => deepCloneProvider(provider));
-    let activeProvider = providersCopy.find(provider => provider.id === resolvedProviderId);
-
-    if (!activeProvider && providersCopy.length > 0) {
-      activeProvider = providersCopy[0];
-      resolvedProviderId = activeProvider.id;
-    }
-
-    let resolvedModelId = modelId;
-    if (activeProvider) {
-      if (!resolvedModelId || !activeProvider.models.some(model => model.id === resolvedModelId)) {
-        resolvedModelId = activeProvider.models[0]?.id ?? '';
-      }
-    } else {
-      resolvedModelId = '';
-    }
-
-    providersCopy.forEach(provider => {
-      provider.isActive = provider.id === resolvedProviderId;
-    });
-
-    this.providers = providersCopy;
-    this.activeProviderId = resolvedProviderId;
-    this.activeModelId = resolvedModelId ?? '';
-    this.currentProviderIndex = Math.max(0, providersCopy.findIndex(provider => provider.id === resolvedProviderId));
-  }
-
-  private openProviderDialog(initialProvider: AIProvider | null, mode: DialogMode, providerIndex: number): void {
-    const sourceProvider = initialProvider ? deepCloneProvider(initialProvider) : null;
-    this.providerDialogMode = mode;
-    this.providerDialogIndex = providerIndex;
-    this.providerDraft = createProviderDraft(sourceProvider);
-    this.providerDialogInitialModels = sourceProvider ? sourceProvider.models.map(item => deepCloneModel(item)) : [];
-    this.providerDialogWasActive = sourceProvider ? sourceProvider.isActive : false;
-    this.showProviderDialog = true;
-  }
-
-  private closeProviderDialog(): void {
-    this.showProviderDialog = false;
-    this.providerDialogIndex = -1;
-    this.providerDialogInitialModels = [];
-    this.providerDialogWasActive = false;
-  }
-
-  private async confirmProviderDialog(): Promise<void> {
-    const draft = this.providerDraft;
-    const trimmedId = draft.id.trim();
-    if (!trimmedId) {
-      showToastSafely('请输入服务商ID');
-      return;
-    }
-
-    const trimmedApiUrl = draft.apiUrl.trim();
-    if (!trimmedApiUrl) {
-      showToastSafely('请输入API地址');
-      return;
-    }
-
-    const internalName = draft.name.trim() || trimmedId;
-    const displayName = draft.displayName.trim() || internalName;
-
-    if (this.providerDialogMode === 'create') {
-      if (this.providerIdExists(trimmedId)) {
-        showToastSafely('服务商ID已存在，请使用其他ID');
-        return;
-      }
-    } else if (this.providerDialogMode === 'edit') {
-      if (this.providerDialogIndex < 0 || this.providerDialogIndex >= this.providers.length) {
-        return;
-      }
-      if (this.providerIdExists(trimmedId, this.providerDialogIndex)) {
-        showToastSafely('服务商ID已存在，请使用其他ID');
-        return;
+      try {
+        await this.persistSettingsSilently();
+        this.showToast('模型已删除并保存');
+      } catch (error) {
+        console.error('Failed to save after deleting model:', error);
+        this.showToast('保存设置失败');
       }
     }
-
-    const provider = new AIProvider(trimmedId, internalName, displayName, trimmedApiUrl, draft.apiKey.trim());
-    provider.models = this.providerDialogInitialModels.map(item => deepCloneModel(item));
-    provider.isActive = this.providerDialogMode === 'edit' ? this.providerDialogWasActive : false;
-
-    if (this.providerDialogMode === 'create') {
-      const providersCopy = this.cloneProvidersList();
-      providersCopy.push(provider);
-      this.providers = providersCopy;
-
-      if (providersCopy.length === 1) {
-        this.updateActiveState(provider.id, provider.models[0]?.id ?? '');
-      }
-
-      await this.autoSaveSettings();
-      showToastSafely('服务商已添加并保存');
-    } else {
-      const providersCopy = this.cloneProvidersList();
-      const index = this.providerDialogIndex;
-      const wasActive = providersCopy[index].id === this.activeProviderId;
-      provider.isActive = wasActive;
-      providersCopy[index] = provider;
-      this.providers = providersCopy;
-
-      if (wasActive) {
-        this.updateActiveState(provider.id, this.activeModelId);
-      } else {
-        await this.autoSaveSettings();
-      }
-
-      showToastSafely('服务商已修改并保存');
-    }
-
-    this.closeProviderDialog();
   }
 
-  private openModelDialog(providerIndex: number, initialModel: AIModel | null, mode: DialogMode, modelIndex: number): void {
-    const sourceModel = initialModel ? deepCloneModel(initialModel) : null;
-    this.modelDialogMode = mode;
-    this.modelDialogProviderIndex = providerIndex;
-    this.modelDialogIndex = modelIndex;
-    this.modelDraft = createModelDraft(sourceModel);
-    if (sourceModel && providerIndex >= 0 && providerIndex < this.providers.length) {
-      const provider = this.providers[providerIndex];
-      this.modelDialogWasActive = provider.id === this.activeProviderId && sourceModel.id === this.activeModelId;
-    } else {
-      this.modelDialogWasActive = false;
-    }
-    this.showModelDialog = true;
-  }
-
-  private closeModelDialog(): void {
-    this.showModelDialog = false;
-    this.modelDialogProviderIndex = -1;
-    this.modelDialogIndex = -1;
-    this.modelDialogWasActive = false;
-  }
-
-  private async confirmModelDialog(): Promise<void> {
-    if (this.modelDialogProviderIndex < 0 || this.modelDialogProviderIndex >= this.providers.length) {
-      return;
-    }
-
-    const draft = this.modelDraft;
-    const id = draft.id.trim();
-    if (!id) {
-      showToastSafely('请输入模型ID');
-      return;
-    }
-
-    const displayName = draft.displayName.trim() || id;
-    const maxTokens = Number.parseInt(draft.maxTokens, 10);
-    if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
-      showToastSafely('请填写合法的最大Token数量');
-      return;
-    }
-
-    let temperature = Number.parseFloat(draft.temperature);
-    if (!Number.isFinite(temperature)) {
-      temperature = 0.7;
-    }
-    temperature = Math.min(Math.max(temperature, 0), 2);
-
-    const provider = this.providers[this.modelDialogProviderIndex];
-
-    if (this.modelDialogMode === 'create') {
-      if (provider.models.some(existing => existing.id === id)) {
-        showToastSafely('模型ID已存在，请使用其他ID');
-        return;
-      }
-    } else if (this.modelDialogMode === 'edit') {
-      if (this.modelDialogIndex < 0 || this.modelDialogIndex >= provider.models.length) {
-        return;
-      }
-      if (provider.models.some((existing, idx) => idx !== this.modelDialogIndex && existing.id === id)) {
-        showToastSafely('模型ID已存在，请使用其他ID');
-        return;
-      }
-    }
-
-    const model = new AIModel(id, id, displayName, maxTokens, temperature);
-
-    const providersCopy = this.cloneProvidersList();
-    const targetProvider = providersCopy[this.modelDialogProviderIndex];
-
-    if (this.modelDialogMode === 'create') {
-      targetProvider.models.push(model);
-      this.providers = providersCopy;
-      await this.autoSaveSettings();
-      showToastSafely('模型已添加并保存');
-    } else {
-      const wasActive = this.modelDialogWasActive;
-      targetProvider.models[this.modelDialogIndex] = model;
-      this.providers = providersCopy;
-
-      if (wasActive) {
-        await this.handleSetActiveModel(targetProvider.id, model.id, `已切换到 ${model.displayName}`);
-      } else {
-        await this.autoSaveSettings();
-      }
-
-      showToastSafely('模型已修改并保存');
-    }
-
-    this.closeModelDialog();
-  }
-
-  private openDeleteModelDialog(providerIndex: number, modelIndex: number, modelName: string): void {
-    this.deleteModelContext = { providerIndex, modelIndex, modelName };
-  }
-
-  private closeDeleteModelDialog(): void {
-    this.deleteModelContext = null;
-  }
-
-  private async confirmDeleteModel(): Promise<void> {
-    if (!this.deleteModelContext) {
-      return;
-    }
-
-  const providerIndex = this.deleteModelContext.providerIndex;
-  const modelIndex = this.deleteModelContext.modelIndex;
-  await this.performDeleteModel(providerIndex, modelIndex);
-    this.closeDeleteModelDialog();
-  }
-
-  private providerIdExists(id: string, ignoreIndex: number = -1): boolean {
-    return this.providers.some((provider, index) => provider.id === id && index !== ignoreIndex);
-  }
-
-  addProvider() {
-    this.openProviderDialog(null, 'create', -1);
-  }
-
-  editProvider(index: number) {
-    if (index < 0 || index >= this.providers.length) {
-      return;
-    }
-
-    const originalProvider = this.providers[index];
-    this.openProviderDialog(originalProvider, 'edit', index);
-  }
-
-  async deleteProvider(index: number) {
-    if (this.providers.length <= 1) {
-      showToastSafely('至少保留一个服务商');
-      return;
-    }
-    if (index < 0 || index >= this.providers.length) {
-      return;
-    }
-
-    const providersCopy = this.cloneProvidersList();
-    const removedProvider = providersCopy.splice(index, 1)[0];
-    this.providers = providersCopy;
-
-    if (providersCopy.length > 0) {
-      if (removedProvider.id === this.activeProviderId) {
-        const fallbackProvider = providersCopy[0];
-        this.updateActiveState(fallbackProvider.id, fallbackProvider.models[0]?.id ?? '');
-      } else {
-        this.updateActiveState(this.activeProviderId, this.activeModelId);
-      }
-    } else {
-      this.updateActiveState('', '');
-    }
-
-    await this.autoSaveSettings();
-    showToastSafely('服务商已删除并保存');
-  }
-
-  setActiveProvider(providerId: string, modelId: string) {
-    this.handleSetActiveModel(providerId, modelId, undefined);
-  }
-
-  private async handleSetActiveModel(providerId: string, modelId: string, toastMessage?: string) {
-    this.updateActiveState(providerId, modelId);
-    await this.autoSaveSettings();
-    if (toastMessage) {
-      showToastSafely(toastMessage);
-    }
-  }
-
-  addModel(providerIndex: number) {
-    if (providerIndex < 0 || providerIndex >= this.providers.length) {
-      return;
-    }
-
-    this.openModelDialog(providerIndex, null, 'create', -1);
-  }
-
-  editModel(providerIndex: number, modelIndex: number) {
-    if (providerIndex < 0 || providerIndex >= this.providers.length) {
-      return;
-    }
-    const provider = this.providers[providerIndex];
-    if (modelIndex < 0 || modelIndex >= provider.models.length) {
-      return;
-    }
-
-    const originalModel = provider.models[modelIndex];
-    this.openModelDialog(providerIndex, originalModel, 'edit', modelIndex);
-  }
-
-  private async performDeleteModel(providerIndex: number, modelIndex: number): Promise<void> {
-    if (providerIndex < 0 || providerIndex >= this.providers.length) {
-      return;
-    }
-
-    const provider = this.providers[providerIndex];
-    if (provider.models.length <= 1) {
-      showToastSafely('至少保留一个模型');
-      throw new Error('last_model');
-    }
-    if (modelIndex < 0 || modelIndex >= provider.models.length) {
-      return;
-    }
-
-    const providersCopy = this.cloneProvidersList();
-    const targetProvider = providersCopy[providerIndex];
-    const removedModel = targetProvider.models.splice(modelIndex, 1)[0];
-    this.providers = providersCopy;
-
-    if (targetProvider.id === this.activeProviderId && removedModel.id === this.activeModelId) {
-      const fallbackModelId = targetProvider.models[0]?.id ?? '';
-      await this.handleSetActiveModel(targetProvider.id, fallbackModelId);
-    } else {
-      await this.autoSaveSettings();
-    }
-
-    showToastSafely('模型已删除并保存');
-  }
-
+  // 测试服务商连接
   async testProviderConnection(provider: AIProvider) {
     if (!provider.apiUrl || !provider.apiKey || provider.models.length === 0) {
-      showToastSafely('请先完善服务商配置');
+      this.showToast('请先完善服务商配置');
       return;
     }
 
-    this.testingProviderId = provider.id;
+    this.isTesting = true;
+
     try {
       const testModel = provider.models[0];
-      const testMessage = new ChatMessage('Hello', 'user', 'test');
-      await this.networkManager.sendChatRequest(provider.apiUrl, provider.apiKey, testModel.name, [testMessage]);
-      showToastSafely('连接测试成功');
-    } catch (error) {
-      console.error('Connection test failed:', error);
-      showToastSafely(this.mapNetworkError(error as Error));
-    } finally {
-      this.testingProviderId = '';
-    }
-  }
+      const testMessage = new ChatMessage('Hello', 'user', {
+        conversationId: 'test'
+      });
+      await this.networkManager.sendChatRequest(
+        provider.apiUrl,
+        provider.apiKey,
+        testModel.name,
+        [testMessage]
+      );
 
-  private mapNetworkError(error: Error): string {
-    const message = error?.message ?? '';
-    if (message.includes('401') || message.includes('403')) {
-      return 'API密钥无效，请检查设置';
+      this.showToast('连接测试成功！');
+    } catch (error) {
+      const normalizedError = this.ensureError(error as ErrorInput);
+      console.error('Connection test failed:', normalizedError);
+      const errorMessageText = normalizedError.message;
+      let errorMessage = '连接测试失败';
+      if (errorMessageText.includes('网络')) {
+        errorMessage = '网络连接失败，请检查网络设置';
+      } else if (errorMessageText.includes('401') || errorMessageText.includes('403')) {
+        errorMessage = 'API密钥无效，请检查设置';
+      } else if (errorMessageText.includes('404')) {
+        errorMessage = 'API地址无效，请检查设置';
+      }
+      this.showToast(errorMessage);
+    } finally {
+      this.isTesting = false;
     }
-    if (message.includes('404')) {
-      return 'API地址无效，请检查设置';
-    }
-    if (message.includes('timeout')) {
-      return '请求超时，请稍后再试';
-    }
-    if (message.includes('网络')) {
-      return '网络连接失败，请检查网络设置';
-    }
-    return '连接测试失败';
   }
 
   @Builder
-  private SettingsContent() {
-    Column({ space: 16 }) {
-      Row() {
-        Column({ space: 4 }) {
-          Text('模型与服务商配置')
-            .fontSize(22)
-            .fontWeight(FontWeight.Medium);
-          Text('管理大模型服务商、API和模型参数')
-            .fontSize(14)
-            .fontColor(Color.Gray);
-        };
-
-        Blank();
-
-        Button('新建服务商')
-          .type(ButtonType.Capsule)
-          .height(40)
-          .padding({ left: 20, right: 20 })
-          .onClick(() => this.addProvider());
-      }
-      .width('100%');
-
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .size({ width: 48, height: 48 });
+  SettingsSheetBuilder() {
+    if (this.activeSheetType === 'provider' && this.providerDraft) {
+      ProviderSettingsDialog({
+        provider: this.providerDraft,
+        isEditMode: this.providerEditIndex >= 0,
+        onConfirm: (provider: AIProvider) => {
+          this.handleProviderConfirm(provider);
+        },
+        onCancel: () => {
+          this.closeSettingsSheet();
         }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center);
-      } else if (this.providers.length === 0) {
-        Column({ space: 16 }) {
-          Text('还没有配置AI服务商')
-            .fontSize(16)
-            .fontColor(Color.Gray);
-
-          Button('添加服务商')
-            .type(ButtonType.Capsule)
-            .height(44)
-            .padding({ left: 24, right: 24 })
-            .onClick(() => this.addProvider());
+      })
+    } else if (this.activeSheetType === 'model' && this.modelDraft) {
+      ModelSettingsDialog({
+        model: this.modelDraft,
+        isEditMode: this.modelEditIndex >= 0,
+        onConfirm: (model: AIModel) => {
+          this.handleModelConfirm(model);
+        },
+        onCancel: () => {
+          this.closeSettingsSheet();
         }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center);
-      } else {
-        Tabs({ barPosition: BarPosition.Start, index: this.currentProviderIndex }) {
-          ForEach(this.providers, (provider: AIProvider, index: number) => {
-            TabContent() {
-              this.ProviderContent(provider, index);
-            }
-            .tabBar(provider.displayName);
-          });
-        }
-        .layoutWeight(1)
-        .barMode(BarMode.Scrollable)
-        .onChange((index: number) => {
-          this.currentProviderIndex = index;
-        });
-      }
+      })
+    } else {
+      Column().width('100%').height(1);
     }
-    .padding(16)
-    .width('100%')
-    .height('100%');
   }
-
 
   build() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      this.SettingsContent();
-      if (this.showProviderDialog) {
-        this.ProviderDialogOverlay();
+    NavDestination() {
+      Column() {
+        if (this.providers.length === 0) {
+          // 空状态
+          Column() {
+            Text('还没有配置AI服务商')
+              .fontSize(16)
+              .margin({ top: 16 })
+
+            Button('添加服务商')
+              .fontSize(16)
+              .backgroundColor(Color.Transparent)
+              .border({
+                width: 1
+              })
+              .borderRadius(24)
+              .padding({ left: 24, right: 24 })
+              .height(48)
+              .margin({ top: 24 })
+              .onClick(() => {
+                this.addProvider();
+              })
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          // 使用原生Tabs组件
+          Tabs({ barPosition: BarPosition.Start, index: this.currentProviderIndex }) {
+            ForEach(this.providers, (provider: AIProvider, index: number) => {
+              TabContent() {
+                this.ProviderContent(provider, index)
+              }
+              .tabBar(provider.displayName)
+            })
+          }
+          .layoutWeight(1)
+          .barMode(BarMode.Scrollable) // 可滚动的页签
+          .onChange((index: number) => {
+            this.currentProviderIndex = index;
+          })
+        }
       }
-      if (this.showModelDialog) {
-        this.ModelDialogOverlay();
-      }
-      if (this.deleteModelContext) {
-        this.DeleteModelDialogOverlay(this.deleteModelContext);
-      }
+      .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
+        height: SheetSize.FIT_CONTENT,
+        detents: [SheetSize.FIT_CONTENT],
+        backgroundColor: Color.White,
+        blurStyle: BlurStyle.Thick,
+        showClose: true,
+        enableOutsideInteractive: false,
+        dragBar: true,
+        onDisappear: () => {
+          this.isSettingsSheetVisible = false;
+          this.resetSheetState();
+        }
+      })
+      .width('100%')
+      .height('100%')
     }
-    .width('100%')
-    .height('100%');
+    .padding({
+      top: this.getUIContext().px2vp(this.topRectHeight),
+      bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+    })
+    .title('模型设置')
+    .onReady((context: NavDestinationContext) => {
+      this.pathStack = context.pathStack;
+    })
   }
 
   @Builder
-  private ProviderContent(provider: AIProvider, providerIndex: number) {
+  ProviderContent(provider: AIProvider, providerIndex: number) {
     Scroll() {
-      Column({ space: 20 }) {
-        Column({ space: 12 }) {
-          Row({ space: 8 }) {
-            Text('服务商信息')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold);
-
-            if (provider.id === this.activeProviderId) {
-              Text('使用中')
-                .fontSize(12)
-                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                .backgroundColor('#1E007AFF')
-                .borderRadius(12)
-                .fontColor(Color.Blue);
-            }
-          }
-
-          Text(`API 地址：${provider.apiUrl || '未设置'}`)
-            .fontSize(14)
-            .fontColor(Color.Gray);
-
-          Text(`API Key：${provider.apiKey ? '已设置' : '未设置'}`)
-            .fontSize(14)
-            .fontColor(Color.Gray);
-        }
-        .width('100%')
-        .padding(16)
-    .backgroundColor(Color.White)
-    .borderRadius(12);
-
+      Column({ space: 24 }) {
+        // 模型列表
         Column({ space: 16 }) {
           Row() {
             Text('模型列表')
               .fontSize(18)
-              .fontWeight(FontWeight.Bold);
+              .fontWeight(FontWeight.Bold)
 
-            Blank();
+            Blank()
 
             Button('添加模型')
               .fontSize(14)
+              .backgroundColor(Color.Transparent)
+              .border({
+                width: 1
+              })
+              .borderRadius(16)
+              .padding({ left: 16, right: 16 })
               .height(32)
-              .type(ButtonType.Capsule)
-              .onClick(() => this.addModel(providerIndex));
+              .onClick(() => {
+                this.addModel(providerIndex);
+              })
           }
-          .width('100%');
+          .width('100%')
 
           if (provider.models.length === 0) {
             Text('还没有配置模型')
               .fontSize(14)
-              .fontColor(Color.Gray)
               .width('100%')
               .textAlign(TextAlign.Center)
-              .padding(24);
+              .padding(24)
           } else {
             ForEach(provider.models, (model: AIModel, modelIndex: number) => {
-              this.ModelItem(model, provider, providerIndex, modelIndex);
-            });
+              this.ModelItem(model, provider.id, providerIndex, modelIndex)
+            })
           }
         }
         .width('100%')
         .padding(16)
-    .backgroundColor(Color.White)
-    .borderRadius(12);
+        .borderRadius(12)
 
+        // 测试连接按钮
+        if (provider.apiUrl && provider.apiKey && provider.models.length > 0) {
+          Button(this.isTesting ? '测试中...' : '测试连接')
+            .width('100%')
+            .height(48)
+            .fontSize(16)
+            .backgroundColor(Color.Transparent)
+            .border({
+              width: 1
+            })
+            .borderRadius(24)
+            .enabled(!this.isTesting)
+            .onClick(() => {
+              this.testProviderConnection(provider);
+            })
+        }
+
+        // 操作按钮
         Row({ space: 12 }) {
-          Button(this.isProviderUnderTest(provider.id) ? '测试中...' : '测试连接')
-            .layoutWeight(1)
-            .height(44)
-            .type(ButtonType.Capsule)
-            .enabled(!this.isProviderUnderTest(provider.id))
-            .onClick(() => this.testProviderConnection(provider));
-
           Button('编辑服务商')
             .layoutWeight(1)
-            .height(44)
-            .type(ButtonType.Capsule)
-            .onClick(() => this.editProvider(providerIndex));
+            .height(48)
+            .fontSize(16)
+            .backgroundColor(Color.Transparent)
+            .border({
+              width: 1
+            })
+            .borderRadius(24)
+            .onClick(() => {
+              this.editProvider(providerIndex);
+            })
 
           if (this.providers.length > 1) {
-            Button('删除')
+            Button('删除服务商')
               .layoutWeight(1)
-              .height(44)
-              .type(ButtonType.Capsule)
-              .fontColor(Color.Red)
-              .border({ width: 1, color: Color.Red })
+              .height(48)
+              .fontSize(16)
               .backgroundColor(Color.Transparent)
-              .onClick(async () => await this.deleteProvider(providerIndex));
+              .border({
+                width: 1
+              })
+              .borderRadius(24)
+              .onClick(async () => {
+                await this.deleteProvider(providerIndex);
+              })
           }
         }
-        .width('100%');
+        .width('100%')
+        .margin({ bottom: 12 })
+
+        Button('新建服务商')
+          .width('100%')
+          .height(48)
+          .fontSize(16)
+          .backgroundColor(Color.Transparent)
+          .border({
+            width: 1
+          })
+          .borderRadius(24)
+          .onClick(() => {
+            this.addProvider();
+          })
       }
       .width('100%')
-      .padding({ bottom: 24 });
+      .padding(16)
+      .alignItems(HorizontalAlign.Start) // 从上对齐
     }
+    .layoutWeight(1)
     .width('100%')
-    .align(Alignment.TopStart);
+    .align(Alignment.TopStart) // 确保内容从顶部开始
   }
 
   @Builder
-  private ModelItem(model: AIModel, provider: AIProvider, providerIndex: number, modelIndex: number) {
-    Column({ space: 8 }) {
-      Row({ space: 8 }) {
-        Column() {
-          Row({ space: 8 }) {
-            Text(model.displayName)
-              .fontSize(16)
-              .fontWeight(FontWeight.Medium)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis });
-
-            if (this.isModelActive(provider.id, model.id)) {
-              Text('使用中')
-                .fontSize(12)
-                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                .backgroundColor('#1E007AFF')
-                .borderRadius(12)
-                .fontColor(Color.Blue);
-            }
-          }
-
-          Text(`ID: ${model.name}`)
-            .fontSize(12)
-            .fontColor(Color.Gray)
+  ModelItem(model: AIModel, providerId: string, providerIndex: number, modelIndex: number) {
+    Row() {
+      Column() {
+        Row() {
+          Text(model.displayName)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
             .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis });
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1) // 让文本占据剩余空间但不超出
 
-          Text(`Tokens: ${model.maxTokens} · Temperature: ${model.temperature}`)
-            .fontSize(12)
-            .fontColor(Color.Gray);
-        }
-        .layoutWeight(1);
-
-        Row({ space: 8 }) {
-          if (!this.isModelActive(provider.id, model.id)) {
-            Button('使用')
+          if (providerId === this.activeProviderId && model.id === this.activeModelId) {
+            Text('使用中')
               .fontSize(12)
-              .height(32)
-              .onClick(async () => await this.handleSetActiveModel(provider.id, model.id, `已切换到 ${model.displayName}`));
-          }
-
-          Button('编辑')
-            .fontSize(12)
-            .height(32)
-            .onClick(() => this.editModel(providerIndex, modelIndex));
-
-          if (provider.models.length > 1) {
-            Button('删除')
-              .fontSize(12)
-              .height(32)
-              .fontColor(Color.Red)
-              .border({ width: 1, color: Color.Red })
               .backgroundColor(Color.Transparent)
-              .onClick(() => {
-                this.openDeleteModelDialog(providerIndex, modelIndex, model.displayName);
-              });
+              .border({
+                width: 1,
+              })
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .borderRadius(8)
+              .margin({ left: 8 })
+              .flexShrink(0) // 防止压缩
           }
         }
-      }
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#0C000000')
-    .borderRadius(12)
-    .onClick(async () => {
-      if (!this.isModelActive(provider.id, model.id)) {
-        await this.handleSetActiveModel(provider.id, model.id, `已切换到 ${model.displayName}`);
-      }
-    });
-  }
-
-  @Builder
-  private ProviderDialogOverlay() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
         .width('100%')
-        .height('100%')
-        .backgroundColor('rgba(0, 0, 0, 0.45)')
-        .onClick(() => this.closeProviderDialog());
 
-      Column({ space: 0 }) {
-        this.ProviderDialogCard();
+        Text(`ID: ${model.name} | 最大Token: ${model.maxTokens} | 温度: ${model.temperature}`)
+          .fontSize(12)
+          .margin({ top: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .alignSelf(ItemAlign.Start)
+          .width('100%')
       }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center);
-    }
-    .width('100%')
-    .height('100%');
-  }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
 
-  @Builder
-  private ProviderDialogCard() {
-    Column({ space: 20 }) {
-      Text(this.providerDialogMode === 'edit' ? '编辑服务商' : '新建服务商')
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium);
+      Row({ space: 8 }) {
+        if (providerId !== this.activeProviderId || model.id !== this.activeModelId) {
+          Button('使用')
+            .fontSize(12)
+            .backgroundColor(Color.Transparent)
+            .border({
+              width: 1
+            })
+            .borderRadius(12)
+            .padding({ left: 12, right: 12 })
+            .height(28)
+            .flexShrink(0) // 防止按钮被压缩
+            .onClick(async () => {
+              const switched = await this.setActiveProvider(providerId, model.id);
+              if (switched) {
+                this.showToast(`已切换到 ${model.displayName}`);
+              }
+            })
+        }
 
-      Column({ space: 12 }) {
-        Text('服务商ID')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '请输入服务商ID', text: this.providerDraft.id })
-          .onChange(value => this.updateProviderDraft({ id: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('内部名称（可选）')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '用于标识服务商的内部名称', text: this.providerDraft.name })
-          .onChange(value => this.updateProviderDraft({ name: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('显示名称')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '在界面上显示的名称', text: this.providerDraft.displayName })
-          .onChange(value => this.updateProviderDraft({ displayName: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('API 地址')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: 'https://', text: this.providerDraft.apiUrl })
-          .onChange(value => this.updateProviderDraft({ apiUrl: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('API Key')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '请输入API Key', text: this.providerDraft.apiKey })
-          .onChange(value => this.updateProviderDraft({ apiKey: value }));
-      }
-
-      Row({ space: 16 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
+        Button('编辑')
+          .fontSize(12)
           .backgroundColor(Color.Transparent)
-          .border({ width: 1, color: Color.Gray })
-          .fontColor(Color.Gray)
-          .onClick(() => this.closeProviderDialog());
+          .border({
+            width: 1
+          })
+          .borderRadius(12)
+          .padding({ left: 12, right: 12 })
+          .height(28)
+          .flexShrink(0) // 防止按钮被压缩
+          .onClick(() => {
+            this.editModel(providerIndex, modelIndex);
+          })
 
-        Button(this.providerDialogMode === 'edit' ? '保存' : '创建')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
-          .onClick(async () => await this.confirmProviderDialog());
+        // 只有当服务商有多个模型时才显示删除按钮
+        if (this.providers[providerIndex]?.models.length > 1) {
+          Button('删除')
+            .fontSize(12)
+            .backgroundColor(Color.Transparent)
+            .border({
+              width: 1
+            })
+            .borderRadius(12)
+            .padding({ left: 12, right: 12 })
+            .height(28)
+            .flexShrink(0) // 防止按钮被压缩
+            .onClick(async () => {
+              // 显示删除确认对话框
+              NativeDialogHelper.showDeleteConfirmDialog(
+                `删除模型"${model.displayName}"`,
+                '此操作无法撤销，模型配置将永久删除。',
+                async () => {
+                  await this.deleteModel(providerIndex, modelIndex);
+                }
+              );
+            })
+        }
       }
-    }
-    .padding(24)
-    .backgroundColor(Color.White)
-    .borderRadius(20)
-    .width('90%');
-  }
-
-  @Builder
-  private ModelDialogOverlay() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('rgba(0, 0, 0, 0.45)')
-        .onClick(() => this.closeModelDialog());
-
-      Column({ space: 0 }) {
-        this.ModelDialogCard();
-      }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center);
-    }
-    .width('100%')
-    .height('100%');
-  }
-
-  @Builder
-  private ModelDialogCard() {
-    Column({ space: 20 }) {
-      Text(this.modelDialogMode === 'edit' ? '编辑模型' : '添加模型')
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium);
-
-      Column({ space: 12 }) {
-        Text('模型ID')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '例如 gpt-4', text: this.modelDraft.id })
-          .onChange(value => this.updateModelDraft({ id: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('显示名称')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '例如 GPT-4', text: this.modelDraft.displayName })
-          .onChange(value => this.updateModelDraft({ displayName: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('最大Token数量')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '4096', text: this.modelDraft.maxTokens })
-          .onChange(value => this.updateModelDraft({ maxTokens: value }));
-      }
-
-      Column({ space: 12 }) {
-        Text('Temperature (0-2)')
-          .fontSize(14)
-          .fontColor(Color.Gray);
-        TextInput({ placeholder: '0.7', text: this.modelDraft.temperature })
-          .onChange(value => this.updateModelDraft({ temperature: value }));
-      }
-
-      Row({ space: 16 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
-          .backgroundColor(Color.Transparent)
-          .border({ width: 1, color: Color.Gray })
-          .fontColor(Color.Gray)
-          .onClick(() => this.closeModelDialog());
-
-        Button(this.modelDialogMode === 'edit' ? '保存' : '添加')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
-          .onClick(async () => await this.confirmModelDialog());
-      }
-    }
-    .padding(24)
-    .backgroundColor(Color.White)
-    .borderRadius(20)
-    .width('90%');
-  }
-
-  @Builder
-  private DeleteModelDialogOverlay(context: DeleteModelContext) {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('rgba(0, 0, 0, 0.45)')
-        .onClick(() => this.closeDeleteModelDialog());
-
-      Column({ space: 0 }) {
-        this.DeleteModelDialogCard(context.modelName);
-      }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center);
+      .flexShrink(0) // 防止整个按钮区域被压缩
     }
     .width('100%')
-    .height('100%');
-  }
-
-  @Builder
-  private DeleteModelDialogCard(modelName: string) {
-    Column({ space: 20 }) {
-      Text('删除模型')
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium);
-
-      Text(`确定要删除模型 “${modelName}” 吗？此操作无法撤销。`)
-        .fontSize(14)
-        .fontColor(Color.Gray);
-
-      Row({ space: 16 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
-          .backgroundColor(Color.Transparent)
-          .border({ width: 1, color: Color.Gray })
-          .fontColor(Color.Gray)
-          .onClick(() => this.closeDeleteModelDialog());
-
-        Button('删除')
-          .layoutWeight(1)
-          .height(44)
-          .type(ButtonType.Capsule)
-          .backgroundColor(Color.Red)
-          .fontColor(Color.White)
-          .onClick(async () => await this.confirmDeleteModel());
+    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .borderRadius(8)
+    .margin({ bottom: 8 })
+    .onClick(() => {
+      if (providerId !== this.activeProviderId || model.id !== this.activeModelId) {
+        this.setActiveProvider(providerId, model.id).then((switched: boolean) => {
+          if (switched) {
+            this.showToast(`已切换到 ${model.displayName}`);
+          }
+        });
       }
-    }
-    .padding(24)
-    .backgroundColor(Color.White)
-    .borderRadius(20)
-    .width('90%');
+    })
   }
 }
-

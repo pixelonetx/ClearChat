@@ -1,6 +1,5 @@
 import { http } from '@kit.NetworkKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-
+import { Constants } from '../components/Constants';
 import {
   ChatRequest,
   ChatResponse,
@@ -9,26 +8,36 @@ import {
   StreamCallbacks,
   StreamResponse,
   RequestMessage,
-  ChatRequestBody
+  ChatRequestBody,
+  ReasoningContentItem
 } from '../services/DataModels';
+import { NetworkError } from '../components/Errors';
 
-interface HttpHeaderOptions {
-  'Content-Type'?: string;
-  Authorization?: string;
-  Accept?: string;
-  'Cache-Control'?: string;
-  Connection?: string;
+/**
+ * 错误信息接口
+ */
+interface ErrorInfo {
+  message?: string;
 }
 
-const LOG_TAG: string = '[Sample_HttpRequestDemo]';
-const TARGET_URL: string = '';
+/**
+ * 错误响应接口
+ */
+interface ErrorResponse {
+  error?: ErrorInfo;
+}
 
-// 网络请求管理器
+interface StreamParseState {
+  metadataDispatched: boolean;
+  completed: boolean;
+}
+
+/**
+ * 网络请求管理器
+ */
 export class NetworkManager {
   private static instance: NetworkManager;
   private streamBuffer: string = ''; // 用于累积流式数据
-  private currentStreamRequest: http.HttpRequest | null = null;
-  private streamCompleted: boolean = false;
 
   private constructor() {
   }
@@ -40,9 +49,23 @@ export class NetworkManager {
     return NetworkManager.instance;
   }
 
-  // 发送流式聊天请求到AI服务
-  async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[],
-    callbacks: StreamCallbacks): Promise<void> {
+  private resolveChatCompletionsUrl(apiUrl: string): string {
+    if (!apiUrl || apiUrl.trim().length === 0) {
+      return apiUrl;
+    }
+
+    if (apiUrl.includes('/chat/completions')) {
+      return apiUrl;
+    }
+
+    const sanitizedUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    return `${sanitizedUrl}/chat/completions`;
+  }
+
+  /**
+   * 发送流式聊天请求到AI服务
+   */
+  async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[], callbacks: StreamCallbacks): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       console.info('Starting stream chat request...');
       console.info('API URL:', apiUrl);
@@ -54,13 +77,9 @@ export class NetworkManager {
 
       // 清空缓冲区确保新请求从干净状态开始
       this.streamBuffer = '';
-      this.streamCompleted = false;
 
       // 如果API URL已经包含完整路径，直接使用；否则拼接 /chat/completions
-      let url = apiUrl;
-      if (!apiUrl.includes('/chat/completions')) {
-        url = `${apiUrl}/chat/completions`;
-      }
+      const url = this.resolveChatCompletionsUrl(apiUrl);
 
       const requestMessages: RequestMessage[] = messages.map(msg => {
         const requestMsg: RequestMessage = {
@@ -79,7 +98,6 @@ export class NetworkManager {
       };
 
       const httpRequest = http.createHttp();
-  this.currentStreamRequest = httpRequest;
 
       console.info('Request URL:', url);
       console.info('Request body:', JSON.stringify(requestBody));
@@ -106,7 +124,8 @@ export class NetworkManager {
             timeoutId = null;
           }
           callbacks.onError(error);
-        }
+        },
+        onMetadata: callbacks.onMetadata
       };
 
       // 设置30秒超时
@@ -118,34 +137,31 @@ export class NetworkManager {
       }, 30000);
 
       // 按需订阅HTTP流式响应事件
-      let responseBuffer = new ArrayBuffer(0);
+      const parseState: StreamParseState = { metadataDispatched: false, completed: false };
 
       // 订阅HTTP流式响应数据接收事件
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
-        const newBuffer = new ArrayBuffer(responseBuffer.byteLength + data.byteLength);
-        const bufferView = new Uint8Array(newBuffer);
-        bufferView.set(new Uint8Array(responseBuffer));
-        bufferView.set(new Uint8Array(data), responseBuffer.byteLength);
-        responseBuffer = newBuffer;
-
         // 将 ArrayBuffer 转换为字符串 - 使用 UTF-8 解码
         const uint8Array = new Uint8Array(data);
-        const rawChunk = this.utf8ArrayToString(uint8Array);
+        let chunk = this.utf8ArrayToString(uint8Array);
 
-        console.info('Received streaming data chunk, length:', rawChunk.length);
-        console.info('Chunk preview:', rawChunk.substring(0, 200));
+        console.info('Received streaming data chunk, length:', chunk.length);
+        console.info('Chunk preview:', chunk.substring(0, 200));
 
-        this.appendAndProcessStreamChunk(rawChunk, wrappedCallbacks);
+        this.streamBuffer += chunk;
+        // 实时解析SSE格式的数据
+        this.parseSSEChunk(wrappedCallbacks, parseState);
       });
 
       // 订阅HTTP流式响应数据接收完毕事件
       httpRequest.on('dataEnd', () => {
         console.info('HTTP stream data receive completed');
+        // 处理剩余的缓冲区数据
         if (this.streamBuffer.trim()) {
-          this.appendAndProcessStreamChunk('\n\n', wrappedCallbacks, true);
+          this.parseSSEChunk(wrappedCallbacks, parseState);
         }
-        if (!this.streamCompleted) {
-          this.streamCompleted = true;
+        if (!parseState.completed) {
+          parseState.completed = true;
           wrappedCallbacks.onComplete();
         }
       });
@@ -156,31 +172,32 @@ export class NetworkManager {
       });
 
       // 发起HTTP流式请求
-      const streamHeaders: HttpHeaderOptions = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      };
-
       const streamOptions: http.HttpRequestOptions = {
         method: http.RequestMethod.POST,
-        header: streamHeaders,
+        header: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        },
         extraData: JSON.stringify(requestBody),
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: 300000,
         readTimeout: 300000,
-        usingCache: false
+        usingCache: false,
+        priority: 1,
+        usingProtocol: http.HttpProtocol.HTTP1_1
       };
 
-      httpRequest.requestInStream(url, streamOptions).then((responseCode: number) => {
+  httpRequest.requestInStream(url, streamOptions).then((responseCode: number) => {
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
         console.info('Stream request completed with response code:', responseCode);
         if (responseCode === 200) {
+          // 流式数据接收已在 dataReceive 和 dataEnd 事件中处理
           console.info('Stream request successful');
         } else {
           wrappedCallbacks.onError(new Error(`HTTP ${responseCode}`));
@@ -201,75 +218,6 @@ export class NetworkManager {
   }
 
   /**
-   * 取消当前流式请求
-   */
-  cancelCurrentStreamRequest(): void {
-    if (this.currentStreamRequest) {
-      console.info('Cancelling current stream request');
-      this.destroyStreamRequest(this.currentStreamRequest);
-    }
-  }
-
-  /**
-   * 非流式请求，用于连接测试等场景
-   */
-  async sendChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[]): Promise<ChatResponse> {
-    const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage) => {
-      const requestMsg: RequestMessage = {
-        role: msg.role,
-        content: msg.content
-      };
-      return requestMsg;
-    });
-
-    let url = apiUrl;
-    if (!apiUrl.includes('/chat/completions')) {
-      url = `${apiUrl}/chat/completions`;
-    }
-
-    const requestBody: ChatRequestBody = {
-      model: model,
-      messages: requestMessages,
-      stream: false,
-      max_tokens: 512,
-      temperature: 0.7
-    };
-
-    const httpRequest = http.createHttp();
-    const headers: HttpHeaderOptions = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    };
-
-    const options: http.HttpRequestOptions = {
-      method: http.RequestMethod.POST,
-      header: headers,
-      extraData: JSON.stringify(requestBody),
-      expectDataType: http.HttpDataType.STRING,
-      usingCache: false,
-      connectTimeout: 30000,
-      readTimeout: 30000
-    };
-
-    try {
-      const responseCode = await httpRequest.request(url, options);
-      if (responseCode.responseCode !== http.ResponseCode.OK) {
-        throw new Error(`HTTP ${responseCode.responseCode}`);
-      }
-
-      const responseData = responseCode.result as string;
-      return JSON.parse(responseData) as ChatResponse;
-    } catch (error) {
-      const bizError = error as BusinessError;
-      const message = bizError?.message ?? JSON.stringify(error);
-      console.error('Non-stream chat request failed:', message);
-      throw new Error(`非流式请求失败: ${message}`);
-    } finally {
-      this.destroyStreamRequest(httpRequest);
-    }
-  }
-
-  /**
    * 销毁流式HTTP请求
    */
   private destroyStreamRequest(httpRequest: http.HttpRequest): void {
@@ -283,14 +231,89 @@ export class NetworkManager {
     httpRequest.off('dataEnd');
     // 销毁请求
     httpRequest.destroy();
-    if (this.currentStreamRequest === httpRequest) {
-      this.currentStreamRequest = null;
-    }
-    this.streamBuffer = '';
-    this.streamCompleted = false;
   }
 
-  // 将 UTF-8 字节数组转换为字符串
+  /**
+   * 解析 Server-Sent Events (SSE) 格式的流数据块
+   */
+  private parseSSEChunk(callbacks: StreamCallbacks, state: StreamParseState): void {
+    const lines = this.streamBuffer.split('\n');
+
+    // 保留最后一行，因为它可能是不完整的
+    this.streamBuffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (trimmedLine === '') continue;
+
+      // SSE 格式: data: {json}
+      if (trimmedLine.startsWith('data: ')) {
+        const dataStr = trimmedLine.substring(6).trim();
+
+        // 检查是否是结束标志
+        if (dataStr === '[DONE]') {
+          console.info('SSE stream completed with [DONE]');
+          if (!state.completed) {
+            state.completed = true;
+            callbacks.onComplete();
+          }
+          return;
+        }
+
+        try {
+          const jsonData = JSON.parse(dataStr) as StreamResponse;
+          if (!state.metadataDispatched) {
+            callbacks.onMetadata?.({
+              id: jsonData.id,
+              created: jsonData.created,
+              model: jsonData.model,
+              systemFingerprint: jsonData.system_fingerprint,
+              choiceIndex: jsonData.choices && jsonData.choices.length > 0 ? jsonData.choices[0].index : undefined,
+              finishReason: jsonData.choices && jsonData.choices.length > 0 ? jsonData.choices[0].finish_reason : undefined
+            });
+            state.metadataDispatched = true;
+          }
+          if (jsonData.choices && jsonData.choices.length > 0) {
+            const delta = jsonData.choices[0].delta;
+            if (delta && delta.content) {
+              console.info('Received SSE content chunk:', delta.content);
+              // 立即触发回调，实现真正的实时输出
+              callbacks.onData(delta.content);
+            }
+            // 处理推理内容（如果有）
+            if (delta && delta.reasoning_content) {
+              let reasoningChunk: string = '';
+              const reasoningContent = delta.reasoning_content;
+              if (typeof reasoningContent === 'string') {
+                reasoningChunk = reasoningContent;
+              } else if (Array.isArray(reasoningContent)) {
+                const parts: Array<string> = [];
+                reasoningContent.forEach((entry: string | ReasoningContentItem) => {
+                  if (typeof entry === 'string') {
+                    parts.push(entry);
+                  } else if (entry && typeof entry.text === 'string') {
+                    parts.push(entry.text);
+                  }
+                });
+                reasoningChunk = parts.join('');
+              }
+              if (reasoningChunk && reasoningChunk.length > 0) {
+                console.info('Received SSE reasoning content:', reasoningChunk);
+                callbacks.onData(reasoningChunk);
+              }
+            }
+          }
+        } catch (parseError) {
+          console.warn('Failed to parse SSE JSON:', parseError, 'Raw data:', dataStr);
+          // 继续处理其他行，不因为一行解析失败而停止
+        }
+      }
+    }
+  }
+
+  /**
+   * 将 UTF-8 字节数组转换为字符串
+   */
   private utf8ArrayToString(array: Uint8Array): string {
     let result = '';
     let i = 0;
@@ -336,185 +359,121 @@ export class NetworkManager {
   }
 
   /**
-   * 将接收到的流式片段写入缓冲区并解析
+   * 发送聊天请求到AI服务（非流式，保留兼容性）
    */
-  private appendAndProcessStreamChunk(chunk: string, callbacks: StreamCallbacks, forceFlush: boolean = false): void {
-    this.streamBuffer += chunk.replace(/\r\n/g, '\n');
+  async sendChatRequest(
+    apiUrl: string,
+    apiKey: string,
+    modelName: string,
+    messages: ChatMessage[]
+  ): Promise<string> {
+    console.info('NetworkManager: Starting chat request');
+    console.info('API URL:', apiUrl);
+    console.info('Model:', modelName);
+    console.info('Messages count:', messages.length);
+    console.info('API Key length:', apiKey.length);
 
-    let separatorIndex = this.streamBuffer.indexOf('\n\n');
-    while (separatorIndex !== -1) {
-      const rawEvent = this.streamBuffer.substring(0, separatorIndex);
-      this.streamBuffer = this.streamBuffer.substring(separatorIndex + 2);
-      this.handleSSEEvent(rawEvent, callbacks);
-      separatorIndex = this.streamBuffer.indexOf('\n\n');
-    }
+    const requestUrl = this.resolveChatCompletionsUrl(apiUrl);
+    console.info('Resolved chat endpoint:', requestUrl);
 
-    if (forceFlush && this.streamBuffer.trim()) {
-      const remainder = this.streamBuffer;
-      this.streamBuffer = '';
-      this.handleSSEEvent(remainder, callbacks);
-    }
+    return new Promise((resolve, reject) => {
+      // 创建HTTP请求
+      const httpRequest = http.createHttp();
+
+      // 构建请求体
+      const requestMessages: MessageInterface[] = messages.map((msg: ChatMessage): MessageInterface => {
+        return {
+          role: msg.role,
+          content: msg.content
+        };
+      });
+
+      const requestBody: ChatRequest = {
+        model: modelName,
+        messages: requestMessages,
+        max_tokens: 2000,
+        temperature: 0.7,
+        stream: false
+      };
+
+      // 设置请求选项
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      };
+
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.POST,
+        header: requestHeaders,
+        extraData: JSON.stringify(requestBody),
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: Constants.DEFAULT_TIMEOUT,
+        readTimeout: Constants.DEFAULT_TIMEOUT
+      };
+
+  console.info('Sending chat request to:', requestUrl);
+      console.info('Request body:', JSON.stringify(requestBody, null, 2));
+
+      // 发送请求
+  httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
+        if (err) {
+          console.error('HTTP request failed:', err);
+          httpRequest.destroy();
+          reject(new NetworkError(`网络请求失败: ${err.message || err}`));
+          return;
+        }
+
+        try {
+          if (data.responseCode === 200) {
+            const responseData = data.result as string;
+            console.info('Received response:', responseData);
+
+            const response: ChatResponse = JSON.parse(responseData);
+
+            if (response.choices && response.choices.length > 0) {
+              const content = response.choices[0].message.content;
+              httpRequest.destroy();
+              resolve(content);
+            } else {
+              httpRequest.destroy();
+              reject(new NetworkError('AI服务返回的响应格式不正确'));
+            }
+          } else {
+            let errorMessage = `请求失败，状态码: ${data.responseCode}`;
+
+            try {
+              const errorData = JSON.parse(data.result as string) as ErrorResponse;
+              if (errorData.error && errorData.error.message) {
+                errorMessage = errorData.error.message;
+              }
+            } catch (e) {
+              // 解析错误信息失败，使用默认错误消息
+            }
+
+            console.error('HTTP request failed with status:', data.responseCode);
+            httpRequest.destroy();
+            reject(new NetworkError(errorMessage));
+          }
+        } catch (parseError) {
+          console.error('Failed to parse response:', parseError);
+          httpRequest.destroy();
+          reject(new NetworkError(`响应解析失败: ${parseError}`));
+        }
+      });
+    });
   }
 
   /**
-   * 解析单个SSE事件
+   * 测试API连接
    */
-  private handleSSEEvent(rawEvent: string, callbacks: StreamCallbacks): void {
-    if (!rawEvent) {
-      return;
-    }
-
-    const dataPayloadLines = rawEvent
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.substring(5).trim());
-
-    if (dataPayloadLines.length === 0) {
-      return;
-    }
-
-    const dataPayload = dataPayloadLines.join('\n');
-
-    if (dataPayload === '[DONE]') {
-      if (!this.streamCompleted) {
-        this.streamCompleted = true;
-        callbacks.onComplete();
-      }
-      if (this.currentStreamRequest) {
-        this.destroyStreamRequest(this.currentStreamRequest);
-      }
-      return;
-    }
-
+  async testConnection(apiUrl: string, apiKey: string, modelName: string): Promise<boolean> {
     try {
-      const streamResponse: StreamResponse = JSON.parse(dataPayload);
-      const textParts: string[] = [];
-
-      streamResponse.choices?.forEach(choice => {
-        if (choice.delta?.content) {
-          textParts.push(choice.delta.content);
-        }
-        if (choice.delta?.reasoning_content) {
-          textParts.push(choice.delta.reasoning_content);
-        }
-      });
-
-      if (textParts.length > 0) {
-        callbacks.onData(textParts.join(''));
-      }
+      const testMessage = new ChatMessage('Hello', 'user');
+      await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage]);
+      return true;
     } catch (error) {
-      console.error('Failed to parse SSE event:', error, dataPayload);
+      console.error('Connection test failed:', error);
+      return false;
     }
   }
 }
-
-// @Entry
-// @Component
-// struct HttpRequestPage {
-//   @State html: string = "";
-//
-//   build() {
-//     Column({ space: 10 }) {
-//       Button("读取百度网页")
-//         .onClick(() => {
-//           //this.sendStreamHttpRequest();
-//         })
-//       Text(this.html)
-//     }
-//     .width('100%')
-//     .height('100%')
-//     .padding(10)
-//   }
-//
-//
-// }
-
-
-
-
-
-
-
-
-
-
-
-
-
-  // // 封装流式 HTTP 请求逻辑
-  // private sendStreamHttpRequest(): void {
-  //   let httpRequest = http.createHttp();
-  //   let res = new ArrayBuffer(0);
-  //
-  //   // 订阅HTTP流式响应数据接收事件
-  //   httpRequest.on('dataReceive', (data: ArrayBuffer) => {
-  //     const newRes = new ArrayBuffer(res.byteLength + data.byteLength);
-  //     const resView = new Uint8Array(newRes);
-  //     resView.set(new Uint8Array(res));
-  //     resView.set(new Uint8Array(data), res.byteLength);
-  //     res = newRes;
-  //     console.info('res length: ' + res.byteLength);
-  //   });
-  //
-  //   // 订阅HTTP流式响应数据接收完毕事件
-  //   httpRequest.on('dataEnd', () => {
-  //     console.info('No more data in response, data receive end');
-  //   });
-  //
-  //   class Data {
-  //     public receiveSize: number = 0;
-  //     public totalSize: number = 0;
-  //   }
-  //
-  //   // 订阅HTTP流式响应数据接收进度事见
-  //   httpRequest.on('dataReceiveProgress', (data: Data) => {
-  //     console.info("dataReceiveProgress receiveSize:" + data.receiveSize + ", totalSize:" + data.totalSize);
-  //   });
-  //
-  //   // 订阅HTTP流式响应数据发送进度事件，向服务器上传数据时，可以通过该回调获取数据上传进度
-  //   httpRequest.on('dataSendProgress', (data: http.DataSendProgressInfo) => {
-  //     console.log("dataSendProgress receiveSize:" + data.sendSize + ", totalSize:" + data.totalSize);
-  //   });
-  //
-  //   let streamInfo: http.HttpRequestOptions = {
-  //     method: http.RequestMethod.POST, // 使用POST请求
-  //     header: {
-  //       'contentType': 'application/json'
-  //     },
-  //     extraData: 'data to send', // 请求体内容
-  //     expectDataType: http.HttpDataType.STRING, // 指定返回数据的类型
-  //     usingCache: true, // 使用缓存
-  //     priority: 1, // 请求优先级
-  //     connectTimeout: 60000, // 连接超时
-  //     readTimeout: 60000, // 读取超时
-  //     usingProtocol: http.HttpProtocol.HTTP1_1 // 协议类型
-  //   };
-  //
-  //   // 发送流式请求
-  //   httpRequest.requestInStream("huawei.com", streamInfo)
-  //     .then((data: number) => {
-  //       console.info("requestInStream OK!");
-  //       console.info('ResponseCode :' + JSON.stringify(data));
-  //       // 取消订阅步骤3中订阅的事件，并调用destroy方法主动销毁。
-  //       this.destroyRequest(httpRequest);
-  //     }).catch((err: Error) => {
-  //     console.error("requestInStream ERROR : err = " + JSON.stringify(err));
-  //     // 取消订阅步骤3中订阅的事件，并调用destroy方法主动销毁。
-  //     this.destroyRequest(httpRequest);
-  //     });
-  //
-  // };
-  //
-  // public destroyRequest(httpRequest: http.HttpRequest) {
-  //   // 取消订阅HTTP流式响应数据接收事件。
-  //   httpRequest.off('dataReceive');
-  //   // 取消订阅HTTP流式响应数据发送进度事件。
-  //   httpRequest.off('dataSendProgress');
-  //   // 取消订阅HTTP流式响应数据接收进度事件。
-  //   httpRequest.off('dataReceiveProgress');
-  //   // 取消订阅HTTP流式响应数据接收完毕事件。
-  //   httpRequest.off('dataEnd');
-  //   // 当该请求使用完毕时，调用destroy方法主动销毁。
-  //   httpRequest.destroy();
-  // }

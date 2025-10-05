@@ -1,16 +1,26 @@
-import relationalStore from '@ohos.data.relationalStore';
-import { common } from '@kit.AbilityKit';
-import {
-  ChatMessage,
-  AppSettings,
-  AIProvider,
-  AIProviderDTO,
-  Constants,
-  DatabaseError,
-  Conversation,
-  ConversationRecord
-} from '../services/DataModels';
+import { relationalStore } from '@kit.ArkData';
+import { Constants } from '../components/Constants';
+import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel } from '../services/DataModels';
+import { Conversation } from '../services/ConversationModels';
+import { DatabaseError } from '../components/Errors';
 
+interface ProviderModelRecord {
+  id?: string;
+  name?: string;
+  displayName?: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+interface ProviderRecord {
+  id?: string;
+  name?: string;
+  displayName?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  models?: ProviderModelRecord[];
+  isActive?: boolean;
+}
 
 /**
  * 数据库管理器
@@ -31,7 +41,7 @@ export class DatabaseManager {
   /**
    * 初始化数据库
    */
-  async initDatabase(context: common.Context): Promise<void> {
+  async initDatabase(context: Context): Promise<void> {
     const config: relationalStore.StoreConfig = {
       name: Constants.DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S1,
@@ -65,13 +75,16 @@ export class DatabaseManager {
         timestamp INTEGER NOT NULL,
         conversation_id TEXT NOT NULL DEFAULT 'default',
         model_name TEXT,
-        provider_name TEXT
+        provider_name TEXT,
+        provider_message_id TEXT,
+        provider_created_at INTEGER,
+        system_fingerprint TEXT
       )
     `;
 
     // 创建对话表
     const createConversationTable = `
-      CREATE TABLE IF NOT EXISTS ${Constants.CONVERSATION_TABLE} (
+      CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         created_at INTEGER NOT NULL,
@@ -99,48 +112,10 @@ export class DatabaseManager {
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
 
-      // 升级现有表结构以支持模型信息
-      await this.upgradeTableStructure();
-
       console.info('Database tables created successfully');
     } catch (error) {
       console.error('Failed to create tables:', error);
       throw new DatabaseError(`Failed to create tables: ${error}`);
-    }
-  }
-
-  /**
-   * 升级表结构
-   */
-  private async upgradeTableStructure(): Promise<void> {
-    try {
-      // 检查并添加模型相关字段
-      await this.addColumnIfNotExists(Constants.CHAT_TABLE, 'model_name', 'TEXT');
-      await this.addColumnIfNotExists(Constants.CHAT_TABLE, 'provider_name', 'TEXT');
-      console.info('Table structure upgraded successfully');
-    } catch (error) {
-      console.error('Failed to upgrade table structure:', error);
-      // 升级失败不应该影响应用启动，只记录错误
-    }
-  }
-
-  /**
-   * 如果列不存在则添加列
-   */
-  private async addColumnIfNotExists(tableName: string, columnName: string, columnType: string): Promise<void> {
-    if (!this.rdbStore) {
-      console.error('Database not initialized');
-      return;
-    }
-
-    try {
-      // 尝试添加列，如果已存在会抛出异常
-      const alterSql = `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`;
-      await this.rdbStore.executeSql(alterSql);
-      console.info(`Added column ${columnName} to table ${tableName}`);
-    } catch (error) {
-      // 列可能已存在，忽略错误
-      console.info(`Column ${columnName} already exists in table ${tableName} or failed to add:`, error);
     }
   }
 
@@ -158,7 +133,10 @@ export class DatabaseManager {
       'timestamp': message.timestamp,
       'conversation_id': message.conversationId,
       'model_name': message.modelName || null,
-      'provider_name': message.providerName || null
+      'provider_name': message.providerName || null,
+      'provider_message_id': message.providerMessageId || null,
+      'provider_created_at': message.providerCreatedAt !== undefined ? message.providerCreatedAt : null,
+      'system_fingerprint': message.systemFingerprint || null
     };
 
     try {
@@ -199,6 +177,55 @@ export class DatabaseManager {
   }
 
   /**
+   * 更新聊天消息的元数据
+   */
+  async updateChatMessageMetadata(messageId: number, metadata: ChatMessageMetadataUpdate): Promise<void> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+
+    const valueBucket: relationalStore.ValuesBucket = {};
+
+    if (metadata.timestamp !== undefined) {
+      valueBucket['timestamp'] = metadata.timestamp;
+    }
+    if (metadata.providerMessageId !== undefined) {
+      valueBucket['provider_message_id'] = metadata.providerMessageId;
+    }
+    if (metadata.providerCreatedAt !== undefined) {
+      valueBucket['provider_created_at'] = metadata.providerCreatedAt;
+    }
+    if (metadata.systemFingerprint !== undefined) {
+      valueBucket['system_fingerprint'] = metadata.systemFingerprint;
+    }
+    if (metadata.modelName !== undefined) {
+      valueBucket['model_name'] = metadata.modelName;
+    }
+    if (metadata.providerName !== undefined) {
+      valueBucket['provider_name'] = metadata.providerName;
+    }
+
+    if (Object.keys(valueBucket).length === 0) {
+      console.info('No metadata fields provided to update for message:', messageId);
+      return;
+    }
+
+    const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
+    predicates.equalTo('id', messageId);
+
+    try {
+      const rowsAffected = await this.rdbStore.update(valueBucket, predicates);
+      console.info('Chat message metadata updated, rows affected:', rowsAffected);
+      if (rowsAffected === 0) {
+        throw new DatabaseError(`No message found with ID: ${messageId}`);
+      }
+    } catch (error) {
+      console.error('Failed to update chat message metadata:', error);
+      throw new DatabaseError(`Failed to update chat message metadata: ${error}`);
+    }
+  }
+
+  /**
    * 获取聊天消息列表
    */
   async getChatMessages(conversationId: string = 'default', limit: number = 100): Promise<ChatMessage[]> {
@@ -216,26 +243,38 @@ export class DatabaseManager {
       const messages: ChatMessage[] = [];
 
       if (resultSet.goToFirstRow()) {
+        const contentIndex = resultSet.getColumnIndex('content');
+        const roleIndex = resultSet.getColumnIndex('role');
+        const conversationIdIndex = resultSet.getColumnIndex('conversation_id');
+        const modelNameIndex = resultSet.getColumnIndex('model_name');
+        const providerNameIndex = resultSet.getColumnIndex('provider_name');
+        const providerMessageIdIndex = resultSet.getColumnIndex('provider_message_id');
+        const providerCreatedAtIndex = resultSet.getColumnIndex('provider_created_at');
+        const systemFingerprintIndex = resultSet.getColumnIndex('system_fingerprint');
+        const timestampIndex = resultSet.getColumnIndex('timestamp');
+        const idIndex = resultSet.getColumnIndex('id');
+
         do {
-          const content = resultSet.getString(resultSet.getColumnIndex('content'));
-          const role = resultSet.getString(resultSet.getColumnIndex('role')) as 'user' | 'assistant';
-          const conversationIdValue = resultSet.getString(resultSet.getColumnIndex('conversation_id'));
+          const content = resultSet.getString(contentIndex);
+          const role = resultSet.getString(roleIndex) as 'user' | 'assistant';
+          const conversationId = resultSet.getString(conversationIdIndex);
+          const modelName = resultSet.isColumnNull(modelNameIndex) ? undefined : resultSet.getString(modelNameIndex);
+          const providerName = resultSet.isColumnNull(providerNameIndex) ? undefined : resultSet.getString(providerNameIndex);
+          const providerMessageId = resultSet.isColumnNull(providerMessageIdIndex) ? undefined : resultSet.getString(providerMessageIdIndex);
+          const providerCreatedAt = resultSet.isColumnNull(providerCreatedAtIndex) ? undefined : resultSet.getLong(providerCreatedAtIndex);
+          const systemFingerprint = resultSet.isColumnNull(systemFingerprintIndex) ? undefined : resultSet.getString(systemFingerprintIndex);
+          const timestampValue = resultSet.getLong(timestampIndex);
 
-          // 读取模型信息（可能为null）
-          let modelName: string | undefined;
-          let providerName: string | undefined;
-          const modelNameIndex = this.getColumnIndexSafe(resultSet, 'model_name');
-          const providerNameIndex = this.getColumnIndexSafe(resultSet, 'provider_name');
-          if (modelNameIndex >= 0 && !resultSet.isColumnNull(modelNameIndex)) {
-            modelName = resultSet.getString(modelNameIndex);
-          }
-          if (providerNameIndex >= 0 && !resultSet.isColumnNull(providerNameIndex)) {
-            providerName = resultSet.getString(providerNameIndex);
-          }
-
-          const message = new ChatMessage(content, role, conversationIdValue, modelName, providerName);
-          message.id = resultSet.getLong(resultSet.getColumnIndex('id'));
-          message.timestamp = resultSet.getLong(resultSet.getColumnIndex('timestamp'));
+          const message = new ChatMessage(content, role, {
+            conversationId,
+            modelName,
+            providerName,
+            timestamp: timestampValue,
+            providerMessageId,
+            providerCreatedAt,
+            systemFingerprint
+          });
+          message.id = resultSet.getLong(idIndex);
           messages.push(message);
         } while (resultSet.goToNextRow());
       }
@@ -305,42 +344,14 @@ export class DatabaseManager {
       activeModelId: settings.activeModelId
     });
 
-    let apiUrl = settings.apiUrl;
-    let apiKey = settings.apiKey;
-    let modelName = settings.modelName;
-
-    const activeProvider = settings.providers?.find(provider => provider.id === settings.activeProviderId);
-    if (activeProvider) {
-      if (!apiUrl) {
-        apiUrl = activeProvider.apiUrl;
-      }
-      if (!apiKey) {
-        apiKey = activeProvider.apiKey;
-      }
-
-      const activeModel = activeProvider.models.find(model => model.id === settings.activeModelId || model.name === settings.activeModelId);
-      if (activeModel && !modelName) {
-        modelName = activeModel.name;
-      }
-    }
-
     const valueBucket: relationalStore.ValuesBucket = {
-      'api_url': apiUrl || '',
-      'api_key': apiKey || '',
-      'model_name': modelName || settings.activeModelId || ''
+      'api_url': settings.apiUrl,
+      'api_key': settings.apiKey,
+      'model_name': settings.modelName,
+      'providers_data': JSON.stringify(settings.providers ?? []),
+      'active_provider_id': settings.activeProviderId ?? '',
+      'active_model_id': settings.activeModelId ?? ''
     };
-
-    // 添加新版本字段
-    if (settings.providers && settings.providers.length > 0) {
-      const serializedProviders = settings.providers.map(provider => provider.toJSON());
-      valueBucket['providers_data'] = JSON.stringify(serializedProviders);
-    }
-    if (settings.activeProviderId) {
-      valueBucket['active_provider_id'] = settings.activeProviderId;
-    }
-    if (settings.activeModelId) {
-      valueBucket['active_model_id'] = settings.activeModelId;
-    }
 
     try {
       // 首先删除现有设置
@@ -373,78 +384,76 @@ export class DatabaseManager {
       console.info('Query settings result count:', resultSet.rowCount);
 
       if (resultSet.goToFirstRow()) {
-        settings = new AppSettings(
+        const resolvedSettings = new AppSettings(
           resultSet.getString(resultSet.getColumnIndex('api_url')),
           resultSet.getString(resultSet.getColumnIndex('api_key')),
           resultSet.getString(resultSet.getColumnIndex('model_name'))
         );
-        settings.id = resultSet.getLong(resultSet.getColumnIndex('id'));
+        resolvedSettings.id = resultSet.getLong(resultSet.getColumnIndex('id'));
 
-        // 读取新版本字段
-        try {
-          const providersDataIndex = resultSet.getColumnIndex('providers_data');
-          if (providersDataIndex >= 0) {
-            const providersJson = resultSet.getString(providersDataIndex);
-            if (providersJson) {
-              const parsedProviders = JSON.parse(providersJson) as Array<AIProviderDTO>;
-              settings.providers = parsedProviders.map(item => AIProvider.fromPlainObject(item));
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to parse providers data:', e);
+        const providersDataIndex = resultSet.getColumnIndex('providers_data');
+        const activeProviderIdIndex = resultSet.getColumnIndex('active_provider_id');
+        const activeModelIdIndex = resultSet.getColumnIndex('active_model_id');
+
+        if (providersDataIndex < 0) {
+          console.warn('Settings record missing providers_data column, treating as legacy configuration.');
+          resultSet.close();
+          return null;
         }
 
-        try {
-          const activeProviderIdIndex = resultSet.getColumnIndex('active_provider_id');
-          if (activeProviderIdIndex >= 0) {
-            settings.activeProviderId = resultSet.getString(activeProviderIdIndex);
-          }
-        } catch (e) {
-          console.warn('No active_provider_id column found');
+        const providersJson = resultSet.isColumnNull(providersDataIndex)
+          ? ''
+          : resultSet.getString(providersDataIndex);
+        const hydratedProviders = this.parseProvidersJson(providersJson);
+
+        if (hydratedProviders.length === 0) {
+          console.warn('Settings record contains no valid providers, treating as unconfigured.');
+          resultSet.close();
+          return null;
         }
 
-        try {
-          const activeModelIdIndex = resultSet.getColumnIndex('active_model_id');
-          if (activeModelIdIndex >= 0) {
-            settings.activeModelId = resultSet.getString(activeModelIdIndex);
-          }
-        } catch (e) {
-          console.warn('No active_model_id column found');
+        resolvedSettings.providers = hydratedProviders;
+
+        if (activeProviderIdIndex >= 0 && !resultSet.isColumnNull(activeProviderIdIndex)) {
+          resolvedSettings.activeProviderId = resultSet.getString(activeProviderIdIndex) ?? '';
+        } else {
+          resolvedSettings.activeProviderId = '';
         }
 
-        if (settings && settings.providers.length > 0) {
-          const currentSettings = settings;
-          if (currentSettings.activeProviderId) {
-            currentSettings.providers.forEach(provider => {
-              provider.isActive = provider.id === currentSettings.activeProviderId;
-            });
-          } else {
-            currentSettings.providers.forEach(provider => provider.isActive = false);
-          }
-
-          if (!currentSettings.activeProviderId) {
-            const firstProvider = currentSettings.providers[0];
-            currentSettings.activeProviderId = firstProvider.id;
-            firstProvider.isActive = true;
-          }
-
-          const activeProvider = currentSettings.providers.find(provider => provider.isActive)
-            ?? currentSettings.providers[0];
-
-          if (activeProvider && !currentSettings.activeModelId && activeProvider.models.length > 0) {
-            currentSettings.activeModelId = activeProvider.models[0].id;
-          }
+        if (activeModelIdIndex >= 0 && !resultSet.isColumnNull(activeModelIdIndex)) {
+          resolvedSettings.activeModelId = resultSet.getString(activeModelIdIndex) ?? '';
+        } else {
+          resolvedSettings.activeModelId = '';
         }
 
-        console.info('Retrieved settings:', {
-          id: settings.id,
-          apiUrl: settings.apiUrl,
-          modelName: settings.modelName,
-          apiKeyLength: settings.apiKey.length,
-          providersCount: settings.providers?.length || 0,
-          activeProviderId: settings.activeProviderId,
-          activeModelId: settings.activeModelId
+        const activeProvider = resolvedSettings.providers.find(provider => provider.id === resolvedSettings.activeProviderId)
+          ?? resolvedSettings.providers[0];
+        resolvedSettings.activeProviderId = activeProvider.id;
+
+        let activeModel: AIModel | undefined;
+        if (activeProvider.models.length > 0) {
+          activeModel = activeProvider.models.find(model => model.id === resolvedSettings.activeModelId) ?? activeProvider.models[0];
+          resolvedSettings.activeModelId = activeModel.id;
+          resolvedSettings.modelName = activeModel.name;
+        } else {
+          resolvedSettings.activeModelId = '';
+          resolvedSettings.modelName = '';
+        }
+
+        resolvedSettings.apiUrl = activeProvider.apiUrl;
+        resolvedSettings.apiKey = activeProvider.apiKey;
+
+        console.info('Retrieved settings using provider-centric format:', {
+          id: resolvedSettings.id,
+          apiUrl: resolvedSettings.apiUrl,
+          modelName: resolvedSettings.modelName,
+          apiKeyLength: resolvedSettings.apiKey.length,
+          providersCount: resolvedSettings.providers.length,
+          activeProviderId: resolvedSettings.activeProviderId,
+          activeModelId: resolvedSettings.activeModelId
         });
+
+        settings = resolvedSettings;
       } else {
         console.info('No settings found in database');
       }
@@ -458,6 +467,49 @@ export class DatabaseManager {
   }
 
   /**
+   * 获取所有对话，按更新时间倒序排列
+   */
+  async getAllConversations(): Promise<Conversation[]> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+
+    const predicates = new relationalStore.RdbPredicates('conversations');
+    predicates.orderByDesc('updated_at');
+
+    try {
+      const resultSet = await this.rdbStore.query(predicates);
+      const conversations: Conversation[] = [];
+
+      if (resultSet.goToFirstRow()) {
+        const idIndex = resultSet.getColumnIndex('id');
+        const titleIndex = resultSet.getColumnIndex('title');
+        const createdAtIndex = resultSet.getColumnIndex('created_at');
+        const updatedAtIndex = resultSet.getColumnIndex('updated_at');
+        const messageCountIndex = resultSet.getColumnIndex('message_count');
+        const isActiveIndex = resultSet.getColumnIndex('is_active');
+
+        do {
+          const conversation = new Conversation();
+          conversation.id = resultSet.getString(idIndex);
+          conversation.title = resultSet.getString(titleIndex);
+          conversation.createdAt = resultSet.getLong(createdAtIndex);
+          conversation.updatedAt = resultSet.getLong(updatedAtIndex);
+          conversation.messageCount = resultSet.getLong(messageCountIndex);
+          conversation.isActive = resultSet.getLong(isActiveIndex) === 1;
+          conversations.push(conversation);
+        } while (resultSet.goToNextRow());
+      }
+
+      resultSet.close();
+      return conversations;
+    } catch (error) {
+      console.error('Failed to get conversations:', error);
+      throw new DatabaseError(`Failed to get conversations: ${error}`);
+    }
+  }
+
+  /**
    * 删除对话及其所有消息
    */
   async deleteConversation(conversationId: string): Promise<void> {
@@ -466,13 +518,11 @@ export class DatabaseManager {
     }
 
     try {
-      // 删除对话中的所有消息
       const messagePredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
       messagePredicates.equalTo('conversation_id', conversationId);
       await this.rdbStore.delete(messagePredicates);
 
-    // 删除对话记录
-    const conversationPredicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
+      const conversationPredicates = new relationalStore.RdbPredicates('conversations');
       conversationPredicates.equalTo('id', conversationId);
       await this.rdbStore.delete(conversationPredicates);
 
@@ -480,68 +530,6 @@ export class DatabaseManager {
     } catch (error) {
       console.error('Failed to delete conversation:', error);
       throw new DatabaseError(`Failed to delete conversation: ${error}`);
-    }
-  }
-
-  /**
-   * 设置活跃对话
-   */
-  async setActiveConversation(conversationId: string): Promise<void> {
-    if (!this.rdbStore) {
-      throw new DatabaseError('Database not initialized');
-    }
-
-    try {
-      // 将所有对话设置为非活跃
-    const deactivateAll: relationalStore.ValuesBucket = { 'is_active': 0 };
-    const allPredicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
-      await this.rdbStore.update(deactivateAll, allPredicates);
-
-      // 设置指定对话为活跃
-    const activateOne: relationalStore.ValuesBucket = { 'is_active': 1, 'updated_at': Date.now() };
-    const activePredicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
-      activePredicates.equalTo('id', conversationId);
-      await this.rdbStore.update(activateOne, activePredicates);
-
-      console.info('Active conversation set:', conversationId);
-    } catch (error) {
-      console.error('Failed to set active conversation:', error);
-      throw new DatabaseError(`Failed to set active conversation: ${error}`);
-    }
-  }
-
-  /**
-   * 获取活跃对话
-   */
-  async getActiveConversation(): Promise<Conversation | null> {
-    if (!this.rdbStore) {
-      throw new DatabaseError('Database not initialized');
-    }
-
-    const predicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
-    predicates.equalTo('is_active', 1);
-
-    try {
-      const resultSet = await this.rdbStore.query(predicates);
-      let conversation: Conversation | null = null;
-
-      if (resultSet.goToFirstRow()) {
-        const record: ConversationRecord = {
-          id: resultSet.getString(resultSet.getColumnIndex('id')),
-          title: resultSet.getString(resultSet.getColumnIndex('title')),
-          created_at: resultSet.getLong(resultSet.getColumnIndex('created_at')),
-          updated_at: resultSet.getLong(resultSet.getColumnIndex('updated_at')),
-          message_count: resultSet.getLong(resultSet.getColumnIndex('message_count')),
-          is_active: 1
-        };
-        conversation = Conversation.fromRecord(record);
-      }
-
-      resultSet.close();
-      return conversation;
-    } catch (error) {
-      console.error('Failed to get active conversation:', error);
-      throw new DatabaseError(`Failed to get active conversation: ${error}`);
     }
   }
 
@@ -554,20 +542,18 @@ export class DatabaseManager {
     }
 
     try {
-      // 计算对话中的消息数量
       const countPredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
       countPredicates.equalTo('conversation_id', conversationId);
       const resultSet = await this.rdbStore.query(countPredicates);
       const messageCount = resultSet.rowCount;
       resultSet.close();
 
-      // 更新对话记录
       const valueBucket: relationalStore.ValuesBucket = {
         'message_count': messageCount,
         'updated_at': Date.now()
       };
 
-  const predicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
+      const predicates = new relationalStore.RdbPredicates('conversations');
       predicates.equalTo('id', conversationId);
       await this.rdbStore.update(valueBucket, predicates);
 
@@ -604,49 +590,12 @@ export class DatabaseManager {
     };
 
     try {
-  await this.rdbStore.insert(Constants.CONVERSATION_TABLE, valueBucket);
+      await this.rdbStore.insert('conversations', valueBucket);
       console.info('Conversation created:', conversation.id);
       return conversation;
     } catch (error) {
       console.error('Failed to create conversation:', error);
       throw new DatabaseError(`Failed to create conversation: ${error}`);
-    }
-  }
-
-  /**
-   * 获取所有对话列表
-   */
-  async getAllConversations(): Promise<Conversation[]> {
-    if (!this.rdbStore) {
-      throw new DatabaseError('Database not initialized');
-    }
-
-  const predicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
-    predicates.orderByDesc('updated_at');
-
-    try {
-      const resultSet = await this.rdbStore.query(predicates);
-      const conversations: Conversation[] = [];
-
-      if (resultSet.goToFirstRow()) {
-        do {
-          const record: ConversationRecord = {
-            id: resultSet.getString(resultSet.getColumnIndex('id')),
-            title: resultSet.getString(resultSet.getColumnIndex('title')),
-            created_at: resultSet.getLong(resultSet.getColumnIndex('created_at')),
-            updated_at: resultSet.getLong(resultSet.getColumnIndex('updated_at')),
-            message_count: resultSet.getLong(resultSet.getColumnIndex('message_count')),
-            is_active: resultSet.getLong(resultSet.getColumnIndex('is_active'))
-          };
-          conversations.push(Conversation.fromRecord(record));
-        } while (resultSet.goToNextRow());
-      }
-
-      resultSet.close();
-      return conversations;
-    } catch (error) {
-      console.error('Failed to get conversations:', error);
-      throw new DatabaseError(`Failed to get conversations: ${error}`);
     }
   }
 
@@ -663,7 +612,7 @@ export class DatabaseManager {
       'updated_at': Date.now()
     };
 
-  const predicates = new relationalStore.RdbPredicates(Constants.CONVERSATION_TABLE);
+    const predicates = new relationalStore.RdbPredicates('conversations');
     predicates.equalTo('id', conversationId);
 
     try {
@@ -675,19 +624,113 @@ export class DatabaseManager {
     }
   }
 
-  private getColumnIndexSafe(resultSet: relationalStore.ResultSet, columnName: string): number {
-    try {
-      return resultSet.getColumnIndex(columnName);
-    } catch (error) {
-      console.info(`Column ${columnName} not found in resultSet`);
-      return -1;
-    }
-  }
-
   /**
    * 生成唯一ID
    */
   private generateId(): string {
     return Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+
+  private parseProvidersJson(providersJson: string | undefined): AIProvider[] {
+    if (!providersJson || providersJson.trim().length === 0) {
+      return [];
+    }
+
+    let parsedValue: ProviderRecord[];
+    try {
+      const parsed = JSON.parse(providersJson) as ProviderRecord[];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      parsedValue = parsed;
+    } catch (error) {
+      console.error('Failed to parse providers data:', error);
+      return [];
+    }
+
+    const providers: AIProvider[] = [];
+    for (const record of parsedValue) {
+      const provider = this.hydrateProvider(record);
+      if (provider) {
+        providers.push(provider);
+      }
+    }
+    return providers;
+  }
+
+  private hydrateModel(raw: ProviderModelRecord | null | undefined): AIModel | null {
+    if (!raw) {
+      return null;
+    }
+
+    const idSource = raw.id;
+    const nameSource = raw.name;
+    const displayNameSource = raw.displayName;
+    const maxTokensSource = raw.maxTokens;
+    const temperatureSource = raw.temperature;
+
+    const id = typeof idSource === 'string' && idSource.trim().length > 0
+      ? idSource
+      : (typeof nameSource === 'string' && nameSource.trim().length > 0 ? nameSource : '');
+    const name = typeof nameSource === 'string' && nameSource.trim().length > 0 ? nameSource : id;
+
+    if (!id || !name) {
+      return null;
+    }
+
+    const displayName = typeof displayNameSource === 'string' && displayNameSource.trim().length > 0
+      ? displayNameSource
+      : name;
+
+    const maxTokensNumber = Number(maxTokensSource);
+    const maxTokens = Number.isFinite(maxTokensNumber) && maxTokensNumber > 0 ? maxTokensNumber : 4096;
+
+    const temperatureNumber = Number(temperatureSource);
+    const temperature = Number.isFinite(temperatureNumber) ? temperatureNumber : 0.7;
+
+    return new AIModel(id, name, displayName, maxTokens, temperature);
+  }
+
+  private hydrateProvider(raw: ProviderRecord | null | undefined): AIProvider | null {
+    if (!raw) {
+      return null;
+    }
+
+    const idSource = raw.id;
+    const nameSource = raw.name;
+    const displayNameSource = raw.displayName;
+    const apiUrlSource = raw.apiUrl;
+    const apiKeySource = raw.apiKey;
+    const modelsSource = raw.models;
+    const isActiveSource = raw.isActive;
+
+    const id = typeof idSource === 'string' && idSource.trim().length > 0 ? idSource : '';
+    const name = typeof nameSource === 'string' && nameSource.trim().length > 0 ? nameSource : '';
+    const displayName = typeof displayNameSource === 'string' && displayNameSource.trim().length > 0
+      ? displayNameSource
+      : (name || id);
+    const apiUrl = typeof apiUrlSource === 'string' && apiUrlSource.trim().length > 0 ? apiUrlSource : '';
+    const apiKey = typeof apiKeySource === 'string' ? apiKeySource : '';
+
+    if (!id || !name || !displayName || !apiUrl) {
+      return null;
+    }
+
+    const provider = new AIProvider(id, name, displayName, apiUrl, apiKey);
+    provider.isActive = Boolean(isActiveSource);
+
+    const hydratedModels: AIModel[] = [];
+    if (Array.isArray(modelsSource)) {
+      for (const modelRecord of modelsSource) {
+        const hydratedModel = this.hydrateModel(modelRecord);
+        if (hydratedModel) {
+          hydratedModels.push(hydratedModel);
+        }
+      }
+    }
+
+    provider.models = hydratedModels;
+
+    return provider;
   }
 }

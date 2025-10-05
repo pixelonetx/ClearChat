@@ -1,93 +1,54 @@
-// 常量定义
-interface DatabaseConstants {
-  DB_NAME: string;
-  CHAT_TABLE: string;
-  CONVERSATION_TABLE: string;
-  SETTINGS_TABLE: string;
+/**
+ * 聊天消息实体类
+ */
+export interface ChatMessageInit {
+  conversationId?: string;
+  modelName?: string;
+  providerName?: string;
+  timestamp?: number;
+  providerMessageId?: string;
+  providerCreatedAt?: number;
+  systemFingerprint?: string;
 }
 
-export const Constants: DatabaseConstants = {
-  DB_NAME: 'clearchat.db',
-  CHAT_TABLE: 'chat_messages',
-  CONVERSATION_TABLE: 'conversations',
-  SETTINGS_TABLE: 'app_settings'
-};
-
-// 自定义数据库异常
-export class DatabaseError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DatabaseError';
-  }
-}
-
-// 对话实体
-export interface ConversationRecord {
-  id?: string | number;
-  title?: string;
-  created_at?: number | string;
-  updated_at?: number | string;
-  message_count?: number | string;
-  is_active?: number | string;
-}
-
-export class Conversation {
-  id: string = '';
-  title: string = '';
-  createdAt: number = Date.now();
-  updatedAt: number = Date.now();
-  messageCount: number = 0;
-  isActive: boolean = false;
-
-  static fromRecord(record: ConversationRecord): Conversation {
-    const conversation = new Conversation();
-    conversation.id = String(record.id ?? '');
-    conversation.title = String(record.title ?? '');
-    conversation.createdAt = Number(record.created_at ?? Date.now());
-    conversation.updatedAt = Number(record.updated_at ?? Date.now());
-    conversation.messageCount = Number(record.message_count ?? 0);
-    conversation.isActive = Number(record.is_active ?? 0) === 1;
-    return conversation;
-  }
-}
-
-// 聊天消息实体类
 export class ChatMessage {
   id?: number;
   content: string;
   role: 'user' | 'assistant'; // user: 用户消息, assistant: AI回复
   timestamp: number;
-  conversationId: string; // AI消息的模型信息
+  conversationId: string;
+  // 新增：AI消息的模型信息
   modelName?: string; // 使用的模型名称
   providerName?: string; // 使用的服务商名称
+  providerMessageId?: string; // AI服务返回的消息ID
+  providerCreatedAt?: number; // AI服务返回的创建时间（秒）
+  systemFingerprint?: string; // AI服务返回的系统指纹
 
-  constructor(content: string, role: 'user' | 'assistant', conversationId: string = 'default', modelName?: string, providerName?: string) {
+  constructor(content: string, role: 'user' | 'assistant', init?: ChatMessageInit) {
     this.content = content;
     this.role = role;
-    this.timestamp = Date.now();
-    this.conversationId = conversationId;
-    this.modelName = modelName;
-    this.providerName = providerName;
+    this.timestamp = init?.timestamp ?? Date.now();
+    this.conversationId = init?.conversationId ?? 'default';
+    this.modelName = init?.modelName;
+    this.providerName = init?.providerName;
+    this.providerMessageId = init?.providerMessageId;
+    this.providerCreatedAt = init?.providerCreatedAt;
+    this.systemFingerprint = init?.systemFingerprint;
   }
 }
 
-// AI模型配置
-export interface AIModelDTO {
-  id?: string;
-  name?: string;
-  displayName?: string;
-  maxTokens?: number;
-  temperature?: number;
+export interface ChatMessageMetadataUpdate {
+  timestamp?: number;
+  providerMessageId?: string | null;
+  providerCreatedAt?: number | null;
+  systemFingerprint?: string | null;
+  modelName?: string | null;
+  providerName?: string | null;
 }
 
-export interface SerializedAIModel {
-  id: string;
-  name: string;
-  displayName: string;
-  maxTokens: number;
-  temperature: number;
-}
-
+/**
+ * AI模型配置
+ */
 export class AIModel {
   id: string;
   name: string;
@@ -102,55 +63,11 @@ export class AIModel {
     this.maxTokens = maxTokens;
     this.temperature = temperature;
   }
-
-  static fromPlainObject(data: AIModelDTO): AIModel {
-    const idValue = data.id ?? data.name ?? '';
-    const nameValue = data.name ?? data.id ?? '';
-    const displayNameValue = data.displayName ?? nameValue;
-    const maxTokensValue = data.maxTokens ?? 4096;
-    const temperatureValue = data.temperature ?? 0.7;
-
-    return new AIModel(
-      String(idValue),
-      String(nameValue),
-      String(displayNameValue),
-      Number(maxTokensValue),
-      Number(temperatureValue)
-    );
-  }
-
-  toJSON(): SerializedAIModel {
-    return {
-      id: this.id,
-      name: this.name,
-      displayName: this.displayName,
-      maxTokens: this.maxTokens,
-      temperature: this.temperature
-    };
-  }
 }
 
-// AI服务商配置
-export interface AIProviderDTO {
-  id?: string;
-  name?: string;
-  displayName?: string;
-  apiUrl?: string;
-  apiKey?: string;
-  isActive?: boolean | number;
-  models?: Array<AIModelDTO>;
-}
-
-export interface SerializedAIProvider {
-  id: string;
-  name: string;
-  displayName: string;
-  apiUrl: string;
-  apiKey: string;
-  models: Array<SerializedAIModel>;
-  isActive: boolean;
-}
-
+/**
+ * AI服务商配置
+ */
 export class AIProvider {
   id: string;
   name: string;
@@ -169,55 +86,17 @@ export class AIProvider {
     this.models = [];
     this.isActive = false;
   }
-
-  static fromPlainObject(data: AIProviderDTO): AIProvider {
-    const provider = new AIProvider(
-      String(data.id ?? ''),
-      String(data.name ?? ''),
-      String(data.displayName ?? data.name ?? ''),
-      String(data.apiUrl ?? ''),
-      String(data.apiKey ?? '')
-    );
-    const isActiveRaw = data.isActive;
-    provider.isActive = typeof isActiveRaw === 'boolean' ? isActiveRaw : Boolean(isActiveRaw);
-
-    const modelsData = data.models;
-    if (modelsData && modelsData.length > 0) {
-      provider.models = modelsData.map(model => AIModel.fromPlainObject(model));
-    }
-
-    return provider;
-  }
-
-  toJSON(): SerializedAIProvider {
-    return {
-      id: this.id,
-      name: this.name,
-      displayName: this.displayName,
-      apiUrl: this.apiUrl,
-      apiKey: this.apiKey,
-      models: this.models.map(model => model.toJSON()),
-      isActive: this.isActive
-    };
-  }
 }
 
-// 应用设置实体类
-export interface SerializedAppSettings {
-  id?: number;
-  apiUrl: string;
-  apiKey: string;
-  modelName: string;
-  providers: Array<SerializedAIProvider>;
-  activeProviderId: string;
-  activeModelId: string;
-}
-
+/**
+ * 应用设置实体类
+ */
 export class AppSettings {
   id?: number;
   apiUrl: string;
   apiKey: string;
   modelName: string;
+  // 新增字段，保持向后兼容
   providers: AIProvider[];
   activeProviderId: string;
   activeModelId: string;
@@ -230,33 +109,27 @@ export class AppSettings {
     this.activeProviderId = '';
     this.activeModelId = '';
   }
-
-  toJSON(): SerializedAppSettings {
-    return {
-      id: this.id,
-      apiUrl: this.apiUrl,
-      apiKey: this.apiKey,
-      modelName: this.modelName,
-      providers: this.providers.map(provider => provider.toJSON()),
-      activeProviderId: this.activeProviderId,
-      activeModelId: this.activeModelId
-    };
-  }
 }
 
-// 消息接口
+/**
+ * 消息接口
+ */
 export interface MessageInterface {
   role: string;
   content: string;
 }
 
-// 请求消息接口
+/**
+ * 请求消息接口
+ */
 export interface RequestMessage {
   role: string;
   content: string;
 }
 
-// 聊天请求体接口
+/**
+ * 聊天请求体接口
+ */
 export interface ChatRequestBody {
   model: string;
   messages: RequestMessage[];
@@ -265,21 +138,27 @@ export interface ChatRequestBody {
   temperature: number;
 }
 
-// 选择项接口
+/**
+ * 选择项接口
+ */
 export interface ChoiceInterface {
   index: number;
   message: MessageInterface;
   finish_reason: string;
 }
 
-// 使用情况接口
+/**
+ * 使用情况接口
+ */
 export interface UsageInterface {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
 }
 
-// API请求实体类
+/**
+ * API请求实体类
+ */
 export interface ChatRequest {
   model: string;
   messages: Array<MessageInterface>;
@@ -288,7 +167,9 @@ export interface ChatRequest {
   stream?: boolean;
 }
 
-// API响应实体类
+/**
+ * API响应实体类
+ */
 export interface ChatResponse {
   id: string;
   object: string;
@@ -298,11 +179,20 @@ export interface ChatResponse {
   usage: UsageInterface;
 }
 
-// 流式响应的Delta接口
+/**
+ * 流式响应的Delta接口
+ */
+export interface ReasoningContentItem {
+  type?: string;
+  text?: string;
+}
+
+export type ReasoningContent = string | Array<ReasoningContentItem | string>;
+
 export interface StreamDelta {
   content?: string;
   role?: string;
-  reasoning_content?: string;  // 支持推理内容
+  reasoning_content?: ReasoningContent;  // 支持推理内容
 }
 
 /**
@@ -321,6 +211,7 @@ export interface StreamCallbacks {
   onData: (chunk: string) => void;
   onComplete: () => void;
   onError: (error: Error) => void;
+  onMetadata?: (metadata: StreamMetadata) => void;
 }
 
 /**
@@ -332,4 +223,14 @@ export interface StreamResponse {
   created: number;
   model: string;
   choices: Array<StreamChoice>;
+  system_fingerprint?: string;
+}
+
+export interface StreamMetadata {
+  id?: string;
+  created?: number;
+  model?: string;
+  systemFingerprint?: string;
+  choiceIndex?: number;
+  finishReason?: string;
 }
