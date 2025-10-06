@@ -17,7 +17,6 @@ import { Constants } from '../components/Constants';
 import inputMethod from '@ohos.inputMethod';
 
 const uiContext: UIContext | undefined = AppStorage.get('uiContext');
-let storage = uiContext?.getSharedLocalStorage();
 
 // 定义模型信息接口
 interface ModelInfo {
@@ -189,11 +188,9 @@ struct Chat {
                 LoadingProgress()
                   .width(48)
                   .height(48)
-                  .color('#007AFF')
 
                 Text('正在初始化应用...')
                   .fontSize(16)
-                  .fontColor('#666666')
                   .margin({ top: 16 })
               }
               .width('100%')
@@ -217,13 +214,13 @@ struct Chat {
                   })
 
                   Text(this.currentConversation?.title || '聊天助手')
-                    .fontSize(18)
+                    .fontSize(16)
                     .fontWeight(FontWeight.Medium)
                     .layoutWeight(1)
                     .textAlign(TextAlign.Center)
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .padding({ left: 8, right: 8 })
+                    .padding({ left: 12, right: 12 })
 
                   Button() {
                     Image($r('app.media.square_and_pencil'))
@@ -274,7 +271,8 @@ struct Chat {
                         .height(48)
                         .margin({ top: 16 })
                         .onClick(() => {
-                          this.openSettings();
+                          this.pathStack.pushPathByName("Settings", null, false);
+                          this.hideKeyboard();
                         })
                     }
                   }
@@ -289,9 +287,7 @@ struct Chat {
                         MessageItem({
                           message: message,
                           onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                          onEdit: (msg: ChatMessage): void => {
-                            this.editMessage(msg);
-                          },
+                          onEdit: (msg: ChatMessage): void => { this.editMessage(msg); },
                           onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
                           onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
                         })
@@ -333,7 +329,7 @@ struct Chat {
                     .maxLines(5)
                     .borderRadius(20)
                     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                    .border({ width: 1,})
+                    .border({ width: 1 })
                     .onChange((value: string) => {
                       this.inputText = value;
                     })
@@ -351,6 +347,7 @@ struct Chat {
                     }
                   }
                   .type(ButtonType.Circle)
+                  .backgroundColor($r('sys.color.button_background_color_transparent'))
                   .size({ width: 40, height: 40 })
                   .margin({ left: 12 })
                   .enabled(this.inputText.trim() !== '' && !this.isLoading)
@@ -379,7 +376,6 @@ struct Chat {
               Column()
                 .layoutWeight(1)
                 .height('100%')
-                .backgroundColor('rgba(0, 0, 0, 0)')
                 .onClick(() => {
                   this.hideSidebar();
                 })
@@ -403,10 +399,6 @@ struct Chat {
             detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
             dragBar: true, // 启用默认拖拽条
             showClose: true, // 显示默认关闭按钮
-            enableOutsideInteractive: false, // 禁用外部交互
-            onWillSpringBackWhenDismiss: (() => {
-              // 禁用默认回弹以避免动画冲突
-            }),
             onDisappear: () => {
               this.showModelSelectorSheet = false;
             }
@@ -912,7 +904,8 @@ struct Chat {
 
     if (!this.hasSettings) {
       this.showToast('请先配置API设置');
-      this.openSettings();
+      this.pathStack.pushPathByName("Settings", null, false);
+      this.hideKeyboard();
       return;
     }
 
@@ -1039,7 +1032,7 @@ struct Chat {
 
       // 添加用户消息到界面和数据库
       userMessageIndex = this.appendMessage(userMessage);
-  console.info('Added user message to UI, total messages:', this.messages.length);
+      console.info('Added user message to UI, total messages:', this.messages.length);
       userMessageId = await this.databaseManager.insertChatMessage(userMessage);
       this.replaceMessageAt(userMessageIndex, (message: ChatMessage) => {
         message.id = userMessageId!;
@@ -1235,12 +1228,6 @@ struct Chat {
         }
       }
     }
-  }
-
-  openSettings() {
-    // 打开设置页面时隐藏键盘
-    this.hideKeyboard();
-    this.pathStack.pushPathByName("Settings", null, false);
   }
 
   // 消息操作方法
@@ -1692,7 +1679,7 @@ struct Chat {
             .fillColor($r('sys.color.ohos_id_color_text_primary'))
         }
         .type(ButtonType.Circle)
-        .size({ width: 48, height: 48 })
+        .size({ width: 40, height: 40 })
         .backgroundColor($r('sys.color.button_background_color_transparent'))
         .onClick(() => {
           this.hideSidebar();
@@ -1766,9 +1753,9 @@ struct Chat {
         .height(48)
         .backgroundColor($r('sys.color.button_background_color_transparent'))
         .borderRadius(24)
-        .border({ width: 1 })
         .onClick(() => {
-          this.openSettings();
+          this.pathStack.pushPathByName("Settings", null, false);
+          this.hideKeyboard();
           this.hideSidebar();
         })
       }
@@ -1790,10 +1777,11 @@ struct Chat {
       Button() {
         Image($r('app.media.square_and_pencil'))
           .size({ width: 20, height: 20 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .size({ width: 40, height: 40 })
-      .backgroundColor(Color.Transparent)
+      .backgroundColor($r('sys.color.button_background_color_transparent'))
       .margin({ left: 10, right: 5 })
       .onClick(() => {
         this.showRenameDialog(conversation);
@@ -1803,10 +1791,11 @@ struct Chat {
       Button() {
         Image($r('app.media.trash'))
           .size({ width: 20, height: 20 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .size({ width: 40, height: 40 })
-      .backgroundColor(Color.Transparent)
+      .backgroundColor($r('sys.color.button_background_color_transparent'))
       .margin({ left: 5, right: 10 })
       .onClick(() => {
         this.showDeleteConversationDialog(conversation.id, conversation.title || '新对话');

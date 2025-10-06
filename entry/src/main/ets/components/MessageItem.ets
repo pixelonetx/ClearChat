@@ -22,6 +22,7 @@ export struct MessageItem {
         Row({ space: 6 }) {
           Image($r('app.media.trash'))
             .size({ width: 14, height: 14 })
+            .fillColor($r('sys.color.ohos_id_color_text_primary'))
           Text('删除')
             .fontSize(13)
         }
@@ -35,8 +36,6 @@ export struct MessageItem {
         this.showUserMenu = false;
       })
     }
-    // .borderRadius(8)
-    // .padding(4)
   }
 
   @Builder
@@ -46,6 +45,7 @@ export struct MessageItem {
         Row({ space: 6 }) {
           Image($r('app.media.trash'))
             .size({ width: 14, height: 14 })
+            .fillColor($r('sys.color.ohos_id_color_text_primary'))
           Text('删除')
             .fontSize(13)
         }
@@ -59,8 +59,6 @@ export struct MessageItem {
         this.showAssistantMenu = false;
       })
     }
-    // .borderRadius(8)
-    // .padding(4)
   }
 
   @Builder
@@ -70,6 +68,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.rectangle_on_rectangle'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -84,6 +83,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.square_and_pencil'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -98,6 +98,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.more_fill'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -131,6 +132,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.rectangle_on_rectangle'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -145,6 +147,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.arrow_clockwise'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -159,6 +162,7 @@ export struct MessageItem {
       Button() {
         Image($r('app.media.more_fill'))
           .size({ width: 18, height: 18 })
+          .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
       .backgroundColor($r('sys.color.background_primary'))
@@ -190,26 +194,25 @@ export struct MessageItem {
     Column() {
       Row() {
         Blank()
-
         Row() {
           Column() {
             Text(this.message.content)
               .fontSize(14)
-              .fontColor(Color.White)
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
               .maxLines(999)
               .textOverflow({ overflow: TextOverflow.None })
               .wordBreak(WordBreak.BREAK_ALL)
           }
-          .padding(16)
+          // .padding(16)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
-          .backgroundColor('#4CAF50')
-          .constraintSize({
-            minWidth: 40,  // 减小最小宽度，适合短消息
-            minHeight: 36  // 保持最小高度，防止变成小圆形
-          })
+          // .backgroundColor('#F3F4F6')
+          // .constraintSize({
+          //   minWidth: 40,  // 减小最小宽度，适合短消息
+          //   minHeight: 36  // 保持最小高度，防止变成小圆形
+          // })
         }
-        .constraintSize({ maxWidth: '85%' })
+        // .constraintSize({ maxWidth: '85%' })
       }
       .width('100%')
       .alignItems(VerticalAlign.Top)
@@ -218,7 +221,7 @@ export struct MessageItem {
       this.UserActionButtons()
     }
     .width('100%')
-    .margin({ bottom: Constants.MESSAGE_MARGIN })
+    // .margin({ bottom: Constants.MESSAGE_MARGIN })
     .alignItems(HorizontalAlign.End)
   }
 
@@ -229,9 +232,9 @@ export struct MessageItem {
       if (this.message.modelName) {
         Row() {
           Text(this.message.modelName)
-            .fontSize(11)
-            .opacity(0.8)
-            .margin({ left: 8, bottom: 4 })
+            .fontSize(12)
+            // .opacity(0.8)
+            .margin({ bottom: 8 })
         }
         .width('100%')
         .justifyContent(FlexAlign.Start)
@@ -245,19 +248,19 @@ export struct MessageItem {
               maxWidth: 'auto' // 自动继承父容器宽度限制
             })
           }
-          .padding(16)
+          // .padding(16)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
-          .backgroundColor('#F3F4F6')
-          .constraintSize({
-            minWidth: 40,  // 减小最小宽度，适合短消息
-            minHeight: 36  // 保持最小高度，防止变成小圆形
-          })
+          // .backgroundColor('#F3F4F6')
+          // .constraintSize({
+          //   minWidth: 40,  // 减小最小宽度，适合短消息
+          //   minHeight: 36  // 保持最小高度，防止变成小圆形
+          // })
         }
-        .constraintSize({ maxWidth: '85%' }) // 动态宽度，最大85%
+        // .constraintSize({ maxWidth: '85%' }) // 动态宽度，最大85%
         .layoutWeight(0) // 不占用剩余空间，根据内容调整大小
 
-        Blank()
+        // Blank()
       }
       .width('100%')
       .alignItems(VerticalAlign.Top)
@@ -267,7 +270,7 @@ export struct MessageItem {
       this.AssistantActionButtons()
     }
     .width('100%')
-    .margin({ bottom: Constants.MESSAGE_MARGIN })
+    // .margin({ bottom: Constants.MESSAGE_MARGIN })
     .alignItems(HorizontalAlign.Start)
   }
 

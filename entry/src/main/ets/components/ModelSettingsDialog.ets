@@ -6,7 +6,6 @@ export struct ModelSettingsDialog {
   model: AIModel = new AIModel('', '', '');
   isEditMode: boolean = false;
   onConfirm: (model: AIModel) => void = () => {};
-  onCancel: () => void = () => {};
   @State private editableModel: AIModel = new AIModel('', '', '');
 
   aboutToAppear() {
@@ -105,16 +104,6 @@ export struct ModelSettingsDialog {
 
       // 按钮区域
       Row() {
-        Button('取消')
-          .layoutWeight(1)
-          .height(48)
-          .backgroundColor('#F5F5F5')
-          .fontColor('#666666')
-          .borderRadius(24)
-          .onClick(() => {
-            this.onCancel();
-          })
-
         Button('确定')
           .layoutWeight(1)
           .height(48)
@@ -128,7 +117,7 @@ export struct ModelSettingsDialog {
       }
       .width('100%')
     }
-    .width(320)
+    .width('100%')
     .padding(24)
     .borderRadius(12)
   }

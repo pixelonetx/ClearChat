@@ -115,7 +115,7 @@ struct ModelSettings {
     }
 
     if (rawError && typeof rawError === 'object') {
-  const potentialMessage = (rawError as ErrorLike).message;
+      const potentialMessage = (rawError as ErrorLike).message;
       if (typeof potentialMessage === 'string' && potentialMessage.length > 0) {
         return new Error(potentialMessage);
       }
@@ -523,9 +523,6 @@ struct ModelSettings {
         isEditMode: this.providerEditIndex >= 0,
         onConfirm: (provider: AIProvider) => {
           this.handleProviderConfirm(provider);
-        },
-        onCancel: () => {
-          this.closeSettingsSheet();
         }
       })
     } else if (this.activeSheetType === 'model' && this.modelDraft) {
@@ -534,9 +531,6 @@ struct ModelSettings {
         isEditMode: this.modelEditIndex >= 0,
         onConfirm: (model: AIModel) => {
           this.handleModelConfirm(model);
-        },
-        onCancel: () => {
-          this.closeSettingsSheet();
         }
       })
     } else {
@@ -591,7 +585,6 @@ struct ModelSettings {
       .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
         height: SheetSize.FIT_CONTENT,
         detents: [SheetSize.FIT_CONTENT],
-        backgroundColor: Color.White,
         blurStyle: BlurStyle.Thick,
         showClose: true,
         enableOutsideInteractive: false,
@@ -629,7 +622,8 @@ struct ModelSettings {
 
             Button('添加模型')
               .fontSize(14)
-              .backgroundColor(Color.Transparent)
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
+              .backgroundColor($r('sys.color.button_background_color_transparent'))
               .border({
                 width: 1
               })
@@ -664,7 +658,8 @@ struct ModelSettings {
             .width('100%')
             .height(48)
             .fontSize(16)
-            .backgroundColor(Color.Transparent)
+            .fontColor($r('sys.color.ohos_id_color_text_primary'))
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
             .border({
               width: 1
             })
@@ -678,10 +673,11 @@ struct ModelSettings {
         // 操作按钮
         Row({ space: 12 }) {
           Button('编辑服务商')
+            .fontColor($r('sys.color.ohos_id_color_text_primary'))
             .layoutWeight(1)
             .height(48)
             .fontSize(16)
-            .backgroundColor(Color.Transparent)
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
             .border({
               width: 1
             })
@@ -692,10 +688,11 @@ struct ModelSettings {
 
           if (this.providers.length > 1) {
             Button('删除服务商')
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
               .layoutWeight(1)
               .height(48)
               .fontSize(16)
-              .backgroundColor(Color.Transparent)
+              .backgroundColor($r('sys.color.button_background_color_transparent'))
               .border({
                 width: 1
               })
@@ -709,10 +706,11 @@ struct ModelSettings {
         .margin({ bottom: 12 })
 
         Button('新建服务商')
+          .fontColor($r('sys.color.ohos_id_color_text_primary'))
           .width('100%')
           .height(48)
           .fontSize(16)
-          .backgroundColor(Color.Transparent)
+          .backgroundColor($r('sys.color.button_background_color_transparent'))
           .border({
             width: 1
           })
@@ -744,8 +742,8 @@ struct ModelSettings {
 
           if (providerId === this.activeProviderId && model.id === this.activeModelId) {
             Text('使用中')
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
               .fontSize(12)
-              .backgroundColor(Color.Transparent)
               .border({
                 width: 1,
               })
@@ -772,7 +770,8 @@ struct ModelSettings {
         if (providerId !== this.activeProviderId || model.id !== this.activeModelId) {
           Button('使用')
             .fontSize(12)
-            .backgroundColor(Color.Transparent)
+            .fontColor($r('sys.color.ohos_id_color_text_primary'))
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
             .border({
               width: 1
             })
@@ -790,7 +789,8 @@ struct ModelSettings {
 
         Button('编辑')
           .fontSize(12)
-          .backgroundColor(Color.Transparent)
+          .fontColor($r('sys.color.ohos_id_color_text_primary'))
+          .backgroundColor($r('sys.color.button_background_color_transparent'))
           .border({
             width: 1
           })
@@ -805,8 +805,9 @@ struct ModelSettings {
         // 只有当服务商有多个模型时才显示删除按钮
         if (this.providers[providerIndex]?.models.length > 1) {
           Button('删除')
+            .fontColor($r('sys.color.ohos_id_color_text_primary'))
             .fontSize(12)
-            .backgroundColor(Color.Transparent)
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
             .border({
               width: 1
             })

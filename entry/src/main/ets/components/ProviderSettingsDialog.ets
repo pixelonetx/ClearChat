@@ -6,7 +6,6 @@ export struct ProviderSettingsDialog {
   provider: AIProvider = new AIProvider('', '', '');
   isEditMode: boolean = false;
   onConfirm: (provider: AIProvider) => void = () => {};
-  onCancel: () => void = () => {};
   @State private editableProvider: AIProvider = new AIProvider('', '', '');
 
   // 预定义的模型列表
@@ -96,7 +95,6 @@ export struct ProviderSettingsDialog {
 
         TextInput({ placeholder: '请输入API密钥', text: this.editableProvider.apiKey })
           .height(48)
-          .borderRadius(8)
           .type(InputType.Password)
           .onChange((value: string) => {
             this.editableProvider.apiKey = value;
@@ -146,16 +144,6 @@ export struct ProviderSettingsDialog {
 
       // 按钮区域
       Row() {
-        Button('取消')
-          .layoutWeight(1)
-          .height(48)
-          .backgroundColor('#F5F5F5')
-          .fontColor('#666666')
-          .borderRadius(24)
-          .onClick(() => {
-            this.onCancel();
-          })
-
         Button('确定')
           .layoutWeight(1)
           .height(48)
@@ -169,7 +157,7 @@ export struct ProviderSettingsDialog {
       }
       .width('100%')
     }
-    .width(320)
+    .width('100%')
     .padding(24)
     .borderRadius(12)
   }

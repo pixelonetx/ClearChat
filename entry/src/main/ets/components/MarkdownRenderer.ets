@@ -110,7 +110,6 @@ export struct MarkdownRenderer {
         } else {
           Span(segment.text)
             .fontSize(this.getHeadingSize(block.level || 1))
-            .fontColor('#333333')
             .fontWeight(FontWeight.Bold) // 标题默认加粗
             .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
             .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
@@ -188,7 +187,6 @@ export struct MarkdownRenderer {
               } else {
                 Span(segment.text)
                   .fontSize(14)
-                  .fontColor('#666666')
                   .fontStyle(FontStyle.Italic)
                   .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
                   .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
@@ -215,7 +213,6 @@ export struct MarkdownRenderer {
           Row() {
             Text(block.ordered ? `${(block.startNumber ?? 1) + index}.` : '•')
               .fontSize(14)
-              .fontColor('#666666')
               .width(block.ordered ? 28 : 16)
               .textAlign(TextAlign.End)
               .margin({ right: 8 })
@@ -273,7 +270,6 @@ export struct MarkdownRenderer {
         } else {
           Span(segment.text)
             .fontSize(14)
-            .fontColor('#333333')
             .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
             .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
             .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
@@ -326,7 +322,7 @@ export struct MarkdownRenderer {
                     } else {
                       Span(segment.text)
                         .fontSize(12)
-                        .fontColor('#333333')
+
                         .fontWeight(segment.bold ? FontWeight.Bold : (rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal))
                         .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
                         .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
@@ -341,7 +337,7 @@ export struct MarkdownRenderer {
               }
               .layoutWeight(1)
               .height(40)
-              .backgroundColor(rowIndex === 0 ? '#F5F5F5' : '#FFFFFF')
+
               .border({
                 width: 1,
                 color: '#E0E0E0'
@@ -457,7 +453,6 @@ export struct MarkdownRenderer {
       Row() {
         Text(this.expandedSections.has(id) ? '🤔 思考过程 ▼' : '🤔 思考过程 ▶')
           .fontSize(13)
-          .fontColor('#666666')
           .fontWeight(FontWeight.Medium)
 
         Blank()

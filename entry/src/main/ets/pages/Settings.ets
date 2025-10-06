@@ -30,7 +30,7 @@ struct Settings {
       Column() {
         // 设置列表
         Scroll() {
-          Column() {
+          Column({ space: 10 }) {
             // 模型设置
             this.SettingGroup('模型设置', [
               {
@@ -85,7 +85,7 @@ struct Settings {
           }
           .alignItems(HorizontalAlign.Start)
           .justifyContent(FlexAlign.Start)
-          .padding({ left: 16, right: 16, top: 0, bottom: 32 });
+          .padding({ left: 16, right: 16, top: 4, bottom: 20 });
         }
         .layoutWeight(1)
         .width('100%')
@@ -96,7 +96,8 @@ struct Settings {
       .height('100%')
       .alignItems(HorizontalAlign.Start)
       .justifyContent(FlexAlign.Start)
-      .alignItems(HorizontalAlign.Center);
+      .alignItems(HorizontalAlign.Center)
+      .backgroundColor($r('sys.color.ohos_id_color_background'));
     }
     .padding({
       top: this.getUIContext().px2vp(this.topRectHeight),
@@ -115,15 +116,16 @@ struct Settings {
       Text(title)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
         .width('100%')
         .textAlign(TextAlign.Start)
-        .padding({ left: 16, right: 16 })
-        .margin({ bottom: 8, top: 16 });
+        .padding({ left: 8, right: 8 })
+        .margin({ bottom: 6, top: 8 });
 
       // 设置项列表
       Column() {
         ForEach(items, (item: SettingItem, index: number) => {
-          this.SettingItem(item, index === items.length - 1);
+          this.SettingItem(item, index, items.length);
 
           // 分割线（除了最后一项）
           if (index < items.length - 1) {
@@ -133,26 +135,31 @@ struct Settings {
           }
         });
       }
-      .borderRadius(8)
-      .margin({ bottom: 8 });
+      .backgroundColor($r('sys.color.background_primary'))
+      .borderRadius(12)
+      .clip(true)
+      .margin({ bottom: 6 })
+      .padding({ top: 4, bottom: 4 });
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start);
   }
 
   @Builder
-  SettingItem(item: SettingItem, isLast: boolean) {
+  SettingItem(item: SettingItem, index: number, total: number) {
     Row() {
       Column() {
         Text(item.title)
           .fontSize(16)
           .fontWeight(FontWeight.Normal)
+          .fontColor($r('sys.color.ohos_id_color_text_primary'))
           .width('100%')
           .textAlign(TextAlign.Start);
 
         if (item.subtitle) {
           Text(item.subtitle)
             .fontSize(13)
+            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
             .width('100%')
             .textAlign(TextAlign.Start)
             .margin({ top: 2 });
@@ -164,22 +171,24 @@ struct Settings {
 
       Text('›')
         .fontSize(20)
-        .fontWeight(FontWeight.Normal);
+        .fontWeight(FontWeight.Normal)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'));
     }
     .width('100%')
-    .height(item.subtitle ? 56 : 44)
+    .height(item.subtitle ? 50 : 42)
     .padding({ left: 16, right: 16 })
     .justifyContent(FlexAlign.SpaceBetween)
     .alignItems(VerticalAlign.Center)
-    .backgroundColor(Color.Transparent)
+    .backgroundColor($r('sys.color.background_primary'))
+    .borderRadius({
+      topLeft: (index === 0) ? 12 : 0,
+      topRight: (index === 0) ? 12 : 0,
+      bottomLeft: (index === (total - 1)) ? 12 : 0,
+      bottomRight: (index === (total - 1)) ? 12 : 0
+    })
     .onClick(() => {
       item.onClick?.();
     })
-    .gesture(
-      TapGesture().onAction(() => {
-        // 轻微的触摸反馈（可后续添加 haptic 反馈）
-      })
-    );
   }
 
   private async showClearDataDialog() {
