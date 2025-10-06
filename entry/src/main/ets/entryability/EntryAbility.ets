@@ -1,6 +1,6 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { window, KeyboardAvoidMode, UIContext } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 const DOMAIN = 0x0000;
@@ -59,8 +59,13 @@ export default class EntryAbility extends UIAbility {
         }
       });
 
+      // 深色模式
       let applicationContext = this.context.getApplicationContext();
       applicationContext.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+
+      // 键盘弹出，内容上移
+      let uiConttext : UIContext = windowStage.getMainWindowSync().getUIContext();
+      uiConttext.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
 
     });
   }

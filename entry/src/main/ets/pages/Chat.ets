@@ -211,7 +211,7 @@ struct Chat {
                   }
                   .type(ButtonType.Circle)
                   .backgroundColor($r('sys.color.button_background_color_transparent'))
-                  .size({ width: 48, height: 48 })
+                  .size({ width: 40, height: 40 })
                   .onClick(() => {
                     this.showSidebar();
                   })
@@ -231,7 +231,7 @@ struct Chat {
                       .fillColor($r('sys.color.ohos_id_color_text_primary'))
                   }
                   .type(ButtonType.Circle)
-                  .size({ width: 48, height: 48 })
+                  .size({ width: 40, height: 40 })
                   .backgroundColor($r('sys.color.button_background_color_transparent'))
                   .onClick(() => {
                     this.createNewConversation();
@@ -244,7 +244,7 @@ struct Chat {
                       .fillColor($r('sys.color.ohos_id_color_text_primary'))
                   }
                   .type(ButtonType.Circle)
-                  .size({ width: 48, height: 48 })
+                  .size({ width: 40, height: 40 })
                   .backgroundColor($r('sys.color.button_background_color_transparent'))
                   .bindMenu([
                     {
@@ -351,7 +351,7 @@ struct Chat {
                     }
                   }
                   .type(ButtonType.Circle)
-                  .size({ width: 48, height: 48 })
+                  .size({ width: 40, height: 40 })
                   .margin({ left: 12 })
                   .enabled(this.inputText.trim() !== '' && !this.isLoading)
                   .onClick(() => {
@@ -403,7 +403,6 @@ struct Chat {
             detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
             dragBar: true, // 启用默认拖拽条
             showClose: true, // 显示默认关闭按钮
-            maskColor: Color.Transparent, // 移除背景阴影
             enableOutsideInteractive: false, // 禁用外部交互
             onWillSpringBackWhenDismiss: (() => {
               // 禁用默认回弹以避免动画冲突

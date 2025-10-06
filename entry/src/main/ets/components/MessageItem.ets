@@ -26,10 +26,8 @@ export struct MessageItem {
             .fontSize(13)
         }
       }
-      .borderRadius(6)
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-      .width(80)
-      .height(32)
+      .backgroundColor($r('sys.color.background_primary'))
       .onClick(() => {
         if (this.onDelete) {
           this.onDelete(this.message);
@@ -37,9 +35,8 @@ export struct MessageItem {
         this.showUserMenu = false;
       })
     }
-    .borderRadius(8)
-    .padding(4)
-    .shadow({ radius: 8, color: '#00000020', offsetX: 0, offsetY: 2 })
+    // .borderRadius(8)
+    // .padding(4)
   }
 
   @Builder
@@ -53,10 +50,8 @@ export struct MessageItem {
             .fontSize(13)
         }
       }
-      .borderRadius(6)
+      .backgroundColor($r('sys.color.background_primary'))
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-      .width(80)
-      .height(32)
       .onClick(() => {
         if (this.onDelete) {
           this.onDelete(this.message);
@@ -64,9 +59,8 @@ export struct MessageItem {
         this.showAssistantMenu = false;
       })
     }
-    .borderRadius(8)
-    .padding(4)
-    .shadow({ radius: 8, color: '#00000020', offsetX: 0, offsetY: 2 })
+    // .borderRadius(8)
+    // .padding(4)
   }
 
   @Builder
@@ -78,8 +72,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .onClick(() => {
         if (this.onCopy) {
           this.onCopy(this.message);
@@ -92,8 +86,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .onClick(() => {
         if (this.onEdit) {
           this.onEdit(this.message);
@@ -106,8 +100,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .bindPopup(this.showUserMenu, {
         builder: this.UserDropdownMenu,
         placement: Placement.BottomLeft,
@@ -139,8 +133,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .onClick(() => {
         if (this.onCopy) {
           this.onCopy(this.message);
@@ -153,8 +147,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .onClick(() => {
         if (this.onRegenerate) {
           this.onRegenerate(this.message);
@@ -167,8 +161,8 @@ export struct MessageItem {
           .size({ width: 18, height: 18 })
       }
       .type(ButtonType.Circle)
+      .backgroundColor($r('sys.color.background_primary'))
       .size({ width: 36, height: 36 })
-      .backgroundColor(Color.Transparent)
       .bindPopup(this.showAssistantMenu, {
         builder: this.AssistantDropdownMenu,
         placement: Placement.BottomRight,
