@@ -209,6 +209,7 @@ export struct MessageItem {
           .padding(16)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
+          .backgroundColor('#4CAF50')
           .constraintSize({
             minWidth: 40,  // 减小最小宽度，适合短消息
             minHeight: 36  // 保持最小高度，防止变成小圆形
@@ -253,6 +254,7 @@ export struct MessageItem {
           .padding(16)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
+          .backgroundColor('#F3F4F6')
           .constraintSize({
             minWidth: 40,  // 减小最小宽度，适合短消息
             minHeight: 36  // 保持最小高度，防止变成小圆形

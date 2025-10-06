@@ -25,6 +25,10 @@ interface ModelInfo {
   providerName: string;
 }
 
+interface MaybeStringifiable {
+  toString?: () => string;
+}
+
 class ToastOptions {
   message: string;
   duration?: number;
@@ -44,7 +48,6 @@ class RouterUrlOptions {
 }
 
 // 跳转页面入口函数
-
 @Builder
 export function ChatBuilder() {
   Chat();
@@ -73,13 +76,105 @@ struct Chat {
   @State backgroundBlurRadius: number = 0; // 控制背景模糊程度
   @State conversations: Conversation[] = [];
   @State showModelSelectorSheet: boolean = false; // 控制半模态弹窗显示
-  @State forceUpdateTrigger: number = 0; // 强制更新触发器
 
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
   private scroller: Scroller = new Scroller();
   private currentSettings: AppSettings | null = null;
+
+  private cloneChatMessage(message: ChatMessage): ChatMessage {
+    const clone = new ChatMessage(message.content, message.role, {
+      conversationId: message.conversationId,
+      modelName: message.modelName,
+      providerName: message.providerName,
+      timestamp: message.timestamp,
+      providerMessageId: message.providerMessageId,
+      providerCreatedAt: message.providerCreatedAt,
+      systemFingerprint: message.systemFingerprint
+    });
+    clone.id = message.id;
+    return clone;
+  }
+
+  private replaceMessageAt(index: number, updater: (message: ChatMessage) => void): void {
+    const target = this.messages[index];
+    if (!target) {
+      return;
+    }
+
+    const cloned = this.cloneChatMessage(target);
+    updater(cloned);
+
+    const nextMessages = [...this.messages];
+    nextMessages[index] = cloned;
+    this.messages = nextMessages;
+  }
+
+  private appendMessage(message: ChatMessage): number {
+    this.messages = [...this.messages, message];
+    return this.messages.length - 1;
+  }
+
+  private removeMessageAt(index: number): void {
+    if (index < 0 || index >= this.messages.length) {
+      return;
+    }
+    const nextMessages = [...this.messages];
+    nextMessages.splice(index, 1);
+    this.messages = nextMessages;
+  }
+
+  private getFriendlySendErrorMessage(error: Error): string {
+    if (!error) {
+      return '发送消息失败';
+    }
+
+    let rawMessage = (error.message ?? '').trim();
+
+    if (!rawMessage) {
+      const stringifiable = error as MaybeStringifiable;
+      if (stringifiable.toString) {
+        rawMessage = stringifiable.toString().trim();
+      }
+    }
+
+    if (!rawMessage) {
+      return '发送消息失败';
+    }
+
+    const normalized = rawMessage.toLowerCase();
+
+    if (normalized.includes('timeout') || rawMessage.includes('超时')) {
+      return '请求超时，请稍后重试';
+    }
+
+    if (normalized.includes('network') || normalized.includes('connection') || normalized.includes('fetch') || rawMessage.includes('网络')) {
+      return '网络连接失败，请检查网络设置';
+    }
+
+    if (normalized.includes('unauthorized') || normalized.includes('forbidden') || normalized.includes('invalid api key') || normalized.includes('401') || normalized.includes('403') || rawMessage.includes('授权') || rawMessage.includes('认证')) {
+      return 'API密钥无效，请检查设置';
+    }
+
+    if (normalized.includes('rate limit') || normalized.includes('too many')) {
+      return '请求过于频繁，请稍后再试';
+    }
+
+    if (normalized.includes('model') && (normalized.includes('not found') || normalized.includes('does not exist') || normalized.includes('unknown'))) {
+      return '模型不可用，请检查模型ID';
+    }
+
+    if (normalized.startsWith('http ') || rawMessage.startsWith('HTTP') || /http\s\d+/.test(normalized)) {
+      return `服务返回错误：${rawMessage}`;
+    }
+
+    if (normalized.includes('ssl') || normalized.includes('certificate')) {
+      return 'SSL连接失败，请检查网络或证书配置';
+    }
+
+    return `发送失败：${rawMessage}`;
+  }
 
 
   build() {
@@ -194,7 +289,9 @@ struct Chat {
                         MessageItem({
                           message: message,
                           onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                          onEdit: (msg: ChatMessage): void => this.editMessage(msg),
+                          onEdit: (msg: ChatMessage): void => {
+                            this.editMessage(msg);
+                          },
                           onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
                           onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
                         })
@@ -500,9 +597,12 @@ struct Chat {
    */
   async findEmptyConversation(): Promise<Conversation | null> {
     try {
+      const conversationIds = this.conversations.map(conversation => conversation.id);
+      const messageCounts = await this.databaseManager.getConversationMessageCounts(conversationIds);
+
       for (const conversation of this.conversations) {
-        const messages = await this.databaseManager.getChatMessages(conversation.id);
-        if (messages.length === 0) {
+        const count = messageCounts[conversation.id] ?? 0;
+        if (count === 0) {
           console.info('Found empty conversation:', conversation.id, conversation.title);
           return conversation;
         }
@@ -638,27 +738,20 @@ struct Chat {
 
   async deleteConversation(conversation: Conversation) {
     try {
-      if (conversation.id === this.currentConversation?.id) {
-        // 如果删除的是当前对话，切换到第一个对话或创建新对话
-        await this.databaseManager.deleteConversation(conversation.id);
+      await this.databaseManager.deleteConversation(conversation.id);
 
-        const remainingConversations = this.conversations.filter(c => c.id !== conversation.id);
-        if (remainingConversations.length > 0) {
-          this.currentConversation = remainingConversations[0];
+      const updatedConversations = await this.databaseManager.getAllConversations();
+      this.conversations = updatedConversations;
+
+      if (this.currentConversation?.id === conversation.id) {
+        if (updatedConversations.length > 0) {
+          this.currentConversation = updatedConversations[0];
           this.messages = await this.databaseManager.getChatMessages(this.currentConversation.id);
         } else {
-          // 如果没有剩余的对话，创建一个新对话
-          const newConversation = await this.databaseManager.createConversation('新对话');
-          this.currentConversation = newConversation;
+          this.currentConversation = null;
           this.messages = [];
         }
-      } else {
-        // 如果删除的不是当前对话，直接删除
-        await this.databaseManager.deleteConversation(conversation.id);
       }
-
-      // 更新对话列表
-      this.conversations = await this.databaseManager.getAllConversations();
 
       this.showToast('对话已删除');
     } catch (error) {
@@ -862,14 +955,96 @@ struct Chat {
       conversationId: targetConversationId
     });
 
+    let userMessageIndex: number = -1;
+    let userMessageId: number | undefined;
+    let streamingMessageIndex: number = -1;
+    let streamingMessageId: number | undefined;
+
+    let failureHandled = false;
+    const handleFailure = async (errorParam: Error): Promise<void> => {
+      if (failureHandled) {
+        return;
+      }
+      failureHandled = true;
+
+      const toastMessage = this.getFriendlySendErrorMessage(errorParam);
+      const assistantErrorContent = toastMessage.startsWith('发送失败') ? toastMessage : `发送失败：${toastMessage}`;
+
+      console.error('Message send failed:', errorParam);
+
+      if (this.currentConversation && this.currentConversation.id === targetConversationId) {
+        let effectiveIndex = streamingMessageIndex;
+        if (effectiveIndex < 0 || effectiveIndex >= this.messages.length) {
+          const fallbackMessage = new ChatMessage('', 'assistant', {
+            conversationId: targetConversationId
+          });
+          effectiveIndex = this.appendMessage(fallbackMessage);
+          streamingMessageIndex = effectiveIndex;
+        }
+
+        if (effectiveIndex >= 0 && effectiveIndex < this.messages.length) {
+          this.replaceMessageAt(effectiveIndex, (message: ChatMessage) => {
+            message.content = assistantErrorContent;
+            message.modelName = undefined;
+            message.providerName = undefined;
+            message.providerMessageId = undefined;
+            message.providerCreatedAt = undefined;
+            message.systemFingerprint = undefined;
+            message.timestamp = Date.now();
+          });
+
+          const failedMessage = this.messages[effectiveIndex];
+          if (failedMessage?.id !== undefined) {
+            try {
+              await this.databaseManager.updateChatMessage(failedMessage.id, failedMessage.content);
+              await this.databaseManager.updateChatMessageMetadata(failedMessage.id, {
+                timestamp: failedMessage.timestamp,
+                providerMessageId: null,
+                providerCreatedAt: null,
+                systemFingerprint: null,
+                modelName: null,
+                providerName: null
+              });
+            } catch (persistError) {
+              console.error('Failed to persist failed streaming message:', persistError);
+            }
+          } else if (streamingMessageId !== undefined) {
+            try {
+              await this.databaseManager.deleteMessage(streamingMessageId);
+            } catch (deleteError) {
+              console.error('Failed to delete pending AI message after failure:', deleteError);
+            }
+          }
+
+          this.scrollToBottom();
+        }
+      }
+
+      if (this.inputText.trim().length === 0) {
+        this.inputText = userMessage.content;
+      }
+
+      try {
+        await this.databaseManager.updateConversationMessageCount(targetConversationId);
+      } catch (countError) {
+        console.error('Failed to update conversation message count after failure:', countError);
+      }
+
+      this.isLoading = false;
+      this.showToast(toastMessage);
+    };
+
     try {
       this.isLoading = true;
       console.info('Started sending message, isLoading set to true');
 
       // 添加用户消息到界面和数据库
-      this.messages.push(userMessage);
-      console.info('Added user message to UI, total messages:', this.messages.length);
-      await this.databaseManager.insertChatMessage(userMessage);
+      userMessageIndex = this.appendMessage(userMessage);
+  console.info('Added user message to UI, total messages:', this.messages.length);
+      userMessageId = await this.databaseManager.insertChatMessage(userMessage);
+      this.replaceMessageAt(userMessageIndex, (message: ChatMessage) => {
+        message.id = userMessageId!;
+      });
 
       // 清空输入框
       this.inputText = '';
@@ -882,24 +1057,24 @@ struct Chat {
         providerName: modelInfo.providerName
       });
 
-      // 立即保存空的AI消息到数据库，获取ID
-      const streamingMessageId = await this.databaseManager.insertChatMessage(streamingAiMessage);
-      streamingAiMessage.id = streamingMessageId;
-      console.info('Created streaming AI message in database with ID:', streamingMessageId);
-
-      // 确保不会重复添加相同的消息
-      console.info('Adding streaming message. Current messages count:', this.messages.length);
-      console.info('Last message role:', this.messages.length > 0 ? this.messages[this.messages.length - 1].role : 'none');
-
-      this.messages.push(streamingAiMessage);
-      const streamingMessageIndex = this.messages.length - 1;
+      // 将流式消息添加到界面，后续会实时更新内容
+      streamingMessageIndex = this.appendMessage(streamingAiMessage);
       console.info('Added streaming AI message, index:', streamingMessageIndex, 'total messages:', this.messages.length);
 
-      // 强制触发UI更新
-      this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
+      // 立即保存空的AI消息到数据库，获取ID
+      streamingMessageId = await this.databaseManager.insertChatMessage(streamingAiMessage);
+      this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+        message.id = streamingMessageId!;
+      });
+      console.info('Created streaming AI message in database with ID:', streamingMessageId);
 
       // 准备发送给AI的消息列表（不包括刚创建的空AI消息，取最近10条）
-      const messagesForAI = this.messages.slice(0, -1).slice(-10);
+      const endIndex = this.messages.length - 1;
+      const startIndex = Math.max(0, endIndex - 10);
+      const messagesForAI = this.messages.slice(startIndex, endIndex);
+      if (messagesForAI.length === 0) {
+        messagesForAI.push(this.cloneChatMessage(userMessage));
+      }
 
       console.info('Sending message to AI...');
       console.info('API URL:', this.currentSettings.apiUrl);
@@ -925,45 +1100,43 @@ struct Chat {
             if (streamingMessageIndex >= this.messages.length) {
               return;
             }
-            const streamingMessage = this.messages[streamingMessageIndex];
-            if (!streamingMessage) {
-              return;
-            }
             let metadataChanged = false;
-            if (meta.id && streamingMessage.providerMessageId !== meta.id) {
-              streamingMessage.providerMessageId = meta.id;
-              metadataChanged = true;
-            }
-            if (meta.systemFingerprint && streamingMessage.systemFingerprint !== meta.systemFingerprint) {
-              streamingMessage.systemFingerprint = meta.systemFingerprint;
-              metadataChanged = true;
-            }
-            if (meta.model && streamingMessage.modelName !== meta.model) {
-              streamingMessage.modelName = meta.model;
-              metadataChanged = true;
-            }
-            if (meta.created !== undefined) {
-              const createdTimestamp = meta.created * 1000;
-              if (streamingMessage.timestamp < createdTimestamp) {
-                streamingMessage.timestamp = createdTimestamp;
-                streamingMessage.providerCreatedAt = meta.created;
-                metadataChanged = true;
-              } else if (streamingMessage.providerCreatedAt !== meta.created) {
-                streamingMessage.providerCreatedAt = meta.created;
+            this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+              if (meta.id && message.providerMessageId !== meta.id) {
+                message.providerMessageId = meta.id;
                 metadataChanged = true;
               }
-            }
+              if (meta.systemFingerprint && message.systemFingerprint !== meta.systemFingerprint) {
+                message.systemFingerprint = meta.systemFingerprint;
+                metadataChanged = true;
+              }
+              if (meta.model && message.modelName !== meta.model) {
+                message.modelName = meta.model;
+                metadataChanged = true;
+              }
+              if (meta.created !== undefined) {
+                const createdTimestamp = meta.created * 1000;
+                if (message.timestamp < createdTimestamp) {
+                  message.timestamp = createdTimestamp;
+                  message.providerCreatedAt = meta.created;
+                  metadataChanged = true;
+                } else if (message.providerCreatedAt !== meta.created) {
+                  message.providerCreatedAt = meta.created;
+                  metadataChanged = true;
+                }
+              }
+            });
 
             if (metadataChanged) {
-              this.messages = [...this.messages];
-              if (streamingMessage.id !== undefined) {
-                this.databaseManager.updateChatMessageMetadata(streamingMessage.id, {
-                  timestamp: streamingMessage.timestamp,
-                  providerMessageId: streamingMessage.providerMessageId ?? null,
-                  providerCreatedAt: streamingMessage.providerCreatedAt ?? null,
-                  systemFingerprint: streamingMessage.systemFingerprint ?? null,
-                  modelName: streamingMessage.modelName ?? null,
-                  providerName: streamingMessage.providerName ?? null
+              const persistedMessage = this.messages[streamingMessageIndex];
+              if (persistedMessage?.id !== undefined) {
+                this.databaseManager.updateChatMessageMetadata(persistedMessage.id, {
+                  timestamp: persistedMessage.timestamp,
+                  providerMessageId: persistedMessage.providerMessageId ?? null,
+                  providerCreatedAt: persistedMessage.providerCreatedAt ?? null,
+                  systemFingerprint: persistedMessage.systemFingerprint ?? null,
+                  modelName: persistedMessage.modelName ?? null,
+                  providerName: persistedMessage.providerName ?? null
                 }).catch((metadataError: Error) => {
                   console.error('Failed to persist streaming metadata:', metadataError);
                 });
@@ -981,27 +1154,10 @@ struct Chat {
             // 检查当前显示的对话是否还是发送消息时的对话
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                console.info('Before update - message content length:', this.messages[streamingMessageIndex].content.length);
-
-                // 直接追加内容，实现真正的实时更新
-                this.messages[streamingMessageIndex].content += chunk;
-
-                console.info('After update - message content length:', this.messages[streamingMessageIndex].content.length);
-                console.info('Message ID:', this.messages[streamingMessageIndex].id);
-                console.info('Message role:', this.messages[streamingMessageIndex].role);
-
-                // 触发数组更新 - 创建新数组引用
-                this.messages = [...this.messages];
-
-                // 每接收几个字符就触发一次强制更新，确保UI及时刷新
-                if (this.messages[streamingMessageIndex].content.length % 50 === 0) {
-                  this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
-                  console.info('Force update triggered, new value:', this.forceUpdateTrigger);
-                }
-
+                this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+                  message.content += chunk;
+                });
                 console.info('Updated message content, new length:', this.messages[streamingMessageIndex].content.length);
-
-
               }
             }
           },
@@ -1023,12 +1179,11 @@ struct Chat {
                   console.warn('Streaming message has no ID, this should not happen');
                   // 兜底方案：如果没有ID，保存到数据库
                   const savedId = await this.databaseManager.insertChatMessage(streamingMessage);
-                  streamingMessage.id = savedId;
+                  this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+                    message.id = savedId;
+                  });
                   console.info('AI response saved with ID:', savedId);
                 }
-
-                // 最终强制更新，确保完整内容显示
-                this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
               }
 
               // 生成对话标题
@@ -1048,73 +1203,16 @@ struct Chat {
           },
 
           // onError: 处理错误
-          onError: async (error: Error) => {
-            console.error('Stream request failed:', error);
-
-            // 检查当前显示的对话是否还是发送消息时的对话
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length) {
-                const streamingMessage = this.messages[streamingMessageIndex];
-                if (streamingMessage && streamingMessage.role === 'assistant') {
-                  if (streamingMessage.id !== undefined) {
-                    try {
-                      await this.databaseManager.deleteMessage(streamingMessage.id);
-                    } catch (deleteError) {
-                      console.error('Failed to delete pending AI message:', deleteError);
-                    }
-                  }
-                  this.messages.splice(streamingMessageIndex, 1);
-                  this.messages = [...this.messages];
-                  this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
-                }
-              }
-            }
-
-            let errorMessage = '发送消息失败';
-            if (error.message.includes('网络')) {
-              errorMessage = '网络连接失败，请检查网络设置';
-            } else if (error.message.includes('API')) {
-              errorMessage = 'API调用失败，请检查API设置';
-            } else if (error.message.includes('授权') || error.message.includes('认证')) {
-              errorMessage = 'API密钥无效，请检查设置';
-            }
-
-            this.showToast(errorMessage);
-
-            // 设置加载状态为false
-            this.isLoading = false;
+          onError: (error: Error) => {
+            handleFailure(error).catch((failureError: Error) => {
+              console.error('Failed to handle streaming error:', failureError);
+            });
           }
         }
       );
 
     } catch (error) {
-      console.error('Failed to send message:', error);
-
-      // 设置加载状态为false
-      this.isLoading = false;
-
-      // 显示错误信息
-      this.showToast('发送失败: ' + error);
-
-      // 如果发生错误，移除已添加的空AI消息
-      if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-        if (this.messages.length > 0 && this.messages[this.messages.length - 1].role === 'assistant') {
-          this.messages.pop();
-        }
-
-        // 移除用户消息
-        if (this.messages.length > 0) {
-          const lastUserMessage = this.messages[this.messages.length - 1];
-          if (lastUserMessage && lastUserMessage.role === 'user' && lastUserMessage.content === userMessage.content) {
-            this.messages.pop();
-          }
-        }
-      }
-
-      this.showToast('发送消息失败');
-
-      // 设置加载状态为false
-      this.isLoading = false;
+      await handleFailure(error instanceof Error ? error : new Error(String(error)));
     } finally {
       // 不在这里设置isLoading = false，因为流式请求的回调是异步的
       console.info('Message sending request initiated');
@@ -1164,7 +1262,7 @@ struct Chat {
     }
   }
 
-  editMessage(message: ChatMessage) {
+  async editMessage(message: ChatMessage) {
     if (message.role === 'user') {
       // 用户消息编辑：将内容填入输入框，并标记要替换的消息
       this.inputText = message.content;
@@ -1176,11 +1274,11 @@ struct Chat {
         const messagesToDelete = this.messages.slice(messageIndex);
 
         // 从数据库删除这些消息
-        messagesToDelete.forEach(async (msg) => {
+        for (const msg of messagesToDelete) {
           if (msg.id !== undefined) {
             await this.databaseManager.deleteMessage(msg.id);
           }
-        });
+        }
 
         // 从UI中移除这些消息
         this.messages = this.messages.slice(0, messageIndex);
@@ -1252,30 +1350,34 @@ struct Chat {
       this.messages = this.messages.slice(0, messageIndex + 1);
 
       // 清空当前AI消息的内容，保留消息结构用于重新生成，并更新模型信息
-      this.messages[messageIndex].content = '';
       const modelInfo = this.getCurrentModelInfo();
-      this.messages[messageIndex].modelName = modelInfo.modelName;
-      this.messages[messageIndex].providerName = modelInfo.providerName;
+      this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
+        regeneratingMessage.content = '';
+        regeneratingMessage.modelName = modelInfo.modelName;
+        regeneratingMessage.providerName = modelInfo.providerName;
+      });
 
       // 从数据库删除旧的AI消息内容
       if (message.id !== undefined) {
         await this.databaseManager.deleteMessage(message.id);
         // 清除 ID，因为消息将被重新生成并重新保存
-        this.messages[messageIndex].id = undefined;
+        this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
+          regeneratingMessage.id = undefined;
+        });
       }
 
       // 立即为重新生成的消息创建新的数据库记录
-      const newMessageId = await this.databaseManager.insertChatMessage(this.messages[messageIndex]);
-      this.messages[messageIndex].id = newMessageId;
+      const regeneratedMessageRecord = this.messages[messageIndex];
+      const newMessageId = await this.databaseManager.insertChatMessage(regeneratedMessageRecord);
+      this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
+        regeneratingMessage.id = newMessageId;
+      });
       console.info('Created new database record for regeneration with ID:', newMessageId);
 
       // 设置为重新生成模式
       this.isLoading = true;
       const targetConversationId = this.currentConversation.id;
       const streamingMessageIndex = messageIndex;
-
-      // 强制触发UI更新
-      this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
 
       // 滚动到重新生成的消息位置
       setTimeout(() => {
@@ -1301,39 +1403,40 @@ struct Chat {
             if (streamingMessageIndex >= this.messages.length) {
               return;
             }
-            const regeneratedMessage = this.messages[streamingMessageIndex];
-            if (!regeneratedMessage) {
+            if (!this.messages[streamingMessageIndex]) {
               return;
             }
 
             let metadataChanged = false;
-            if (meta.id && regeneratedMessage.providerMessageId !== meta.id) {
-              regeneratedMessage.providerMessageId = meta.id;
-              metadataChanged = true;
-            }
-            if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
-              regeneratedMessage.systemFingerprint = meta.systemFingerprint;
-              metadataChanged = true;
-            }
-            if (meta.model && regeneratedMessage.modelName !== meta.model) {
-              regeneratedMessage.modelName = meta.model;
-              metadataChanged = true;
-            }
-            if (meta.created !== undefined) {
-              const createdTimestamp = meta.created * 1000;
-              if (regeneratedMessage.timestamp < createdTimestamp) {
-                regeneratedMessage.timestamp = createdTimestamp;
-                regeneratedMessage.providerCreatedAt = meta.created;
-                metadataChanged = true;
-              } else if (regeneratedMessage.providerCreatedAt !== meta.created) {
-                regeneratedMessage.providerCreatedAt = meta.created;
+            this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+              if (meta.id && regeneratedMessage.providerMessageId !== meta.id) {
+                regeneratedMessage.providerMessageId = meta.id;
                 metadataChanged = true;
               }
-            }
+              if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
+                regeneratedMessage.systemFingerprint = meta.systemFingerprint;
+                metadataChanged = true;
+              }
+              if (meta.model && regeneratedMessage.modelName !== meta.model) {
+                regeneratedMessage.modelName = meta.model;
+                metadataChanged = true;
+              }
+              if (meta.created !== undefined) {
+                const createdTimestamp = meta.created * 1000;
+                if (regeneratedMessage.timestamp < createdTimestamp) {
+                  regeneratedMessage.timestamp = createdTimestamp;
+                  regeneratedMessage.providerCreatedAt = meta.created;
+                  metadataChanged = true;
+                } else if (regeneratedMessage.providerCreatedAt !== meta.created) {
+                  regeneratedMessage.providerCreatedAt = meta.created;
+                  metadataChanged = true;
+                }
+              }
+            });
 
             if (metadataChanged) {
-              this.messages = [...this.messages];
-              if (regeneratedMessage.id !== undefined) {
+              const regeneratedMessage = this.messages[streamingMessageIndex];
+              if (regeneratedMessage?.id !== undefined) {
                 this.databaseManager.updateChatMessageMetadata(regeneratedMessage.id, {
                   timestamp: regeneratedMessage.timestamp,
                   providerMessageId: regeneratedMessage.providerMessageId ?? null,
@@ -1353,24 +1456,10 @@ struct Chat {
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                console.info('Before update - regenerated message content length:', this.messages[streamingMessageIndex].content.length);
-
-                // 更新消息内容
-                this.messages[streamingMessageIndex].content += chunk;
-
-                // 创建新的数组引用以触发UI更新
-                this.messages = [...this.messages];
-
+                this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+                  regeneratedMessage.content += chunk;
+                });
                 console.info('After update - regenerated message content length:', this.messages[streamingMessageIndex].content.length);
-
-                // 强制触发UI更新
-                this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
-
-                // 每隔一定数据量进行界面更新，避免过于频繁
-                if (this.messages[streamingMessageIndex].content.length % 50 === 0) {
-                  console.info('Force UI update during regeneration');
-                }
-
               }
             }
           },
@@ -1390,16 +1479,11 @@ struct Chat {
                 } else {
                   // 兜底方案：如果没有ID，保存到数据库
                   const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
-                  regeneratedMessage.id = savedId;
+                  this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
+                    messageToPersist.id = savedId;
+                  });
                   console.info('Regenerated message saved with new ID:', savedId);
                 }
-
-                // 创建新的数组引用以确保UI更新
-                this.messages = [...this.messages];
-
-                // 最终强制更新UI
-                this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
-
                 // 滚动到底部
                 setTimeout(() => {
                   if (this.scroller) {
@@ -1419,8 +1503,9 @@ struct Chat {
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                this.messages[streamingMessageIndex].content = `重新生成失败: ${error.message || error}`;
-                this.forceUpdateTrigger = (this.forceUpdateTrigger + 1) % 1000;
+                this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+                  regeneratedMessage.content = `重新生成失败: ${error.message || error}`;
+                });
               }
             }
 

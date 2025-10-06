@@ -288,6 +288,48 @@ export class DatabaseManager {
   }
 
   /**
+   * 批量获取对话消息数量
+   */
+  async getConversationMessageCounts(conversationIds?: string[]): Promise<Record<string, number>> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+
+    const params: Array<string> = [];
+    let sql = `SELECT conversation_id, COUNT(*) AS message_count FROM ${Constants.CHAT_TABLE}`;
+
+    if (conversationIds && conversationIds.length > 0) {
+      const placeholders = conversationIds.map(() => '?').join(', ');
+      sql += ` WHERE conversation_id IN (${placeholders})`;
+      params.push(...conversationIds);
+    }
+
+    sql += ' GROUP BY conversation_id';
+
+    try {
+      const resultSet = await this.rdbStore.querySql(sql, params);
+      const counts: Record<string, number> = {};
+
+      if (resultSet.goToFirstRow()) {
+        const conversationIdIndex = resultSet.getColumnIndex('conversation_id');
+        const messageCountIndex = resultSet.getColumnIndex('message_count');
+
+        do {
+          const conversationId = resultSet.getString(conversationIdIndex);
+          const count = resultSet.getLong(messageCountIndex);
+          counts[conversationId] = count;
+        } while (resultSet.goToNextRow());
+      }
+
+      resultSet.close();
+      return counts;
+    } catch (error) {
+      console.error('Failed to query conversation message counts:', error);
+      throw new DatabaseError(`Failed to query conversation message counts: ${error}`);
+    }
+  }
+
+  /**
    * 删除聊天记录
    */
   async clearChatHistory(conversationId: string = 'default'): Promise<void> {

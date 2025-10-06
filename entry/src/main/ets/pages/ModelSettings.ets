@@ -463,7 +463,25 @@ struct ModelSettings {
     this.isTesting = true;
 
     try {
-      const testModel = provider.models[0];
+      // 优先使用当前激活服务商对应的激活模型；否则回退到该服务商的第一个模型
+      let testModel: AIModel | undefined = undefined;
+      if (provider.id === this.activeProviderId && this.activeModelId) {
+        testModel = provider.models.find(m => m.id === this.activeModelId);
+      }
+      if (!testModel) {
+        testModel = provider.models[0];
+      }
+
+      if (!testModel || !testModel.name || testModel.name.trim().length === 0) {
+        this.showToast('模型ID无效，请检查模型设置');
+        return;
+      }
+
+      if (!provider.apiUrl.startsWith('http')) {
+        this.showToast('API地址格式不正确，应以 http/https 开头');
+        return;
+      }
+
       const testMessage = new ChatMessage('Hello', 'user', {
         conversationId: 'test'
       });
@@ -478,16 +496,20 @@ struct ModelSettings {
     } catch (error) {
       const normalizedError = this.ensureError(error as ErrorInput);
       console.error('Connection test failed:', normalizedError);
-      const errorMessageText = normalizedError.message;
-      let errorMessage = '连接测试失败';
-      if (errorMessageText.includes('网络')) {
-        errorMessage = '网络连接失败，请检查网络设置';
-      } else if (errorMessageText.includes('401') || errorMessageText.includes('403')) {
-        errorMessage = 'API密钥无效，请检查设置';
-      } else if (errorMessageText.includes('404')) {
-        errorMessage = 'API地址无效，请检查设置';
+      const msg = (normalizedError.message || '').toLowerCase();
+      if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('forbidden') || msg.includes('invalid api')) {
+        this.showToast('API密钥无效，请检查设置');
+      } else if (msg.includes('404') || msg.includes('not found')) {
+        this.showToast('API地址无效，请检查是否为“基地址或兼容地址”');
+      } else if (msg.includes('timeout') || msg.includes('超时')) {
+        this.showToast('请求超时，请稍后重试');
+      } else if (msg.includes('network') || msg.includes('网络') || msg.includes('connection')) {
+        this.showToast('网络连接失败，请检查网络设置');
+      } else if (msg.includes('model') && (msg.includes('not found') || msg.includes('unknown') || msg.includes('does not exist'))) {
+        this.showToast('模型不可用或模型ID错误');
+      } else {
+        this.showToast('连接测试失败');
       }
-      this.showToast(errorMessage);
     } finally {
       this.isTesting = false;
     }

@@ -201,11 +201,19 @@ struct Settings {
       // 清空默认对话的聊天记录
       await this.databaseManager.clearChatHistory();
 
-      promptAction.showToast({ message: '数据已清空' });
+      try {
+        promptAction.showToast({ message: '数据已清空' });
+      } catch (toastErr) {
+        console.warn('Toast display failed (清空成功):', toastErr);
+      }
 
     } catch (error) {
       console.error('Failed to clear data:', error);
-      promptAction.showToast({ message: '清空失败' });
+      try {
+        promptAction.showToast({ message: '清空失败' });
+      } catch (toastErr) {
+        console.warn('Toast display failed (清空失败):', toastErr);
+      }
     }
   }
 
@@ -236,18 +244,26 @@ struct Settings {
     BrowserHelper.openUrl(context, url)
       .then((success: boolean) => {
         if (!success) {
-          promptAction.showToast({
-            message: '无法打开浏览器',
-            duration: 2000
-          });
+          try {
+            promptAction.showToast({
+              message: '无法打开浏览器',
+              duration: 2000
+            });
+          } catch (toastErr) {
+            console.warn('Toast display failed (无法打开浏览器):', toastErr);
+          }
         }
       })
       .catch((error: Error) => {
         console.error('Failed to open URL:', error);
-        promptAction.showToast({
-          message: '打开链接失败',
-          duration: 2000
-        });
+        try {
+          promptAction.showToast({
+            message: '打开链接失败',
+            duration: 2000
+          });
+        } catch (toastErr) {
+          console.warn('Toast display failed (打开链接失败):', toastErr);
+        }
       });
   }
 }
