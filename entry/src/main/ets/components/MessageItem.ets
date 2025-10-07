@@ -24,7 +24,7 @@ export struct MessageItem {
             .size({ width: 14, height: 14 })
             .fillColor($r('sys.color.ohos_id_color_text_primary'))
           Text('删除')
-            .fontSize(13)
+            .fontSize(12)
         }
       }
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
@@ -47,7 +47,7 @@ export struct MessageItem {
             .size({ width: 14, height: 14 })
             .fillColor($r('sys.color.ohos_id_color_text_primary'))
           Text('删除')
-            .fontSize(13)
+            .fontSize(12)
         }
       }
       .backgroundColor($r('sys.color.background_primary'))
@@ -63,16 +63,16 @@ export struct MessageItem {
 
   @Builder
   UserActionButtons() {
-    Row({ space: 8 }) {
+    Row({ space: 2 }) {
       // 复制按钮 - 圆形
       Button() {
         Image($r('app.media.rectangle_on_rectangle'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .onClick(() => {
         if (this.onCopy) {
           this.onCopy(this.message);
@@ -82,12 +82,12 @@ export struct MessageItem {
       // 编辑按钮 - 圆形
       Button() {
         Image($r('app.media.square_and_pencil'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .onClick(() => {
         if (this.onEdit) {
           this.onEdit(this.message);
@@ -97,12 +97,12 @@ export struct MessageItem {
       // 更多按钮 - 圆形
       Button() {
         Image($r('app.media.more_fill'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .bindPopup(this.showUserMenu, {
         builder: this.UserDropdownMenu,
         placement: Placement.BottomLeft,
@@ -122,21 +122,21 @@ export struct MessageItem {
     }
     .width('100%')
     .justifyContent(FlexAlign.End)
-    .margin({ top: 8, right: 4 })
+    .margin({ top: 4, right: 4 })
   }
 
   @Builder
   AssistantActionButtons() {
-    Row({ space: 8 }) {
+    Row({ space: 2 }) {
       // 复制按钮 - 圆形
       Button() {
         Image($r('app.media.rectangle_on_rectangle'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .onClick(() => {
         if (this.onCopy) {
           this.onCopy(this.message);
@@ -146,12 +146,12 @@ export struct MessageItem {
       // 重新生成按钮 - 圆形
       Button() {
         Image($r('app.media.arrow_clockwise'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .onClick(() => {
         if (this.onRegenerate) {
           this.onRegenerate(this.message);
@@ -161,12 +161,12 @@ export struct MessageItem {
       // 更多按钮 - 圆形
       Button() {
         Image($r('app.media.more_fill'))
-          .size({ width: 18, height: 18 })
+          .size({ width: 14, height: 14 })
           .fillColor($r('sys.color.ohos_id_color_text_primary'))
       }
       .type(ButtonType.Circle)
-      .backgroundColor($r('sys.color.background_primary'))
-      .size({ width: 36, height: 36 })
+      .backgroundColor($r('app.color.common_background'))
+      .size({ width: 28, height: 28 })
       .bindPopup(this.showAssistantMenu, {
         builder: this.AssistantDropdownMenu,
         placement: Placement.BottomRight,
@@ -186,7 +186,7 @@ export struct MessageItem {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
-    .margin({ top: 8, left: 4 })
+    .margin({ top: 4, left: 4 })
   }
 
   @Builder

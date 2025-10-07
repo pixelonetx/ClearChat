@@ -18,9 +18,9 @@ struct About {
       Text('关于页')
         .fontColor($r('app.color.text_color'))
     }
+    .backgroundColor($r('app.color.common_background'))
     .padding({
-      top: this.getUIContext().px2vp(this.topRectHeight),
-      bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+      top: this.getUIContext().px2vp(this.topRectHeight)
     })
     .title('关于')
     .onReady((context: NavDestinationContext) => {

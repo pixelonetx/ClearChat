@@ -220,7 +220,7 @@ struct Chat {
                     .textAlign(TextAlign.Center)
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .padding({ left: 12, right: 12 })
+                    .padding({ left: 14, right: 14 })
 
                   Button() {
                     Image($r('app.media.square_and_pencil'))
@@ -252,6 +252,7 @@ struct Chat {
                     }
                   ])
                 }
+                .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
                 .width('100%')
                 .height(56)
                 .padding({ left: 12, right: 12 })
@@ -261,7 +262,7 @@ struct Chat {
                   // 空状态
                   Column() {
                     Text('有什么可以帮忙的？')
-                      .fontSize(16)
+                      .fontSize(18)
                       .margin({ top: 16 })
 
                     if (!this.hasSettings) {
@@ -302,7 +303,7 @@ struct Chat {
                         }
                       })
                     }
-                    .padding({ left: 12, right: 12, top: 16, bottom: 16 })
+                    .padding({ left: 16, right: 16, top: 16, bottom: 16 })
                     .width('100%')
                     .alignItems(HorizontalAlign.Center)
                     .justifyContent(FlexAlign.Start)
@@ -355,8 +356,9 @@ struct Chat {
                     this.sendMessage();
                   })
                 }
+                .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
                 .width('100%')
-                .padding({ left: 12, right: 12, top: 16, bottom: 16 })
+                .padding({ left: 12, right: 12, top: 12, bottom: 12 })
                 .alignItems(VerticalAlign.Bottom)
               }
               .width('100%')
@@ -405,15 +407,10 @@ struct Chat {
           }
         )
       }
-      .backgroundColor($r('sys.color.ohos_id_color_background'))
       .width('100%')
       .height('100%')
-      .padding({
-        top: this.getUIContext().px2vp(this.topRectHeight),
-        bottom: this.getUIContext().px2vp(this.bottomRectHeight)
-      })
     }
-    .hideToolBar(true)
+    .backgroundColor($r('app.color.common_background'))
     .hideTitleBar(true)
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
@@ -1685,6 +1682,7 @@ struct Chat {
           this.hideSidebar();
         })
       }
+      .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
       .width('100%')
       .height(56)
       .padding({ left: 20, right: 16 })
@@ -1759,8 +1757,9 @@ struct Chat {
           this.hideSidebar();
         })
       }
+      .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
       .width('100%')
-      .padding({ bottom: 20 })
+
       .justifyContent(FlexAlign.End)
     }
     .width(300)

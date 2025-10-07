@@ -34,8 +34,7 @@ struct Settings {
             // 模型设置
             this.SettingGroup('模型设置', [
               {
-                title: '模型配置',
-                subtitle: '配置 AI 模型和提供商',
+                title: '模型设置',
                 onClick: () => {
                   this.pathStack.pushPathByName("ModelSettings", null, false);
                 }
@@ -46,7 +45,6 @@ struct Settings {
             this.SettingGroup('数据设置', [
               {
                 title: '清空聊天记录',
-                subtitle: '删除所有对话数据',
                 onClick: () => {
                   this.showClearDataDialog();
                 },
@@ -58,7 +56,6 @@ struct Settings {
             this.SettingGroup('帮助与支持', [
               {
                 title: '帮助文档',
-                subtitle: '使用指南和常见问题',
                 onClick: () => {
                   this.pathStack.pushPathByName("About", null, false);
                 }
@@ -69,14 +66,12 @@ struct Settings {
             this.SettingGroup('关于', [
               {
                 title: '关于',
-                subtitle: '应用信息和版本',
                 onClick: () => {
                   this.pathStack.pushPathByName("About", null, false);
                 }
               },
               {
                 title: '意见反馈',
-                subtitle: '帮助我们改进产品',
                 onClick: () => {
                   this.openFeedbackUrl();
                 }
@@ -85,23 +80,24 @@ struct Settings {
           }
           .alignItems(HorizontalAlign.Start)
           .justifyContent(FlexAlign.Start)
-          .padding({ left: 16, right: 16, top: 4, bottom: 20 });
+          .padding({ left: 16, right: 16, top: 4, bottom: 24 });
         }
         .layoutWeight(1)
         .width('100%')
         .scrollBar(BarState.Auto)
-        .align(Alignment.TopStart);
+        .align(Alignment.TopStart)
+        .margin({ top: 12 });
       }
+
       .width('100%')
       .height('100%')
       .alignItems(HorizontalAlign.Start)
       .justifyContent(FlexAlign.Start)
       .alignItems(HorizontalAlign.Center)
-      .backgroundColor($r('sys.color.ohos_id_color_background'));
     }
+    .backgroundColor($r('app.color.common_background'))
     .padding({
       top: this.getUIContext().px2vp(this.topRectHeight),
-      bottom: this.getUIContext().px2vp(this.bottomRectHeight)
     })
     .title('设置')
     .onReady((context: NavDestinationContext) => {
@@ -119,7 +115,7 @@ struct Settings {
         .fontColor($r('sys.color.ohos_id_color_text_secondary'))
         .width('100%')
         .textAlign(TextAlign.Start)
-        .padding({ left: 8, right: 8 })
+        .padding({ left: 12, right: 12 })
         .margin({ bottom: 6, top: 8 });
 
       // 设置项列表
@@ -130,19 +126,27 @@ struct Settings {
           // 分割线（除了最后一项）
           if (index < items.length - 1) {
             Divider()
-              .height(0.5)
-              .margin({ left: 16 });
+              .height(1)
+              .color(Color.Gray)
+              .margin({ left: 20, right: 20 });
           }
         });
       }
       .backgroundColor($r('sys.color.background_primary'))
-      .borderRadius(12)
+      .borderRadius(16)
       .clip(true)
-      .margin({ bottom: 6 })
-      .padding({ top: 4, bottom: 4 });
+      .margin({ bottom: 10 })
+
+      .shadow({
+        radius: 18,
+        color: 'rgba(16, 24, 40, 0.08)',
+        offsetX: 0,
+        offsetY: 6
+      });
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start);
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 2, right: 2 });
   }
 
   @Builder
@@ -155,31 +159,23 @@ struct Settings {
           .fontColor($r('sys.color.ohos_id_color_text_primary'))
           .width('100%')
           .textAlign(TextAlign.Start);
-
-        if (item.subtitle) {
-          Text(item.subtitle)
-            .fontSize(13)
-            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
-            .width('100%')
-            .textAlign(TextAlign.Start)
-            .margin({ top: 2 });
-        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .justifyContent(FlexAlign.Center);
+      .justifyContent(FlexAlign.Center)
+      .padding({ right: 12 });
 
       Text('›')
         .fontSize(20)
         .fontWeight(FontWeight.Normal)
-        .fontColor($r('sys.color.ohos_id_color_text_secondary'));
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+        .margin({ left: 12 });
     }
     .width('100%')
-    .height(item.subtitle ? 50 : 42)
-    .padding({ left: 16, right: 16 })
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .justifyContent(FlexAlign.SpaceBetween)
     .alignItems(VerticalAlign.Center)
-    .backgroundColor($r('sys.color.background_primary'))
+    .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
     .borderRadius({
       topLeft: (index === 0) ? 12 : 0,
       topRight: (index === 0) ? 12 : 0,
@@ -279,7 +275,6 @@ struct Settings {
 
 interface SettingItem {
   title: string;
-  subtitle?: string;
   onClick?: () => void;
   isDestructive?: boolean;
 }

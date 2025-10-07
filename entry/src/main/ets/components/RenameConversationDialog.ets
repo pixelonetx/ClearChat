@@ -27,8 +27,8 @@ export struct RenameConversationDialog {
         .width('100%')
         .height(40)
         .fontSize(16)
-        .borderRadius(8)
-        .border({ width: 1, color: Color.Gray })
+        // .borderRadius(8)
+        // .border({ width: 1, color: Color.Gray })
         .padding({ left: 12, right: 12 })
         .margin({ bottom: 24 })
         .onChange((value: string) => {
@@ -43,7 +43,7 @@ export struct RenameConversationDialog {
         Button('取消')
           .layoutWeight(1)
           .height(40)
-          .borderRadius(8)
+          // .borderRadius(8)
           .onClick(() => {
             this.controller.close();
           })
@@ -51,8 +51,8 @@ export struct RenameConversationDialog {
         Button('确定')
           .layoutWeight(1)
           .height(40)
-          .fontColor(Color.White)
-          .borderRadius(8)
+          // .fontColor(Color.White)
+          // .borderRadius(8)
           .enabled(this.newTitle.trim().length > 0)
           .onClick(() => {
             this.confirmRename();
@@ -60,15 +60,9 @@ export struct RenameConversationDialog {
       }
       .width('100%')
     }
+    .backgroundColor(Color.White)
     .width(280)
     .padding(20)
-    .borderRadius(12)
-    .shadow({
-      radius: 20,
-      color: 'rgba(0, 0, 0, 0.15)',
-      offsetX: 0,
-      offsetY: 4
-    })
   }
 
   private confirmRename() {

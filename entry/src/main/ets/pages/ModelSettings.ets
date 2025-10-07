@@ -597,6 +597,7 @@ struct ModelSettings {
       .width('100%')
       .height('100%')
     }
+    .backgroundColor($r('app.color.common_background'))
     .padding({
       top: this.getUIContext().px2vp(this.topRectHeight),
       bottom: this.getUIContext().px2vp(this.bottomRectHeight)

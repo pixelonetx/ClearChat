@@ -7,6 +7,10 @@
     {
       "name": "text_color",
       "value": "#000000"
+    },
+    {
+      "name": "common_background",
+      "value": "#F1F3F5"
     }
   ]
 }
