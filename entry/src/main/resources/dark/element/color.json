@@ -11,6 +11,10 @@
     {
       "name": "common_background",
       "value": "#000000"
+    },
+    {
+      "name": "text_sec_color",
+      "value": "#99FFFFFF"
     }
   ]
 }

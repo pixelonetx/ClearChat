@@ -1,5 +1,5 @@
 import { Conversation } from '../services/ConversationModels';
-
+@Preview
 @CustomDialog
 export struct RenameConversationDialog {
   controller: CustomDialogController = new CustomDialogController({
@@ -19,16 +19,11 @@ export struct RenameConversationDialog {
       // 标题
       Text('重命名对话')
         .fontSize(18)
-        .fontWeight(FontWeight.Medium)
         .margin({ bottom: 20 })
 
       // 输入框
       TextInput({ text: this.newTitle, placeholder: '输入新的对话标题' })
         .width('100%')
-        .height(40)
-        .fontSize(16)
-        // .borderRadius(8)
-        // .border({ width: 1, color: Color.Gray })
         .padding({ left: 12, right: 12 })
         .margin({ bottom: 24 })
         .onChange((value: string) => {
@@ -41,18 +36,17 @@ export struct RenameConversationDialog {
       // 按钮行
       Row({ space: 12 }) {
         Button('取消')
+          .fontColor($r('app.color.text_color'))
+          .backgroundColor($r('sys.color.button_background_color_transparent'))
           .layoutWeight(1)
-          .height(40)
-          // .borderRadius(8)
           .onClick(() => {
             this.controller.close();
           })
 
         Button('确定')
+          .fontColor($r('app.color.text_color'))
+          .backgroundColor($r('sys.color.button_background_color_transparent'))
           .layoutWeight(1)
-          .height(40)
-          // .fontColor(Color.White)
-          // .borderRadius(8)
           .enabled(this.newTitle.trim().length > 0)
           .onClick(() => {
             this.confirmRename();
@@ -60,7 +54,8 @@ export struct RenameConversationDialog {
       }
       .width('100%')
     }
-    .backgroundColor(Color.White)
+    .borderRadius(24)
+    .backgroundColor($r('sys.color.background_primary'))
     .width(280)
     .padding(20)
   }

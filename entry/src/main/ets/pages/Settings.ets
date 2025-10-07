@@ -1,10 +1,10 @@
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { BrowserHelper } from '../services/BrowserHelper';
-import common from '@ohos.app.ability.common';
 
 // 跳转页面入口函数
 @Builder
@@ -30,11 +30,11 @@ struct Settings {
       Column() {
         // 设置列表
         Scroll() {
-          Column({ space: 10 }) {
+          Column() {
             // 模型设置
             this.SettingGroup('模型设置', [
               {
-                title: '模型设置',
+                title: '模型提供方',
                 onClick: () => {
                   this.pathStack.pushPathByName("ModelSettings", null, false);
                 }
@@ -52,15 +52,15 @@ struct Settings {
               }
             ]);
 
-            // 帮助与支持
-            this.SettingGroup('帮助与支持', [
-              {
-                title: '帮助文档',
-                onClick: () => {
-                  this.pathStack.pushPathByName("About", null, false);
-                }
-              }
-            ]);
+            // // 帮助与支持
+            // this.SettingGroup('帮助与支持', [
+            //   {
+            //     title: '帮助文档',
+            //     onClick: () => {
+            //       this.pathStack.pushPathByName("About", null, false);
+            //     }
+            //   }
+            // ]);
 
             // 关于
             this.SettingGroup('关于', [
@@ -80,7 +80,7 @@ struct Settings {
           }
           .alignItems(HorizontalAlign.Start)
           .justifyContent(FlexAlign.Start)
-          .padding({ left: 16, right: 16, top: 4, bottom: 24 });
+          .padding({ left: 16, right: 16})
         }
         .layoutWeight(1)
         .width('100%')
@@ -88,7 +88,6 @@ struct Settings {
         .align(Alignment.TopStart)
         .margin({ top: 12 });
       }
-
       .width('100%')
       .height('100%')
       .alignItems(HorizontalAlign.Start)
@@ -110,13 +109,13 @@ struct Settings {
     Column() {
       // 分组标题
       Text(title)
-        .fontSize(13)
+        .fontSize(14)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('sys.color.ohos_id_color_text_secondary'))
         .width('100%')
         .textAlign(TextAlign.Start)
         .padding({ left: 12, right: 12 })
-        .margin({ bottom: 6, top: 8 });
+        .margin({ bottom: 6, top: 8 })
 
       // 设置项列表
       Column() {
@@ -128,15 +127,13 @@ struct Settings {
             Divider()
               .height(1)
               .color(Color.Gray)
-              .margin({ left: 20, right: 20 });
+              // .margin({ left: 16, right: 16 })
           }
-        });
+        })
       }
-      .backgroundColor($r('sys.color.background_primary'))
       .borderRadius(16)
       .clip(true)
       .margin({ bottom: 10 })
-
       .shadow({
         radius: 18,
         color: 'rgba(16, 24, 40, 0.08)',
@@ -163,13 +160,11 @@ struct Settings {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       .justifyContent(FlexAlign.Center)
-      .padding({ right: 12 });
+      .padding({ right: 12 })
 
-      Text('›')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(20)
-        .fontWeight(FontWeight.Normal)
-        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
-        .margin({ left: 12 });
+        .margin({ right: 12 })
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
