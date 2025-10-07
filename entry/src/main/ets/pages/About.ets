@@ -1,5 +1,5 @@
-import pasteboard from '@ohos.pasteboard';
-import promptAction from '@ohos.promptAction';
+import { pasteboard } from '@kit.BasicServicesKit';
+import { promptAction } from '@kit.ArkUI';
 
 // 跳转页面入口函数
 @Builder

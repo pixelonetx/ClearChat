@@ -1,5 +1,4 @@
 
-
 @CustomDialog
 export struct OpenLinkDialog {
   controller: CustomDialogController = new CustomDialogController({

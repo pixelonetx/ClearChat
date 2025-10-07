@@ -119,7 +119,7 @@ export class NativeDialogHelper {
   ): void {
     AlertDialog.show({
       title: '清除所有数据',
-      message: '此操作将删除所有对话记录、模型配置和设置信息。\n\n⚠️ 此操作无法撤销，请谨慎操作！',
+      message: '此操作将删除所有对话记录、模型配置和设置信息。\n\n此操作无法撤销，请谨慎操作！',
       autoCancel: true,
       primaryButton: {
         value: '清除',

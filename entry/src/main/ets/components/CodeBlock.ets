@@ -1,5 +1,5 @@
 import { pasteboard } from '@kit.BasicServicesKit';
-import promptAction from '@ohos.promptAction';
+import { promptAction } from '@kit.ArkUI';
 
 @Component
 export struct CodeBlock {

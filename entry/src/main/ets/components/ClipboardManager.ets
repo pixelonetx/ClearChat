@@ -1,6 +1,6 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
-import promptAction from '@ohos.promptAction';
+import { promptAction } from '@kit.ArkUI';
 
 export class ClipboardManager {
   private static instance: ClipboardManager;

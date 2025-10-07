@@ -1,5 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
 
 import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
@@ -431,6 +432,7 @@ struct Chat {
 
   async aboutToAppear() {
     await this.initializeApp();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
   }
 
   async onPageShow() {
@@ -894,6 +896,7 @@ struct Chat {
 
     // 发送消息后自动收起键盘
     this.hideKeyboard();
+    this.scrollToBottom();
 
     if (!this.hasSettings) {
       this.showToast('请先配置API设置');
@@ -1001,7 +1004,6 @@ struct Chat {
             }
           }
 
-          this.scrollToBottom();
         }
       }
 

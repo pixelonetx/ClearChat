@@ -63,10 +63,6 @@ export default class EntryAbility extends UIAbility {
       let applicationContext = this.context.getApplicationContext();
       applicationContext.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
 
-      // 键盘弹出，内容上移
-      let uiConttext : UIContext = windowStage.getMainWindowSync().getUIContext();
-      uiConttext.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
-
     });
   }
 

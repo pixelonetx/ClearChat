@@ -1,7 +1,7 @@
+import { common } from '@kit.AbilityKit';
 import { MarkdownParser, MarkdownBlock, MarkdownBlockType, TextSegment, TableColumn, TableAlignment } from '../components/MarkdownParser';
 import { CodeBlock } from './CodeBlock';
 import { LinkActionHelper } from './LinkActionSheet';
-import { common } from '@kit.AbilityKit';
 
 // 表格渲染信息接口
 interface TableRenderInfo {

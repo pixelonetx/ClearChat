@@ -1,5 +1,5 @@
+import { promptAction } from '@kit.ArkUI';
 import { AIModel } from '../services/DataModels';
-import promptAction from '@ohos.promptAction';
 
 @Component
 export struct ModelSettingsDialog {
