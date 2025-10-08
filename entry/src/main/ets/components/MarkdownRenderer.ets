@@ -3,19 +3,29 @@ import { MarkdownParser, MarkdownBlock, MarkdownBlockType, TextSegment, TableCol
 import { CodeBlock } from './CodeBlock';
 import { LinkActionHelper } from './LinkActionSheet';
 
-// 表格渲染信息接口
+/**
+ * 表格渲染信息接口
+ * 定义了表格渲染所需的列信息和宽度信息
+ */
 interface TableRenderInfo {
   columns: TableColumn[];
   widths: number[];
 }
 
-// 内容部分接口
+/**
+ * 内容部分接口
+ * 定义了内容部分的类型和内容
+ */
 interface ContentPart {
   type: 'thinking' | 'normal';
   content: string;
   id?: number;
 }
 
+/**
+ * Markdown渲染器组件
+ * 用于将Markdown文本渲染为可视化UI组件
+ */
 @Component
 export struct MarkdownRenderer {
   @Prop content: string;
@@ -25,13 +35,17 @@ export struct MarkdownRenderer {
   private context = getContext(this) as common.UIAbilityContext;
   @State private expandedSections: Set<number> = new Set<number>(); // 显式声明泛型类型
 
-  // 解析思考模型内容
+  /**
+   * 解析思考模型内容
+   * @param content 要解析的内容
+   * @returns 解析后的内容部分数组
+   */
   private parseThinkingContent(content: string): ContentPart[] {
     const parts: ContentPart[] = [];
     let currentIndex = 0;
     let thinkingId = 0;
 
-    const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+    const thinkRegex = /<reasoning_content>([\s\S]*?)<\/reasoning_content>/g;
     let match: RegExpExecArray | null;
 
     while ((match = thinkRegex.exec(content)) !== null) {
@@ -69,6 +83,10 @@ export struct MarkdownRenderer {
     return parts;
   }
 
+  /**
+   * 渲染Markdown块
+   * @param block 要渲染的Markdown块
+   */
   @Builder
   renderBlock(block: MarkdownBlock) {
     if (block.type === MarkdownBlockType.HEADING) {
@@ -88,6 +106,10 @@ export struct MarkdownRenderer {
     }
   }
 
+  /**
+   * 渲染标题
+   * @param block 要渲染的标题块
+   */
   @Builder
   renderHeading(block: MarkdownBlock) {
     Text() {
@@ -122,44 +144,34 @@ export struct MarkdownRenderer {
     .wordBreak(WordBreak.BREAK_ALL)
   }
 
+  /**
+   * 渲染代码块
+   * @param block 要渲染的代码块
+   */
   @Builder
   renderCode(block: MarkdownBlock) {
-    if (block.language && block.language !== 'text' && block.content.includes('\n')) {
-      // 多行代码块
-      Column() {
-        CodeBlock({
-          content: block.content,
-          language: block.language || 'text'
-        })
-      }
-      // 移除固定宽度，让代码块根据内容自适应
-    } else {
-      // 行内代码
-      Text(block.content)
-        .fontSize(14)
-        .fontColor('#D63384')
-        .fontFamily('monospace')
-        .backgroundColor('#F8F8F8')
-        .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-        .borderRadius(4)
-        .border({ width: 1, color: '#E0E0E0' })
-        .copyOption(CopyOptions.InApp)
-        .maxLines(999)
-        .textOverflow({ overflow: TextOverflow.None })
-        .wordBreak(WordBreak.BREAK_ALL)
-        .constraintSize({
-          maxWidth: this.maxWidth // 使用传入的宽度约束
-        })
+    // 只要是CODE_BLOCK类型，就应该被视为一个独立的块，而不是行内代码
+    // 行内代码是在renderText等方法中通过TextSegment的code属性处理的
+    Column() {
+      CodeBlock({
+        content: block.content,
+        language: block.language || 'text'
+      })
     }
+    .margin({ top: 8, bottom: 8 }) // 为代码块添加垂直间距
   }
 
+  /**
+   * 渲染引用块
+   * @param block 要渲染的引用块
+   */
   @Builder
   renderQuote(block: MarkdownBlock) {
     Row() {
-      Divider()
-        .vertical(true)
-        .width(4)
-        .color('#007AFF')
+      // Divider()
+      //   .vertical(true)
+      //   .width(4)
+      //   .color('#007AFF')
 
       Column({ space: 4 }) {
         ForEach(this.getQuoteParagraphs(block.content), (paragraph: string, paraIndex: number) => {
@@ -205,6 +217,10 @@ export struct MarkdownRenderer {
     .alignItems(VerticalAlign.Top)
   }
 
+  /**
+   * 渲染列表
+   * @param block 要渲染的列表块
+   */
   @Builder
   renderList(block: MarkdownBlock) {
     Column() {
@@ -234,6 +250,11 @@ export struct MarkdownRenderer {
     .alignItems(HorizontalAlign.Start)
   }
 
+  /**
+   * 获取引用段落
+   * @param content 引用内容
+   * @returns 段落数组
+   */
   private getQuoteParagraphs(content: string): string[] {
     const paragraphSource: string[] = content.split(/\n{2,}/);
     if (paragraphSource.length === 1 && paragraphSource[0] === '') {
@@ -242,6 +263,10 @@ export struct MarkdownRenderer {
     return paragraphSource;
   }
 
+  /**
+   * 渲染文本
+   * @param block 要渲染的文本块
+   */
   @Builder
   renderText(block: MarkdownBlock) {
     Text() {
@@ -283,14 +308,21 @@ export struct MarkdownRenderer {
     .constraintSize({ maxWidth: '100%' })
   }
 
+  /**
+   * 渲染水平线
+   */
   @Builder
   renderHorizontalRule() {
     Divider()
       .height(2)
-      .color(Color.Black)
+      .color($r('app.color.text_secondary'))
       .margin({ top: 16, bottom: 16 })
   }
 
+  /**
+   * 渲染表格
+   * @param block 要渲染的表格块
+   */
   @Builder
   renderTable(block: MarkdownBlock) {
     if (block.tableData && block.tableData.length > 0) {
@@ -361,7 +393,11 @@ export struct MarkdownRenderer {
     }
   }
 
-  // 获取表格渲染信息
+  /**
+   * 获取表格渲染信息
+   * @param block 表格块
+   * @returns 表格渲染信息
+   */
   private getTableRenderInfo(block: MarkdownBlock): TableRenderInfo {
     const tableColumns: TableColumn[] = block.tableColumns || [];
     const columnWidths = this.parser.getTableColumnWidths(tableColumns, 300, 60); // 总宽度300，最小列宽60
@@ -372,7 +408,12 @@ export struct MarkdownRenderer {
     };
   }
 
-  // 获取单元格文本对齐方式
+  /**
+   * 获取单元格文本对齐方式
+   * @param columnIndex 列索引
+   * @param tableColumns 表格列信息
+   * @returns 文本对齐方式
+   */
   private getCellTextAlign(columnIndex: number, tableColumns: TableColumn[]): TextAlign {
     if (!tableColumns || columnIndex >= tableColumns.length) {
       return TextAlign.Start;
@@ -389,7 +430,12 @@ export struct MarkdownRenderer {
     }
   }
 
-  // 获取单元格水平对齐方式
+  /**
+   * 获取单元格水平对齐方式
+   * @param columnIndex 列索引
+   * @param tableColumns 表格列信息
+   * @returns 水平对齐方式
+   */
   private getCellAlignment(columnIndex: number, tableColumns: TableColumn[]): HorizontalAlign {
     if (!tableColumns || columnIndex >= tableColumns.length) {
       return HorizontalAlign.Start;
@@ -406,25 +452,45 @@ export struct MarkdownRenderer {
     }
   }
 
-  // 获取表格单元格文本对齐方式
+  /**
+   * 获取表格单元格文本对齐方式
+   * @param block 表格块
+   * @param columnIndex 列索引
+   * @returns 文本对齐方式
+   */
   private getTableCellTextAlign(block: MarkdownBlock, columnIndex: number): TextAlign {
     const tableColumns: TableColumn[] = block.tableColumns || [];
     return this.getCellTextAlign(columnIndex, tableColumns);
   }
 
-  // 获取表格单元格水平对齐方式
+  /**
+   * 获取表格单元格水平对齐方式
+   * @param block 表格块
+   * @param columnIndex 列索引
+   * @returns 水平对齐方式
+   */
   private getTableCellAlignment(block: MarkdownBlock, columnIndex: number): HorizontalAlign {
     const tableColumns: TableColumn[] = block.tableColumns || [];
     return this.getCellAlignment(columnIndex, tableColumns);
   }
 
-  // 获取表格单元格宽度
+  /**
+   * 获取表格单元格宽度
+   * @param block 表格块
+   * @param columnIndex 列索引
+   * @returns 单元格宽度
+   */
   private getTableCellWidth(block: MarkdownBlock, columnIndex: number): number {
     const tableColumns: TableColumn[] = block.tableColumns || [];
     const columnWidths = this.parser.getTableColumnWidths(tableColumns, 300, 60);
     return columnWidths[columnIndex] || 60;
   }
 
+  /**
+   * 获取标题字体大小
+   * @param level 标题级别
+   * @returns 字体大小
+   */
   private getHeadingSize(level: number): number {
     switch (level) {
       case 1: return 24;
@@ -445,25 +511,31 @@ export struct MarkdownRenderer {
     LinkActionHelper.showLinkActionSheet(url, this.context);
   }
 
-  // 渲染思考部分
+  /**
+   * 渲染思考部分，UI和逻辑重构
+   * @param content 思考内容
+   * @param id 唯一标识符
+   */
   @Builder
   renderThinkingSection(content: string, id: number) {
     Column() {
-      // 思考部分的标题/切换按钮
+      // 标题和折叠切换器
       Row() {
-        Text(this.expandedSections.has(id) ? '🤔 思考过程 ▼' : '🤔 思考过程 ▶')
-          .fontSize(13)
+        Text('思考过程 🤔')
+          .fontSize(14)
           .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_secondary'))
 
         Blank()
 
-        Text(`${this.expandedSections.has(id) ? '收起' : '展开'}`)
-          .fontSize(12)
-          .fontColor('#007AFF')
+        Image(this.expandedSections.has(id) ? $r('app.media.ic_arrow_down') : $r('app.media.ic_arrow_right'))
+          .width(16)
+          .height(16)
+          .fillColor($r('app.color.icon_secondary'))
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-      .backgroundColor('#F8F9FA')
+      .padding(12)
+      .backgroundColor($r('app.color.bg_secondary'))
       .borderRadius(6)
       .onClick(() => {
         if (this.expandedSections.has(id)) {
@@ -471,39 +543,34 @@ export struct MarkdownRenderer {
         } else {
           this.expandedSections.add(id);
         }
+        // 强制刷新状态
+        this.expandedSections = new Set(this.expandedSections);
       })
 
-      // 思考内容（可折叠）
+      // 可折叠的内容区域
       if (this.expandedSections.has(id)) {
-        Row() {
-          // 左侧竖线
-          Line()
-            .width(3)
-            .height('100%')
-            .backgroundColor('#007AFF')
-            .opacity(0.6)
-            .margin({ right: 12 })
-
-          // 思考内容
-          Column() {
-            ForEach(this.parser.parse(content || ''), (block: MarkdownBlock, index: number) => {
-              this.renderBlock(block)
-            })
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
+        Column() {
+          ForEach(this.parser.parse(content || ''), (block: MarkdownBlock) => {
+            this.renderBlock(block)
+          })
         }
-        .alignItems(VerticalAlign.Top)
-        .padding({ left: 8, right: 8, top: 8, bottom: 8 })
-        .backgroundColor('#F8F9FA')
-        .borderRadius({ bottomLeft: 6, bottomRight: 6 })
+        .width('100%')
+        .padding({ top: 8, bottom: 12, left: 12, right: 12 })
+        .alignItems(HorizontalAlign.Start)
+        .backgroundColor($r('app.color.bg_secondary'))
         .border({
-          width: { left: 0, right: 1, top: 0, bottom: 1 },
-          color: '#E0E0E0',
+          width: { top: 1 },
+          color: $r('app.color.border_primary'),
           style: BorderStyle.Solid
         })
+        .margin({ top: -6 }) // 向上移动以覆盖标题的下圆角
+        .borderWidth({ top: 1 })
+        .borderColor($r('app.color.border_primary'))
+        .borderRadius({ bottomLeft: 6, bottomRight: 6 })
       }
     }
+    .borderWidth(0.5)
+    .borderRadius(10)
     .width('100%')
     .margin({ top: 8, bottom: 8 })
   }

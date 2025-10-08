@@ -301,7 +301,7 @@ export struct MessageItem {
       Blank()
     }
     .width('100%')
-    .margin({ bottom: 12 })
+    .margin({ bottom: 10 })
   }
 
   build() {

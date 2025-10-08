@@ -42,12 +42,15 @@ interface ChatResponseWithSysFp extends ChatResponse {
 interface StreamParseState {
   metadataDispatched: boolean;
   completed: boolean;
+
   // 当检测到错误并已通知回调时，避免重复上报
   errorDispatched: boolean;
+  reasoningStarted?: boolean; // 跟踪<reasoning_content>是否已开启
 }
 
 interface StreamBufferState {
   pending: string;
+
   // 累计当前一个 SSE 事件中的多行 data: 片段
   eventDataLines?: string[];
 }
@@ -65,7 +68,9 @@ export class NetworkManager {
    * 规范化标识符：去除前后空白、零宽字符和不换行空格，避免拷贝粘贴引入的不可见字符导致服务端解析失败
    */
   private sanitizeIdentifier(input: string): string {
-    if (!input) return '';
+    if (!input) {
+      return '';
+    }
     // 去除常见零宽字符: ZWSP(\u200B) ZWNJ(\u200C) ZWJ(\u200D) BOM(\uFEFF) 以及 NBSP(\u00A0)
     return input
       .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '')
@@ -76,7 +81,9 @@ export class NetworkManager {
    * 清洗 API Key：移除零宽字符与首尾空白，避免授权失败
    */
   private sanitizeApiKey(input: string): string {
-    if (!input) return '';
+    if (!input) {
+      return '';
+    }
     return input.replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '').trim();
   }
 
@@ -118,11 +125,12 @@ export class NetworkManager {
   /**
    * 发送流式聊天请求到AI服务
    */
-  async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[], callbacks: StreamCallbacks): Promise<void> {
+  async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[],
+    callbacks: StreamCallbacks): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-  const sanitizedApiUrl = (apiUrl || '').trim();
-  const sanitizedModel = this.sanitizeIdentifier(model || '');
-  const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
+      const sanitizedApiUrl = (apiUrl || '').trim();
+      const sanitizedModel = this.sanitizeIdentifier(model || '');
+      const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
       console.info('Starting stream chat request...');
       console.info('API URL:', sanitizedApiUrl);
@@ -133,7 +141,7 @@ export class NetworkManager {
       let timeoutId: number | null = null;
 
       // 如果API URL已经包含完整路径，直接使用；否则拼接 /chat/completions
-  const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
+      const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
 
       const requestMessages: RequestMessage[] = messages.map(msg => {
         const requestMsg: RequestMessage = {
@@ -190,14 +198,14 @@ export class NetworkManager {
         reject(new Error('请求超时'));
       }, 30000);
 
-    // 按需订阅HTTP流式响应事件
-  const parseState: StreamParseState = { metadataDispatched: false, completed: false, errorDispatched: false };
-  const bufferState: StreamBufferState = { pending: '' };
-  // 捕获非 SSE 的错误响应体（如 HTTP 4xx/5xx 返回 JSON 文本）
-  let rawErrorBody: string = '';
+      // 按需订阅HTTP流式响应事件
+      const parseState: StreamParseState = { metadataDispatched: false, completed: false, errorDispatched: false };
+      const bufferState: StreamBufferState = { pending: '' };
+      // 捕获非 SSE 的错误响应体（如 HTTP 4xx/5xx 返回 JSON 文本）
+      let rawErrorBody: string = '';
 
       // 订阅HTTP流式响应数据接收事件
-  httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+      httpRequest.on('dataReceive', (data: ArrayBuffer) => {
         // 将 ArrayBuffer 转换为字符串 - 使用 UTF-8 解码
         const uint8Array = new Uint8Array(data);
         let chunk = this.utf8ArrayToString(uint8Array);
@@ -335,7 +343,7 @@ export class NetworkManager {
         usingProtocol: http.HttpProtocol.HTTP1_1
       };
 
-  httpRequest.requestInStream(url, streamOptions).then((responseCode: number) => {
+      httpRequest.requestInStream(url, streamOptions).then((responseCode: number) => {
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
@@ -352,7 +360,7 @@ export class NetworkManager {
         }
         this.destroyStreamRequest(httpRequest);
         resolve();
-  }).catch((err: Error) => {
+      }).catch((err: Error) => {
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
@@ -390,7 +398,8 @@ export class NetworkManager {
   /**
    * 解析 Server-Sent Events (SSE) 格式的流数据块
    */
-  private processSSEChunk(buffer: StreamBufferState, chunk: string | null, callbacks: StreamCallbacks, state: StreamParseState): void {
+  private processSSEChunk(buffer: StreamBufferState, chunk: string | null, callbacks: StreamCallbacks,
+    state: StreamParseState): void {
     if (chunk && chunk.length > 0) {
       buffer.pending += chunk;
     }
@@ -481,30 +490,26 @@ export class NetworkManager {
       }
       if (jsonData.choices && jsonData.choices.length > 0) {
         const delta = jsonData.choices[0].delta;
-        if (delta && delta.content) {
-          console.info('Received SSE content chunk:', delta.content);
-          callbacks.onData(delta.content);
+
+        // 检查并处理 reasoning_content
+        if (delta.reasoning_content && typeof delta.reasoning_content === 'string' &&
+          delta.reasoning_content.length > 0) {
+          // 如果是第一个 reasoning_content 块，添加起始标签
+          if (!state.reasoningStarted) {
+            callbacks.onData('<reasoning_content>');
+            state.reasoningStarted = true;
+          }
+          callbacks.onData(delta.reasoning_content);
         }
-        if (delta && delta.reasoning_content) {
-          let reasoningChunk: string = '';
-          const reasoningContent = delta.reasoning_content;
-          if (typeof reasoningContent === 'string') {
-            reasoningChunk = reasoningContent;
-          } else if (Array.isArray(reasoningContent)) {
-            const parts: Array<string> = [];
-            reasoningContent.forEach((entry: string | ReasoningContentItem) => {
-              if (typeof entry === 'string') {
-                parts.push(entry);
-              } else if (entry && typeof entry.text === 'string') {
-                parts.push(entry.text);
-              }
-            });
-            reasoningChunk = parts.join('');
+
+        // 检查并处理 content
+        if (delta.content) {
+          // 如果是从 reasoning_content 过渡到 content，先闭合 reasoning_content 标签
+          if (state.reasoningStarted) {
+            callbacks.onData('</reasoning_content>');
+            state.reasoningStarted = false; // 确保只闭合一次
           }
-          if (reasoningChunk && reasoningChunk.length > 0) {
-            console.info('Received SSE reasoning content:', reasoningChunk);
-            callbacks.onData(reasoningChunk);
-          }
+          callbacks.onData(delta.content);
         }
       }
     } catch (parseError) {
@@ -527,18 +532,24 @@ export class NetworkManager {
         result += String.fromCharCode(byte1);
       } else if ((byte1 & 0xE0) === 0xC0) {
         // 双字节字符
-        if (i >= array.length) break;
+        if (i >= array.length) {
+          break;
+        }
         let byte2 = array[i++];
         result += String.fromCharCode(((byte1 & 0x1F) << 6) | (byte2 & 0x3F));
       } else if ((byte1 & 0xF0) === 0xE0) {
         // 三字节字符
-        if (i + 1 >= array.length) break;
+        if (i + 1 >= array.length) {
+          break;
+        }
         let byte2 = array[i++];
         let byte3 = array[i++];
         result += String.fromCharCode(((byte1 & 0x0F) << 12) | ((byte2 & 0x3F) << 6) | (byte3 & 0x3F));
       } else if ((byte1 & 0xF8) === 0xF0) {
         // 四字节字符 (代理对)
-        if (i + 2 >= array.length) break;
+        if (i + 2 >= array.length) {
+          break;
+        }
         let byte2 = array[i++];
         let byte3 = array[i++];
         let byte4 = array[i++];
@@ -568,9 +579,9 @@ export class NetworkManager {
     modelName: string,
     messages: ChatMessage[]
   ): Promise<string> {
-  const sanitizedApiUrl = (apiUrl || '').trim();
-  const sanitizedModel = this.sanitizeIdentifier(modelName || '');
-  const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
+    const sanitizedApiUrl = (apiUrl || '').trim();
+    const sanitizedModel = this.sanitizeIdentifier(modelName || '');
+    const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
     console.info('NetworkManager: Starting chat request');
     console.info('API URL:', sanitizedApiUrl);
@@ -617,11 +628,11 @@ export class NetworkManager {
         readTimeout: Constants.DEFAULT_TIMEOUT
       };
 
-  console.info('Sending chat request to:', requestUrl);
+      console.info('Sending chat request to:', requestUrl);
       console.info('Request body:', JSON.stringify(requestBody, null, 2));
 
       // 发送请求
-  httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
+      httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
         if (err) {
           console.error('HTTP request failed:', err);
           httpRequest.destroy();
@@ -648,7 +659,8 @@ export class NetworkManager {
             let errorMessage = `请求失败，状态码: ${data.responseCode}`;
             try {
               console.error('HTTP error response body:', data.result as string);
-            } catch (_) {}
+            } catch (_) {
+            }
 
             try {
               const errorData = JSON.parse(data.result as string) as ErrorResponse;

@@ -17,7 +17,7 @@ import { Constants } from '../components/Constants';
 
 import inputMethod from '@ohos.inputMethod';
 
-const uiContext: UIContext | undefined = AppStorage.get('uiContext');
+const uiContext: UIContext | undefined = AppStorage.get('uiContext') as (UIContext | undefined);
 
 // 定义模型信息接口
 interface ModelInfo {
@@ -79,6 +79,7 @@ struct Chat {
   @State conversations: Conversation[] = [];
   @State showModelSelectorSheet: boolean = false; // 控制半模态弹窗显示
   @State customPopup: boolean = false; // 更多按钮
+  @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
 
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
@@ -88,6 +89,7 @@ struct Chat {
   private previousSettingsVersion: number = 0;
   private pendingSettingsReload: Promise<void> | null = null;
   private requestedSettingsVersion: number = 0;
+  private handledReloadVersion: number = 0;
 
   private cloneChatMessage(message: ChatMessage): ChatMessage {
     const clone = new ChatMessage(message.content, message.role, {
@@ -278,9 +280,8 @@ struct Chat {
 
                     if (!this.hasSettings) {
                       Button('配置API设置')
-                        .borderRadius(24)
+                        .buttonStyle(ButtonStyleMode.NORMAL)
                         .padding({ left: 20, right: 20 })
-                        .height(48)
                         .margin({ top: 16 })
                         .onClick(() => {
                           this.pathStack.pushPathByName("Settings", null, false);
@@ -330,48 +331,49 @@ struct Chat {
                 }
               }
 
-              // 输入区域
-              Row() {
+              // 输入
+              Column() {
                 TextArea({ placeholder: '输入你的消息...', text: this.inputText })
-                  .layoutWeight(1)
-                  .constraintSize({
-                    minHeight: 40,
-                    maxHeight: 999 // 最大高度
-                  })
                   .fontSize(16)
-                  .maxLines(5)
-                  .borderRadius(20)
-                  .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                  .border({ width: 1 })
+                  .backgroundColor($r('app.color.input_area_color'))
+                  .showCounter(true)
+                  .minLines(1)
                   .onChange((value: string) => {
                     this.inputText = value;
                   })
 
-                Button() {
-                  if (this.isLoading) {
-                    LoadingProgress()
-                      .width(24)
-                      .height(24)
-                      .color(Color.Red)
-                  } else {
-                    Image($r('app.media.send_plane_line'))
-                      .size({ width: 24, height: 24 })
-                      .fillColor($r('sys.color.ohos_id_color_text_primary'))
+                Row() {
+                  Button() {
+                    if (this.isLoading) {
+                      LoadingProgress()
+                        .width(24)
+                        .height(24)
+                        .color(Color.Red)
+                    } else {
+                      SymbolGlyph($r('sys.symbol.arrow_up_circle'))
+                        .fontSize(24)
+                        .fontColor([$r('app.color.text_color')])
+                    }
                   }
+                  .type(ButtonType.Circle)
+                  .backgroundColor($r('sys.color.button_background_color_transparent'))
+                  .size({ width: 40, height: 40 })
+                  .margin({right:12})
+                  .enabled(this.inputText.trim() !== '' && !this.isLoading)
+                  .onClick(() => {
+                    this.sendMessage();
+                  })
                 }
-                .type(ButtonType.Circle)
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
-                .size({ width: 40, height: 40 })
-                .margin({ left: 12 })
-                .enabled(this.inputText.trim() !== '' && !this.isLoading)
-                .onClick(() => {
-                  this.sendMessage();
-                })
+                .margin( {bottom: 12} ) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
               }
-              .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
+              .backgroundColor($r('app.color.input_area_color'))
+              .borderWidth({top:1})
+              .borderColor($r('app.color.text_secondary'))
+              .borderRadius({topLeft:20, topRight:20})
               .width('100%')
-              .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-              .alignItems(VerticalAlign.Bottom)
+              .padding({ left: 2, right: 2, top: 6, bottom: 4 })
+              .alignItems(HorizontalAlign.End)
+
             }
             .width('100%')
             .height('100%')
@@ -448,13 +450,27 @@ struct Chat {
     await this.initializeApp();
     this.previousSettingsVersion = this.normalizeSettingsVersion(this.settingsVersion);
     this.requestedSettingsVersion = this.previousSettingsVersion;
+    this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
   }
 
   async onPageShow() {
-    // 页面显示时重新加载设置（从设置页面返回时）
+    const latestVersion = this.conversationsReloadVersion ?? 0;
+
+    // 页面显示时，若检测到刷新版本变化，则强制重新加载对话/消息
+    if (latestVersion !== this.handledReloadVersion) {
+      console.info(`Chat: onPageShow detected conversationsReloadVersion change -> ${latestVersion} (handled=${this.handledReloadVersion})`);
+      this.currentConversation = null;
+      this.messages = [];
+      this.conversations = [];
+      this.handledReloadVersion = latestVersion;
+      await this.reloadChatState('conversationsReloadVersion');
+      return;
+    }
+
     if (this.isInitialized) {
-      console.info('Chat: onPageShow triggered, reloading chat state');
+      // 如果不是因为清空数据，则按原逻辑检查设置版本
+      console.info('Chat: onPageShow triggered, reloading chat state due to settings version.');
       await this.reloadChatState('onPageShow');
     }
   }
@@ -470,6 +486,12 @@ struct Chat {
       const context = getContext(this) as common.UIAbilityContext;
       await this.databaseManager.initDatabase(context);
 
+      // 补充 AppStorage 默认值
+  const storedReloadVersion: number | undefined = AppStorage.get('conversationsReloadVersion') as (number | undefined);
+      if (typeof storedReloadVersion !== 'number' || Number.isNaN(storedReloadVersion)) {
+        AppStorage.SetOrCreate('conversationsReloadVersion', 0);
+      }
+
       // 加载设置
       await this.loadSettings();
 
@@ -482,6 +504,7 @@ struct Chat {
       // 加载聊天记录
       await this.loadChatHistory();
 
+    this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
       this.isInitialized = true;
     } catch (error) {
       console.error('Failed to initialize app:', error);
@@ -1909,7 +1932,7 @@ struct Chat {
       .type(ButtonType.Normal)
       .width(140)
       .height(40)
-      .backgroundColor($r('app.color.dialog_button_bac_color'))
+      .backgroundColor($r('sys.color.button_background_color_transparent'))
       .onClick(() => {
         this.customPopup = false;
         this.switchModel();

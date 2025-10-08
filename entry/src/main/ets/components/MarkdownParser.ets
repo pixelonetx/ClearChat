@@ -1,5 +1,6 @@
 /**
  * Markdown块类型枚举
+ * 定义了支持的Markdown块类型
  */
 export enum MarkdownBlockType {
   PARAGRAPH = 'paragraph',
@@ -13,6 +14,7 @@ export enum MarkdownBlockType {
 
 /**
  * 表格列对齐方式
+ * 定义了表格中列的对齐方式
  */
 export enum TableAlignment {
   LEFT = 'left',
@@ -22,6 +24,7 @@ export enum TableAlignment {
 
 /**
  * 表格列信息
+ * 定义了表格列的属性，包括对齐方式和宽度信息
  */
 export interface TableColumn {
   alignment: TableAlignment;
@@ -31,6 +34,7 @@ export interface TableColumn {
 
 /**
  * Markdown块接口
+ * 定义了Markdown块的基本结构和属性
  */
 export interface MarkdownBlock {
   type: MarkdownBlockType;
@@ -47,6 +51,7 @@ export interface MarkdownBlock {
 
 /**
  * 文本格式化片段
+ * 定义了文本的格式化属性，包括粗体、斜体、代码、删除线和链接等
  */
 export interface TextSegment {
   text: string;
@@ -60,6 +65,7 @@ export interface TextSegment {
 
 /**
  * 代码块解析结果类型
+ * 包含解析后的代码块和下一个解析位置的索引
  */
 interface CodeBlockResult {
   block: MarkdownBlock;
@@ -68,6 +74,7 @@ interface CodeBlockResult {
 
 /**
  * 列表解析结果类型
+ * 包含解析后的列表块和下一个解析位置的索引
  */
 interface ListResult {
   block: MarkdownBlock;
@@ -76,6 +83,7 @@ interface ListResult {
 
 /**
  * 段落解析结果类型
+ * 包含解析后的段落块和下一个解析位置的索引
  */
 interface ParagraphResult {
   block: MarkdownBlock;
@@ -84,6 +92,7 @@ interface ParagraphResult {
 
 /**
  * 表格解析结果类型
+ * 包含解析后的表格块和下一个解析位置的索引
  */
 interface TableResult {
   block: MarkdownBlock;
@@ -92,6 +101,7 @@ interface TableResult {
 
 /**
  * 引用解析结果类型
+ * 包含解析后的引用块和下一个解析位置的索引
  */
 interface QuoteResult {
   block: MarkdownBlock;
@@ -100,10 +110,13 @@ interface QuoteResult {
 
 /**
  * Markdown解析器类
+ * 提供将Markdown文本解析为结构化数据的功能
  */
 export class MarkdownParser {
   /**
    * 解析Markdown文本
+   * @param markdown 要解析的Markdown文本
+   * @returns 解析后的Markdown块数组
    */
   parse(markdown: string): MarkdownBlock[] {
     const lines = markdown.split('\n');
@@ -180,15 +193,29 @@ export class MarkdownParser {
 
   /**
    * 解析代码块
+   * @param lines 行数组
+   * @param startIndex 起始索引
+   * @returns 代码块解析结果
    */
   private parseCodeBlock(lines: string[], startIndex: number): CodeBlockResult {
-    const startLine = lines[startIndex];
-    const language = startLine.substring(3).trim();
+    const startLine = lines[startIndex].trim();
+    const fence = startLine.match(/^(`{3,}|~{3,})/)?.[0];
+    if (!fence) {
+      // This should not happen if called after isCodeBlockStart
+      return this.parseParagraphBlock(lines, startIndex);
+    }
+
+    const language = startLine.substring(fence.length).trim();
     const codeLines: string[] = [];
     let i = startIndex + 1;
 
-    while (i < lines.length && !lines[i].trim().startsWith('```')) {
-      codeLines.push(lines[i]);
+    while (i < lines.length) {
+      const currentLine = lines[i];
+      if (currentLine.trim().startsWith(fence)) {
+        i++; // Consume the closing fence
+        break;
+      }
+      codeLines.push(currentLine);
       i++;
     }
 
@@ -198,7 +225,7 @@ export class MarkdownParser {
         content: codeLines.join('\n'),
         language: language || 'text'
       },
-      nextIndex: i + 1
+      nextIndex: i
     };
 
     return blockResult;
@@ -206,6 +233,8 @@ export class MarkdownParser {
 
   /**
    * 解析标题
+   * @param line 标题行文本
+   * @returns 解析后的标题块
    */
   private parseHeading(line: string): MarkdownBlock {
     const match = line.match(/^(#{1,6})\s+(.+)$/);
@@ -227,6 +256,9 @@ export class MarkdownParser {
 
   /**
    * 解析引用块
+   * @param lines 行数组
+   * @param startIndex 起始索引
+   * @returns 引用块解析结果
    */
   private parseQuoteBlock(lines: string[], startIndex: number): QuoteResult {
     const contents: string[] = [];
@@ -265,6 +297,9 @@ export class MarkdownParser {
 
   /**
    * 解析列表
+   * @param lines 行数组
+   * @param startIndex 起始索引
+   * @returns 列表解析结果
    */
   private parseList(lines: string[], startIndex: number): ListResult {
     const items: string[] = [];
@@ -341,6 +376,9 @@ export class MarkdownParser {
 
   /**
    * 解析表格
+   * @param lines 行数组
+   * @param startIndex 起始索引
+   * @returns 表格解析结果
    */
   private parseTable(lines: string[], startIndex: number): TableResult {
     const tableData: string[][] = [];
@@ -465,31 +503,67 @@ export class MarkdownParser {
     return tableResult;
   }
 
+  /**
+   * 判断是否为代码块开始行
+   * @param line 要检查的行
+   * @returns 如果是代码块开始行返回true，否则返回false
+   */
   private isCodeBlockStart(line: string): boolean {
-    return line.startsWith('```');
+    return line.trim().startsWith('```') || line.trim().startsWith('~~~');
   }
 
+  /**
+   * 判断是否为标题行
+   * @param line 要检查的行
+   * @returns 如果是标题行返回true，否则返回false
+   */
   private isHeadingLine(line: string): boolean {
     return /^#{1,6}\s+/.test(line);
   }
 
+  /**
+   * 判断是否为引用行
+   * @param line 要检查的行
+   * @returns 如果是引用行返回true，否则返回false
+   */
   private isQuoteLine(line: string): boolean {
     return line.startsWith('>');
   }
 
+  /**
+   * 判断是否为水平线
+   * @param line 要检查的行
+   * @returns 如果是水平线返回true，否则返回false
+   */
   private isHorizontalRule(line: string): boolean {
     const trimmed = line.trim();
     return trimmed === '---' || trimmed === '***' || trimmed === '___';
   }
 
+  /**
+   * 判断是否为列表行
+   * @param line 要检查的行
+   * @returns 如果是列表行返回true，否则返回false
+   */
   private isListLine(line: string): boolean {
     return /^(\s{0,3})([-*+]|(\d+)\.)\s+/.test(line);
   }
 
+  /**
+   * 判断是否为表格分隔行
+   * @param line 要检查的行
+   * @returns 如果是表格分隔行返回true，否则返回false
+   */
   private isTableSeparatorLine(line: string): boolean {
     return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test(line.trim());
   }
 
+  /**
+   * 判断是否为表格开始
+   * @param lines 行数组
+   * @param index 当前索引
+   * @returns 如果是表格开始返回true，否则返回false
+   */
   private isTableStart(lines: string[], index: number): boolean {
     const currentLine = lines[index];
     if (!currentLine || currentLine.trim() === '') {
@@ -504,6 +578,11 @@ export class MarkdownParser {
     return this.isTableSeparatorLine(nextLine);
   }
 
+  /**
+   * 判断是否为新块开始
+   * @param trimmedLine 要检查的行（已去除前后空格）
+   * @returns 如果是新块开始返回true，否则返回false
+   */
   private startsNewBlock(trimmedLine: string): boolean {
     return this.isCodeBlockStart(trimmedLine)
       || this.isHeadingLine(trimmedLine)
@@ -514,6 +593,8 @@ export class MarkdownParser {
 
   /**
    * 计算文本宽度（考虑中文字符）
+   * @param text 要计算宽度的文本
+   * @returns 文本的显示宽度
    */
   private getTextWidth(text: string): number {
     let width = 0;
@@ -531,6 +612,8 @@ export class MarkdownParser {
 
   /**
    * 判断是否为全角字符
+   * @param char 要检查的字符
+   * @returns 如果是全角字符返回true，否则返回false
    */
   private isFullWidth(char: string): boolean {
     const code = char.charCodeAt(0);
@@ -551,6 +634,9 @@ export class MarkdownParser {
 
   /**
    * 格式化表格为对齐的字符串
+   * @param tableData 表格数据
+   * @param tableColumns 表格列信息
+   * @returns 格式化后的表格字符串
    */
   formatTable(tableData: string[][], tableColumns: TableColumn[]): string {
     if (!tableData.length || !tableColumns.length) {
@@ -612,7 +698,7 @@ export class MarkdownParser {
    * 获取表格列的标准化宽度（用于UI渲染）
    * @param tableColumns 表格列信息
    * @param totalWidth 表格总宽度
-   * @param minColumnWidth 最小列宽度
+   * @param minColumnWidth 最小列宽度，默认为60
    * @returns 每列的实际宽度数组
    */
   getTableColumnWidths(
@@ -641,6 +727,8 @@ export class MarkdownParser {
 
   /**
    * 获取单元格的对齐样式
+   * @param alignment 表格对齐方式
+   * @returns 对应的Flex对齐样式字符串
    */
   getCellAlignment(alignment: TableAlignment): string {
     switch (alignment) {
@@ -657,6 +745,9 @@ export class MarkdownParser {
 
   /**
    * 解析段落，支持多行合并
+   * @param lines 行数组
+   * @param startIndex 起始索引
+   * @returns 段落解析结果
    */
   private parseParagraphBlock(lines: string[], startIndex: number): ParagraphResult {
     const collectedLines: string[] = [];
@@ -692,6 +783,8 @@ export class MarkdownParser {
 
   /**
    * 解析文本格式化
+   * @param text 要解析的文本
+   * @returns 文本格式化片段数组
    */
   parseTextFormatting(text: string): TextSegment[] {
     const segments: TextSegment[] = [];
@@ -753,6 +846,11 @@ export class MarkdownParser {
   }
 
   // 解析格式化文本，不包括链接
+  /**
+   * 解析格式化文本，不包括链接
+   * @param text 要解析的文本
+   * @returns 文本格式化片段数组
+   */
   private parseFormattingWithoutLinks(text: string): TextSegment[] {
     const segments: TextSegment[] = [];
     const chars = text.split('');

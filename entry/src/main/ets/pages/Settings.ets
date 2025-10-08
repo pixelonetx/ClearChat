@@ -1,7 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
-import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { BrowserHelper } from '../services/BrowserHelper';
@@ -190,16 +189,13 @@ struct Settings {
 
   private async clearAllData() {
     try {
-      // 获取所有对话
-      const conversations: Conversation[] = await this.databaseManager.getAllConversations();
+      // 清空所有对话及消息
+      await this.databaseManager.clearAllConversations();
 
-      // 删除每个对话
-      for (const conversation of conversations) {
-        await this.databaseManager.deleteConversation(conversation.id);
-      }
-
-      // 清空默认对话的聊天记录
-      await this.databaseManager.clearChatHistory();
+  // 递增刷新版本号，通知聊天页面重新加载
+  const currentVersion = AppStorage.get('conversationsReloadVersion') as number | undefined;
+  const nextVersion = (currentVersion ?? 0) + 1;
+  AppStorage.SetOrCreate('conversationsReloadVersion', nextVersion);
 
       try {
         promptAction.showToast({ message: '数据已清空' });

@@ -23,6 +23,26 @@
     {
       "name": "img_color",
       "value": "#000000"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#8A8A8E"
+    },
+    {
+      "name": "icon_secondary",
+      "value": "#8A8A8E"
+    },
+    {
+      "name": "bg_secondary",
+      "value": "#F2F2F7"
+    },
+    {
+      "name": "border_primary",
+      "value": "#E5E5EA"
+    },
+    {
+      "name": "input_area_color",
+      "value": "#66ffffff"
     }
   ]
 }

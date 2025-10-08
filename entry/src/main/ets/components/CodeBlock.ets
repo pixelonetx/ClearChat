@@ -27,13 +27,12 @@ export struct CodeBlock {
         Row() {
           Text(this.language)
             .fontSize(12)
-            .fontColor('#666666')
+            .fontColor($r('app.color.text_sec_color'))
             .margin({ left: 12 })
         }
         .layoutWeight(1)
         .height(32)
         .alignItems(VerticalAlign.Center)
-        .backgroundColor('#F6F6F6') // 稍微深一点的背景色，区分标题和内容
         .borderRadius({ topLeft: 8 })
 
         // 复制按钮
@@ -42,11 +41,11 @@ export struct CodeBlock {
             Row({ space: 4 }) {
               Text('复制')
                 .fontSize(12)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_sec_color'))
             }
           }
+          .backgroundColor($r('app.color.bg_secondary'))
           .type(ButtonType.Normal)
-          .backgroundColor(Color.Transparent)
           .border({ width: 1, color: '#E0E0E0', radius: 4 })
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .onClick(() => {
@@ -56,17 +55,16 @@ export struct CodeBlock {
         .height(32)
         .alignItems(VerticalAlign.Center)
         .padding({ right: 12 })
-        .backgroundColor('#F6F6F6')
         .borderRadius({ topRight: 8 })
       }
-      //.width('100%')
+      .width('100%')
       .justifyContent(FlexAlign.SpaceBetween)
 
       // 代码内容区域
       Scroll() {
         Text(this.content)
           .fontSize(13)
-          .fontColor('#333333')
+          .fontColor($r('sys.color.ohos_fa_text_secondary'))
           .fontFamily('Monaco, Menlo, "Ubuntu Mono", monospace')
           .padding(12)
           .textAlign(TextAlign.Start)
@@ -77,17 +75,14 @@ export struct CodeBlock {
       }
       .scrollable(ScrollDirection.Horizontal)
       .scrollBar(BarState.Auto)
-      .scrollBarColor('#CCCCCC')
       .scrollBarWidth(4)
-      .backgroundColor('#F8F8F8')
       .edgeEffect(EdgeEffect.None)
       .borderRadius({ bottomLeft: 8, bottomRight: 8 })
     }
     .border({ width: 1, color: '#E0E0E0' })
     .borderRadius(8)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor('#F8F8F8')
+    .backgroundColor($r('app.color.bg_secondary'))
     .margin({ top: 8, bottom: 8 })
-    .constraintSize({ maxWidth: '100%' }) // 确保代码块不超出父容器)
   }
 }
