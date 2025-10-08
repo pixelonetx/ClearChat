@@ -173,6 +173,21 @@ struct ModelSettings {
   private async persistSettingsSilently() {
     const settings = this.buildSettingsPayload();
     await this.databaseManager.saveSettings(settings);
+    this.notifySettingsUpdated();
+  }
+
+  private notifySettingsUpdated() {
+    try {
+      const version = Date.now();
+      const updated = AppStorage.Set('settingsVersion', version);
+      console.info('ModelSettings: bump settingsVersion', version, 'updated existing key:', updated);
+      if (!updated) {
+        AppStorage.SetOrCreate('settingsVersion', version);
+        console.info('ModelSettings: settingsVersion created with value', version);
+      }
+    } catch (error) {
+      console.error('Failed to update settings version:', error);
+    }
   }
 
   private showToast(message: string) {
@@ -699,8 +714,17 @@ struct ModelSettings {
                 width: 1
               })
               .borderRadius(24)
-              .onClick(async () => {
-                await this.deleteProvider(providerIndex);
+              .onClick(() => {
+                const targetName = provider.displayName || provider.name || provider.id || '该服务商';
+                NativeDialogHelper.showDeleteConfirmDialog(
+                  targetName,
+                  '此操作无法撤销，服务商及其模型配置将永久删除。',
+                  () => {
+                    this.deleteProvider(providerIndex).catch((error: Error) => {
+                      console.error('Failed to delete provider after confirmation:', error);
+                    });
+                  }
+                );
               })
           }
         }

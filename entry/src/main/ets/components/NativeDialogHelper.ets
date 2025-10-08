@@ -27,17 +27,17 @@ export class NativeDialogHelper {
       message: dialogMessage,
       autoCancel: true,
       primaryButton: {
-        value: '删除',
-        fontColor: '#FF4757',
-        action: () => {
-          onConfirm?.();
-        }
-      },
-      secondaryButton: {
         value: '取消',
         fontColor: '#666666',
         action: () => {
           onCancel?.();
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: '#FF4757',
+        action: () => {
+          onConfirm?.();
         }
       },
       cancel: () => {
@@ -64,17 +64,17 @@ export class NativeDialogHelper {
       message: message,
       autoCancel: true,
       primaryButton: {
-        value: '确认',
-        fontColor: '#FFA726',
-        action: () => {
-          onConfirm?.();
-        }
-      },
-      secondaryButton: {
         value: '取消',
         fontColor: '#666666',
         action: () => {
           onCancel?.();
+        }
+      },
+      secondaryButton: {
+        value: '确认',
+        fontColor: '#FFA726',
+        action: () => {
+          onConfirm?.();
         }
       },
       cancel: () => {
@@ -122,17 +122,17 @@ export class NativeDialogHelper {
       message: '此操作将删除所有对话记录、模型配置和设置信息。\n\n此操作无法撤销，请谨慎操作！',
       autoCancel: true,
       primaryButton: {
-        value: '清除',
-        fontColor: '#FF4757',
-        action: () => {
-          onConfirm?.();
-        }
-      },
-      secondaryButton: {
         value: '取消',
         fontColor: '#666666',
         action: () => {
           onCancel?.();
+        }
+      },
+      secondaryButton: {
+        value: '清除',
+        fontColor: '#FF4757',
+        action: () => {
+          onConfirm?.();
         }
       },
       cancel: () => {

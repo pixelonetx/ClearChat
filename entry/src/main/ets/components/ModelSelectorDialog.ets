@@ -18,13 +18,6 @@ export struct ModelSelectorSheet {
 
   build() {
     Column() {
-      // 标题
-      Text('选择AI模型')
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium)
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .padding({ left: 20, right: 20, top: 16, bottom: 20 })
 
       // 提供商和模型列表
       if (this.providers.length > 0) {
@@ -52,19 +45,14 @@ export struct ModelSelectorSheet {
 
                     if (provider.id === this.currentProviderId &&
                       model.id === this.currentModelId) {
-                      Stack() {
-                        Circle({ width: 20, height: 20 })
-
-                        Text('✓')
-                          .fontSize(12)
-                          .fontColor(Color.White)
-                          .fontWeight(FontWeight.Bold)
-                      }
+                      SymbolGlyph($r('sys.symbol.checkmark_circle'))
+                        .fontSize(16)
+                        .fontColor([Color.Green])
                     }
                   }
                   .width('100%')
-                  .height(64)
-                  .padding({ left: 20, right: 20 })
+                  .height(56)
+                  .padding({ left: 20, right: 28 })
                   .borderRadius(12)
                   .margin({ left: 12, right: 12, bottom: 4 })
                   .onClick(() => {
@@ -101,6 +89,5 @@ export struct ModelSelectorSheet {
     .width('100%')
     .height('100%')
     .borderRadius({ topLeft: 16, topRight: 16 })
-    .padding({ bottom: 0 }) // 确保内容延伸到底部
   }
 }

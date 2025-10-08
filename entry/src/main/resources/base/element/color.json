@@ -15,6 +15,14 @@
     {
       "name": "text_sec_color",
       "value": "#99000000"
+    },
+    {
+      "name": "dialog_button_bac_color",
+      "value": "#ffffffff"
+    },
+    {
+      "name": "img_color",
+      "value": "#000000"
     }
   ]
 }

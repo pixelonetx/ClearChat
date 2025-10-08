@@ -198,21 +198,21 @@ export struct MessageItem {
           Column() {
             Text(this.message.content)
               .fontSize(14)
-              .fontColor($r('sys.color.ohos_id_color_text_primary'))
+              .fontColor($r('app.color.text_color'))
               .maxLines(999)
               .textOverflow({ overflow: TextOverflow.None })
               .wordBreak(WordBreak.BREAK_ALL)
           }
-          // .padding(16)
+          .padding(12)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
-          // .backgroundColor('#F3F4F6')
+          .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
           // .constraintSize({
           //   minWidth: 40,  // 减小最小宽度，适合短消息
           //   minHeight: 36  // 保持最小高度，防止变成小圆形
           // })
         }
-        // .constraintSize({ maxWidth: '85%' })
+        .constraintSize({ maxWidth: '85%' })
       }
       .width('100%')
       .alignItems(VerticalAlign.Top)
@@ -301,7 +301,7 @@ export struct MessageItem {
       Blank()
     }
     .width('100%')
-    .margin({ bottom: Constants.MESSAGE_MARGIN })
+    .margin({ bottom: 12 })
   }
 
   build() {

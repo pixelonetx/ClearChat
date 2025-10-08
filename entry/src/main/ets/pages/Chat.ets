@@ -62,6 +62,8 @@ struct Chat {
   bottomRectHeight: number = 0;
   @StorageProp('topRectHeight')
   topRectHeight: number = 0;
+  @StorageProp('settingsVersion')
+  settingsVersion: number = 0;
   @State showControlButton: boolean = true // 显示控制按钮开关
   @State showSideBar: boolean = false // 显示侧边栏开关
 
@@ -76,12 +78,16 @@ struct Chat {
   @State backgroundBlurRadius: number = 0; // 控制背景模糊程度
   @State conversations: Conversation[] = [];
   @State showModelSelectorSheet: boolean = false; // 控制半模态弹窗显示
+  @State customPopup: boolean = false; // 更多按钮
 
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
   private scroller: Scroller = new Scroller();
   private currentSettings: AppSettings | null = null;
+  private previousSettingsVersion: number = 0;
+  private pendingSettingsReload: Promise<void> | null = null;
+  private requestedSettingsVersion: number = 0;
 
   private cloneChatMessage(message: ChatMessage): ChatMessage {
     const clone = new ChatMessage(message.content, message.role, {
@@ -229,14 +235,22 @@ struct Chat {
                 .type(ButtonType.Circle)
                 .size({ width: 40, height: 40 })
                 .backgroundColor($r('sys.color.button_background_color_transparent'))
-                .bindMenu([
-                  {
-                    value: '切换模型',
-                    action: () => {
-                      this.switchModel();
+                .onClick(() => {
+                  this.customPopup = !this.customPopup;
+                })
+                .bindPopup(this.customPopup, {
+                  builder: this.MoreOptionsPopup,
+                  // placement: Placement.BottomRight,
+                  // maskColor: Color.Transparent,
+                  // popupColor: Color.Transparent,
+                  enableArrow: true,
+                  showInSubWindow: true,
+                  onStateChange: (e) => {
+                    if (!e.isVisible) {
+                      this.customPopup = false;
                     }
                   }
-                ])
+                })
               }
               .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
               .width('100%')
@@ -321,8 +335,8 @@ struct Chat {
                 TextArea({ placeholder: '输入你的消息...', text: this.inputText })
                   .layoutWeight(1)
                   .constraintSize({
-                    minHeight: Constants.INPUT_MIN_HEIGHT,
-                    maxHeight: 120 // 最大高度约5行
+                    minHeight: 40,
+                    maxHeight: 999 // 最大高度
                   })
                   .fontSize(16)
                   .maxLines(5)
@@ -398,6 +412,7 @@ struct Chat {
             detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
             dragBar: true, // 启用默认拖拽条
             showClose: true, // 显示默认关闭按钮
+            title: { title: "选择模型" },
             onDisappear: () => {
               this.showModelSelectorSheet = false;
             }
@@ -417,7 +432,6 @@ struct Chat {
   private renameDialogController: CustomDialogController = new CustomDialogController({
     builder: RenameConversationDialog({}),
     autoCancel: true,
-
   });
 
   private showToast(message: string, duration: number = 2000) {
@@ -432,25 +446,22 @@ struct Chat {
 
   async aboutToAppear() {
     await this.initializeApp();
+    this.previousSettingsVersion = this.normalizeSettingsVersion(this.settingsVersion);
+    this.requestedSettingsVersion = this.previousSettingsVersion;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
   }
 
   async onPageShow() {
     // 页面显示时重新加载设置（从设置页面返回时）
     if (this.isInitialized) {
-      await this.loadSettings();
-      // 重新加载对话列表
-      await this.loadConversations();
-
-      // 如果没有对话了，重置当前对话和消息
-      if (this.conversations.length === 0) {
-        this.currentConversation = null;
-        this.messages = [];
-      } else {
-        // 重新加载聊天历史
-        await this.loadChatHistory();
-      }
+      console.info('Chat: onPageShow triggered, reloading chat state');
+      await this.reloadChatState('onPageShow');
     }
+  }
+
+  aboutToRender() {
+    this.logSettingsVersionState('aboutToRender before check');
+    this.checkSettingsVersionChange();
   }
 
   async initializeApp() {
@@ -526,6 +537,101 @@ struct Chat {
     } catch (error) {
       console.error('Failed to load settings:', error);
       this.hasSettings = false;
+    }
+  }
+
+  private async reloadChatState(reason: string = 'manual', targetVersion?: number): Promise<void> {
+    const desiredVersion = targetVersion ?? this.normalizeSettingsVersion(this.settingsVersion);
+    this.requestedSettingsVersion = desiredVersion;
+
+    if (!this.pendingSettingsReload) {
+      this.pendingSettingsReload = this.performSettingsReload(reason);
+    } else {
+      console.info(`Chat: settings reload already in progress, updated targetVersion=${this.requestedSettingsVersion}, reason=${reason}`);
+    }
+
+    try {
+      await this.pendingSettingsReload;
+    } finally {
+      // no-op: performSettingsReload will reset pendingSettingsReload when finished
+    }
+  }
+
+  private async performSettingsReload(initialReason: string): Promise<void> {
+    let attempt = 0;
+    try {
+      while (true) {
+        attempt += 1;
+        const targetVersion = this.requestedSettingsVersion;
+        console.info(`Chat: reloadChatState start [reason=${initialReason}] attempt=${attempt} targetVersion=${targetVersion}`);
+        await this.loadSettings();
+        await this.loadConversations();
+
+        if (this.conversations.length === 0) {
+          this.currentConversation = null;
+          this.messages = [];
+        } else {
+          await this.loadChatHistory();
+        }
+
+        this.previousSettingsVersion = targetVersion;
+        this.logSettingsVersionState('Chat: reloadChatState completed');
+
+        if (this.requestedSettingsVersion === targetVersion) {
+          break;
+        }
+
+        console.info('Chat: detected newer settings reload request during execution, repeating with latest targetVersion');
+      }
+    } catch (error) {
+      console.error('Chat: reloadChatState failed:', error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error));
+    } finally {
+      this.pendingSettingsReload = null;
+    }
+  }
+
+  private checkSettingsVersionChange() {
+    if (!this.isInitialized) {
+      return;
+    }
+
+    const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
+    if (currentVersion === this.previousSettingsVersion && !this.pendingSettingsReload) {
+      return;
+    }
+
+    console.info('Chat: detected settingsVersion change ->', currentVersion);
+    this.reloadChatState('settingsVersion change', currentVersion).catch((error: Error) => {
+      console.error('Failed to refresh chat after settings change:', error);
+    });
+  }
+
+  private normalizeSettingsVersion(value: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    return 0;
+  }
+
+  private logSettingsVersionState(prefix: string) {
+    const current = this.normalizeSettingsVersion(this.settingsVersion);
+    console.info(`${prefix}; currentVersion=${current}, previousVersion=${this.previousSettingsVersion}`);
+  }
+
+  private async waitForLatestSettings(reason: string): Promise<void> {
+    if (this.pendingSettingsReload) {
+      console.info(`Chat: awaiting pending settings reload before ${reason}`);
+      await this.pendingSettingsReload;
+    }
+
+    const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
+    if (currentVersion !== this.previousSettingsVersion) {
+      console.info(`Chat: settings version mismatch detected during ${reason}, triggering reload to ${currentVersion}`);
+      await this.reloadChatState(reason, currentVersion);
     }
   }
 
@@ -750,6 +856,8 @@ struct Chat {
     // 切换模型时隐藏键盘
     this.hideKeyboard();
 
+    await this.waitForLatestSettings('switchModel');
+
     // 显示半模态弹窗
     if (this.currentSettings && this.currentSettings.providers && this.currentSettings.providers.length > 0) {
       this.showModelSelectorSheet = true;
@@ -893,6 +1001,8 @@ struct Chat {
     if (!this.inputText.trim() || this.isLoading) {
       return;
     }
+
+    await this.waitForLatestSettings('sendMessage');
 
     // 发送消息后自动收起键盘
     this.hideKeyboard();
@@ -1097,10 +1207,6 @@ struct Chat {
                 message.systemFingerprint = meta.systemFingerprint;
                 metadataChanged = true;
               }
-              if (meta.model && message.modelName !== meta.model) {
-                message.modelName = meta.model;
-                metadataChanged = true;
-              }
               if (meta.created !== undefined) {
                 const createdTimestamp = meta.created * 1000;
                 if (message.timestamp < createdTimestamp) {
@@ -1298,6 +1404,8 @@ struct Chat {
       return;
     }
 
+    await this.waitForLatestSettings('regenerateMessage');
+
     // 重新生成时隐藏键盘，避免干扰
     this.hideKeyboard();
 
@@ -1396,10 +1504,6 @@ struct Chat {
               }
               if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
                 regeneratedMessage.systemFingerprint = meta.systemFingerprint;
-                metadataChanged = true;
-              }
-              if (meta.model && regeneratedMessage.modelName !== meta.model) {
-                regeneratedMessage.modelName = meta.model;
                 metadataChanged = true;
               }
               if (meta.created !== undefined) {
@@ -1789,6 +1893,28 @@ struct Chat {
     }
     .padding(4)
     .justifyContent(FlexAlign.SpaceEvenly)
+  }
+
+  @Builder
+  MoreOptionsPopup() {
+    Column({ space: 4 }) {
+      Button() {
+        Row() {
+          Text('切换模型')
+            .fontSize(14)
+            .fontColor($r('app.color.text_color'))
+        }
+        .alignItems(VerticalAlign.Center)
+      }
+      .type(ButtonType.Normal)
+      .width(140)
+      .height(40)
+      .backgroundColor($r('app.color.dialog_button_bac_color'))
+      .onClick(() => {
+        this.customPopup = false;
+        this.switchModel();
+      })
+    }
   }
 
   @Builder

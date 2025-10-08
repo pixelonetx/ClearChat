@@ -9,22 +9,18 @@ export struct ProviderSettingsDialog {
   @State private editableProvider: AIProvider = new AIProvider('', '', '');
 
   // 预定义的模型列表
+  // model.id, model.name, model.displayName, model.maxTokens, model.temperature
   private getPredefinedModels(providerType: string): AIModel[] {
-    if (providerType === 'openai') {
+    if (providerType === 'deepseek') {
       return [
-        new AIModel('gpt-3.5-turbo', 'gpt-3.5-turbo', 'GPT-3.5 Turbo', 4096, 0.7),
-        new AIModel('gpt-4', 'gpt-4', 'GPT-4', 8192, 0.7),
-        new AIModel('gpt-4-turbo', 'gpt-4-turbo', 'GPT-4 Turbo', 128000, 0.7)
+        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek Chat', 4000, 0.7),
+        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek Reasoner', 32000, 0.7)
       ];
     } else if (providerType === 'aliyun') {
       return [
-        new AIModel('qwen-flash', 'qwen-flash', 'Qwen Flash', 995904, 0.7),
-        new AIModel('qwen3-4b', 'qwen3-4b', 'Qwen3 4B', 129024, 0.7)
-      ];
-    } else if (providerType === 'deepseek') {
-      return [
-        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek Chat', 32768, 0.7),
-        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek Reasoner', 32768, 0.7)
+        new AIModel('qwen3-max', 'qwen3-max', 'qwen3-max', 258048, 0.7),
+        new AIModel('qwen-plus', 'qwen-plus', 'qwen-plus', 997952, 0.7),
+        new AIModel('qwen-flash', 'qwen-flash', 'qwen-flash', 997952, 0.7),
       ];
     } else {
       return [];
@@ -55,7 +51,7 @@ export struct ProviderSettingsDialog {
           .alignSelf(ItemAlign.Start)
           .margin({ bottom: 8 })
 
-        TextInput({ placeholder: '例如：OpenAI、DeepSeek、自定义', text: this.editableProvider.displayName })
+        TextInput({ placeholder: '如 DeepSeek 等', text: this.editableProvider.displayName })
           .height(48)
           .onChange((value: string) => {
             this.editableProvider.displayName = value;
@@ -76,7 +72,7 @@ export struct ProviderSettingsDialog {
           .alignSelf(ItemAlign.Start)
           .margin({ bottom: 8 })
 
-        TextInput({ placeholder: 'https://api.openai.com/v1', text: this.editableProvider.apiUrl })
+        TextInput({ placeholder: 'https://api.deepseek.com', text: this.editableProvider.apiUrl })
           .height(48)
           .onChange((value: string) => {
             this.editableProvider.apiUrl = value;
@@ -112,14 +108,6 @@ export struct ProviderSettingsDialog {
           .margin({ bottom: 8 })
 
         Row() {
-          Button('OpenAI')
-            .fontSize(12)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .borderRadius(16)
-            .onClick(() => {
-              this.loadPresetProvider('openai');
-            })
-
           Button('Qwen')
             .fontSize(12)
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
@@ -164,12 +152,6 @@ export struct ProviderSettingsDialog {
 
   private loadPresetProvider(providerType: string) {
     switch (providerType) {
-      case 'openai':
-        this.editableProvider.displayName = 'OpenAI';
-        this.editableProvider.name = 'openai';
-        this.editableProvider.apiUrl = 'https://api.openai.com/v1';
-        this.editableProvider.models = this.getPredefinedModels('openai');
-        break;
       case 'aliyun':
         this.editableProvider.displayName = '阿里云';
         this.editableProvider.name = 'aliyun';
