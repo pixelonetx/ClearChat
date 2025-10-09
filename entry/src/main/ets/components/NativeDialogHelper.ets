@@ -108,36 +108,36 @@ export class NativeDialogHelper {
     });
   }
 
-  /**
-   * 显示清除所有数据确认对话框
-   * @param onConfirm 确认回调
-   * @param onCancel 取消回调（可选）
-   */
-  static showClearAllDataDialog(
-    onConfirm?: () => void,
-    onCancel?: () => void
-  ): void {
-    AlertDialog.show({
-      title: '清除所有数据',
-      message: '此操作将删除所有对话记录、模型配置和设置信息。\n\n此操作无法撤销，请谨慎操作！',
-      autoCancel: true,
-      primaryButton: {
-        value: '取消',
-        fontColor: '#666666',
-        action: () => {
-          onCancel?.();
-        }
-      },
-      secondaryButton: {
-        value: '清除',
-        fontColor: '#FF4757',
-        action: () => {
-          onConfirm?.();
-        }
-      },
-      cancel: () => {
-        onCancel?.();
-      }
-    });
-  }
+  // /**
+  //  * 显示清除所有数据确认对话框
+  //  * @param onConfirm 确认回调
+  //  * @param onCancel 取消回调（可选）
+  //  */
+  // static showClearAllDataDialog(
+  //   onConfirm?: () => void,
+  //   onCancel?: () => void
+  // ): void {
+  //   AlertDialog.show({
+  //     title: '清除所有数据',
+  //     message: '此操作将删除所有对话记录、模型配置和设置信息。\n\n此操作无法撤销，请谨慎操作！',
+  //     autoCancel: true,
+  //     primaryButton: {
+  //       value: '取消',
+  //       fontColor: '#666666',
+  //       action: () => {
+  //         onCancel?.();
+  //       }
+  //     },
+  //     secondaryButton: {
+  //       value: '清除',
+  //       fontColor: '#FF4757',
+  //       action: () => {
+  //         onConfirm?.();
+  //       }
+  //     },
+  //     cancel: () => {
+  //       onCancel?.();
+  //     }
+  //   });
+  // }
 }
