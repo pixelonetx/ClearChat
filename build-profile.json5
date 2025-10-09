@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "D:/My_Program/Huawei/AppData/key_1.p12",
+          "storePassword": "0000001DA76A0F1CA942499C4AB677CA312FA332B36E2F1AE3C317299CCFB63BB0F7E9BB0BD20154CAD47F5E41",
+          "keyAlias": "MyFAKey",
+          "keyPassword": "0000001DA19BBA8F708E8B2AB97D44FF6FB09E6210B3CA7E3105339B5CAD61EA569051D9D05F9AD606B529CA34",
+          "signAlg": "SHA256withECDSA",
+          "profile": "D:\\My_Program\\Huawei\\AppData\\releaseProfile\\releaseProfile1Release.p7b",
+          "certpath": "D:/My_Program/Huawei/AppData/Certificate/Certificate1.cer"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",

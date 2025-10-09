@@ -40,16 +40,16 @@ struct Settings {
               }
             ]);
 
-            // 数据设置
-            this.SettingGroup('数据设置', [
-              {
-                title: '清空聊天记录',
-                onClick: () => {
-                  this.showClearDataDialog();
-                },
-                isDestructive: true
-              }
-            ]);
+            // // 数据设置
+            // this.SettingGroup('数据设置', [
+            //   {
+            //     title: '清空聊天记录',
+            //     onClick: () => {
+            //       this.showClearDataDialog();
+            //     },
+            //     isDestructive: true
+            //   }
+            // ]);
 
             // // 帮助与支持
             // this.SettingGroup('帮助与支持', [
@@ -181,37 +181,37 @@ struct Settings {
     })
   }
 
-  private async showClearDataDialog() {
-    NativeDialogHelper.showClearAllDataDialog(() => {
-      this.clearAllData();
-    });
-  }
+  // private async showClearDataDialog() {
+  //   NativeDialogHelper.showClearAllDataDialog(() => {
+  //     this.clearAllData();
+  //   });
+  // }
 
-  private async clearAllData() {
-    try {
-      // 清空所有对话及消息
-      await this.databaseManager.clearAllConversations();
-
-  // 递增刷新版本号，通知聊天页面重新加载
-  const currentVersion = AppStorage.get('conversationsReloadVersion') as number | undefined;
-  const nextVersion = (currentVersion ?? 0) + 1;
-  AppStorage.SetOrCreate('conversationsReloadVersion', nextVersion);
-
-      try {
-        promptAction.showToast({ message: '数据已清空' });
-      } catch (toastErr) {
-        console.warn('Toast display failed (清空成功):', toastErr);
-      }
-
-    } catch (error) {
-      console.error('Failed to clear data:', error);
-      try {
-        promptAction.showToast({ message: '清空失败' });
-      } catch (toastErr) {
-        console.warn('Toast display failed (清空失败):', toastErr);
-      }
-    }
-  }
+  // private async clearAllData() {
+  //   try {
+  //     // 清空所有对话及消息
+  //     await this.databaseManager.clearAllConversations();
+  //
+  // // 递增刷新版本号，通知聊天页面重新加载
+  // const currentVersion = AppStorage.get('conversationsReloadVersion') as number | undefined;
+  // const nextVersion = (currentVersion ?? 0) + 1;
+  // AppStorage.SetOrCreate('conversationsReloadVersion', nextVersion);
+  //
+  //     try {
+  //       promptAction.showToast({ message: '数据已清空' });
+  //     } catch (toastErr) {
+  //       console.warn('Toast display failed (清空成功):', toastErr);
+  //     }
+  //
+  //   } catch (error) {
+  //     console.error('Failed to clear data:', error);
+  //     try {
+  //       promptAction.showToast({ message: '清空失败' });
+  //     } catch (toastErr) {
+  //       console.warn('Toast display failed (清空失败):', toastErr);
+  //     }
+  //   }
+  // }
 
   private openFeedbackUrl() {
     const feedbackUrl = 'https://www.wjx.top/vm/P9ruqRM.aspx';

@@ -13,14 +13,14 @@ export struct ProviderSettingsDialog {
   private getPredefinedModels(providerType: string): AIModel[] {
     if (providerType === 'deepseek') {
       return [
-        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek Chat', 4000, 0.7),
-        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek Reasoner', 32000, 0.7)
+        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek V3.1', 4000, 0.7),
+        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek R1', 32000, 0.7)
       ];
     } else if (providerType === 'aliyun') {
       return [
-        new AIModel('qwen3-max', 'qwen3-max', 'qwen3-max', 258048, 0.7),
-        new AIModel('qwen-plus', 'qwen-plus', 'qwen-plus', 997952, 0.7),
-        new AIModel('qwen-flash', 'qwen-flash', 'qwen-flash', 997952, 0.7),
+          new AIModel('qwen3-max', 'qwen3-max', 'Qwen3-Max', 258048, 0.7),
+        new AIModel('qwen-plus', 'qwen-plus', 'Qwen-Plus', 997952, 0.7),
+        new AIModel('qwen-flash', 'qwen-flash', 'Qwen-Flash', 997952, 0.7),
       ];
     } else {
       return [];

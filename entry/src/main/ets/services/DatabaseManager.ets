@@ -349,23 +349,23 @@ export class DatabaseManager {
     }
   }
 
-  /**
-   * 清空所有对话及聊天记录
-   */
-  async clearAllConversations(): Promise<void> {
-    if (!this.rdbStore) {
-      throw new DatabaseError('Database not initialized');
-    }
-
-    try {
-      await this.rdbStore.executeSql(`DELETE FROM ${Constants.CHAT_TABLE}`);
-      await this.rdbStore.executeSql('DELETE FROM conversations');
-      console.info('All conversations and chat history cleared');
-    } catch (error) {
-      console.error('Failed to clear all conversations:', error);
-      throw new DatabaseError(`Failed to clear all conversations: ${error}`);
-    }
-  }
+  // /**
+  //  * 清空所有对话及聊天记录
+  //  */
+  // async clearAllConversations(): Promise<void> {
+  //   if (!this.rdbStore) {
+  //     throw new DatabaseError('Database not initialized');
+  //   }
+  //
+  //   try {
+  //     await this.rdbStore.executeSql(`DELETE FROM ${Constants.CHAT_TABLE}`);
+  //     await this.rdbStore.executeSql('DELETE FROM conversations');
+  //     console.info('All conversations and chat history cleared');
+  //   } catch (error) {
+  //     console.error('Failed to clear all conversations:', error);
+  //     throw new DatabaseError(`Failed to clear all conversations: ${error}`);
+  //   }
+  // }
 
   /**
    * 删除单条消息
