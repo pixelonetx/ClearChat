@@ -1,6 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { inputMethod } from '@kit.IMEKit';
 
 import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
@@ -13,11 +14,6 @@ import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { MessageItem } from '../components/MessageItem';
 import { RenameConversationDialog } from '../components/RenameConversationDialog';
 import { ModelSelectorSheet } from '../components/ModelSelectorDialog';
-import { Constants } from '../components/Constants';
-
-import inputMethod from '@ohos.inputMethod';
-
-const uiContext: UIContext | undefined = AppStorage.get('uiContext') as (UIContext | undefined);
 
 // 定义模型信息接口
 interface ModelInfo {
@@ -36,14 +32,6 @@ class ToastOptions {
   constructor(message: string, duration?: number) {
     this.message = message;
     this.duration = duration;
-  }
-}
-
-class RouterUrlOptions {
-  url: string;
-
-  constructor(url: string) {
-    this.url = url;
   }
 }
 
@@ -122,15 +110,6 @@ struct Chat {
   private appendMessage(message: ChatMessage): number {
     this.messages = [...this.messages, message];
     return this.messages.length - 1;
-  }
-
-  private removeMessageAt(index: number): void {
-    if (index < 0 || index >= this.messages.length) {
-      return;
-    }
-    const nextMessages = [...this.messages];
-    nextMessages.splice(index, 1);
-    this.messages = nextMessages;
   }
 
   private getFriendlySendErrorMessage(error: Error): string {
@@ -337,7 +316,6 @@ struct Chat {
                   .fontSize(16)
                   .backgroundColor($r('app.color.input_area_color'))
                   .showCounter(true)
-                  .minLines(1)
                   .onChange((value: string) => {
                     this.inputText = value;
                   })
@@ -1691,6 +1669,7 @@ struct Chat {
           })
         })
       }
+      .height('100%')
       .width('100%')
       .scrollBar(BarState.Off)
     })

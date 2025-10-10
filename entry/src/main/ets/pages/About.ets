@@ -106,7 +106,7 @@ struct About {
             // 版本信息
             this.InfoCard(
               '版本信息',
-              '版本号：0.2.3 (10238)\n构建时间：2025年10月9日'
+              '版本号：0.2.4 (10240)\n构建时间：2025年10月10日'
             )
 
             // 数据安全
@@ -142,8 +142,7 @@ struct About {
 
                 Button('复制群号')
                   .height(36)
-                  .backgroundColor('#007AFF')
-                  .fontColor('#FFFFFF')
+                  .buttonStyle(ButtonStyleMode.NORMAL)
                   .fontSize(14)
                   .borderRadius(18)
                   .enabled(this.qqGroupNumber !== '待填写')

@@ -6,11 +6,11 @@
         "type": "HarmonyOS",
         "material": {
           "storeFile": "D:/My_Program/Huawei/AppData/key_1.p12",
-          "storePassword": "0000001DA76A0F1CA942499C4AB677CA312FA332B36E2F1AE3C317299CCFB63BB0F7E9BB0BD20154CAD47F5E41",
-          "keyAlias": "MyFAKey",
-          "keyPassword": "0000001DA19BBA8F708E8B2AB97D44FF6FB09E6210B3CA7E3105339B5CAD61EA569051D9D05F9AD606B529CA34",
+          "storePassword": "0000001D41F9C3949C5551D34754306EFB40D52DDB0600AEBB4E64AD84B1072A3232C2859C9618360C8B5CB7D0",
+          "keyAlias": "myFAKey",
+          "keyPassword": "0000001D14C0D8104F2DCD877F2A47EF44EA0706A806DB2910770D48D548118D32409C440238EAC2F2A507E1B5",
           "signAlg": "SHA256withECDSA",
-          "profile": "D:\\My_Program\\Huawei\\AppData\\releaseProfile\\releaseProfile1Release.p7b",
+          "profile": "D:/My_Program/Huawei/AppData/releaseProfile/releaseProfile1Release.p7b",
           "certpath": "D:/My_Program/Huawei/AppData/Certificate/Certificate1.cer"
         }
       }
