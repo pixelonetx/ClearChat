@@ -10,7 +10,7 @@
     },
     {
       "name": "common_background",
-      "value": "#F1F3F5"
+      "value": "#e9eaec"
     },
     {
       "name": "text_sec_color",
@@ -42,7 +42,7 @@
     },
     {
       "name": "input_area_color",
-      "value": "#E5E5EA"
+      "value": "#FFFFFF"
     }
   ]
 }

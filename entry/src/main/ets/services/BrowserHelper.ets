@@ -16,12 +16,18 @@ export class BrowserHelper {
    */
   static async openUrl(context: common.UIAbilityContext, url: string): Promise<boolean> {
     try {
+      const normalizedUrl = BrowserHelper.normalizeUrl(url);
+
       // 验证URL格式
-      if (!url || !BrowserHelper.isValidUrl(url)) {
-        promptAction.showToast({
-          message: '无效的网址格式',
-          duration: 2000
-        });
+      if (!normalizedUrl || !BrowserHelper.isValidUrl(normalizedUrl)) {
+        try {
+          promptAction.showToast({
+            message: '无效的网址格式',
+            duration: 2000
+          });
+        } catch (toastErr) {
+          console.warn('Toast display failed (invalid url):', toastErr);
+        }
         return false;
       }
 
@@ -29,19 +35,23 @@ export class BrowserHelper {
       const want: Want = {
         action: 'ohos.want.action.viewData',
         entities: ['entity.system.browsable'],
-        uri: url,
+        uri: normalizedUrl,
         parameters: {
           'ohos.ability.params.showDefaultPicker': true
         }
       };
 
       await context.startAbility(want);
-      console.info('Successfully started browser with URL:', url);
+      console.info('Successfully started browser with URL:', normalizedUrl);
 
-      promptAction.showToast({
-        message: '正在启动浏览器...',
-        duration: 1500
-      });
+      try {
+        promptAction.showToast({
+          message: '正在启动浏览器...',
+          duration: 1500
+        });
+      } catch (toastErr) {
+        console.warn('Toast display failed (start browser):', toastErr);
+      }
 
       return true;
 
@@ -49,10 +59,14 @@ export class BrowserHelper {
       const error = err as BusinessError;
       console.error(`Failed to start browser. Code: ${error.code}, message: ${error.message}`);
 
-      promptAction.showToast({
-        message: '无法打开浏览器',
-        duration: 2000
-      });
+      try {
+        promptAction.showToast({
+          message: '无法打开浏览器',
+          duration: 2000
+        });
+      } catch (toastErr) {
+        console.warn('Toast display failed (browser error):', toastErr);
+      }
 
       return false;
     }
@@ -68,22 +82,8 @@ export class BrowserHelper {
       return false;
     }
 
-    // 简单的URL格式验证
-    const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/i;
-    const wwwPattern = /^www\./i;
-
-    // 如果以www开头，自动添加http://
-    if (wwwPattern.test(url)) {
-      return true;
-    }
-
-    // 检查是否以http://或https://开头
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return urlPattern.test(url);
-    }
-
-    // 如果不以协议开头，检查是否为有效域名格式
-    return urlPattern.test('http://' + url);
+    const pattern = /^(https?:\/\/)([\w-]+(\.[\w-]+)+)(:[0-9]+)?(\/[^\s]*)?$/i;
+    return pattern.test(url.trim());
   }
 
   /**

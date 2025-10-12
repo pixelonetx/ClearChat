@@ -7,7 +7,7 @@
         "material": {
           "storeFile": "",
           "storePassword": "",
-          "keyAlias": "myFAKey",
+          "keyAlias": "myFAkey",
           "keyPassword": "",
           "signAlg": "SHA256withECDSA",
           "profile": "",

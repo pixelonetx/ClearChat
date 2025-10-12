@@ -577,6 +577,18 @@ struct ModelSettings {
               .onClick(() => {
                 this.addProvider();
               })
+              .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
+                height: SheetSize.FIT_CONTENT,
+                detents: [SheetSize.FIT_CONTENT],
+                blurStyle: BlurStyle.Thick,
+                showClose: true,
+                enableOutsideInteractive: false,
+                dragBar: true,
+                onDisappear: () => {
+                  this.isSettingsSheetVisible = false;
+                  this.resetSheetState();
+                }
+              })
           }
           .width('100%')
           .layoutWeight(1)
@@ -598,18 +610,6 @@ struct ModelSettings {
           })
         }
       }
-      .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
-        height: SheetSize.FIT_CONTENT,
-        detents: [SheetSize.FIT_CONTENT],
-        blurStyle: BlurStyle.Thick,
-        showClose: true,
-        enableOutsideInteractive: false,
-        dragBar: true,
-        onDisappear: () => {
-          this.isSettingsSheetVisible = false;
-          this.resetSheetState();
-        }
-      })
       .width('100%')
       .height('100%')
     }
