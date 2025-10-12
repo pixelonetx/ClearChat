@@ -69,6 +69,8 @@ struct Chat {
   @State customPopup: boolean = false; // 更多按钮
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
 
+  @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm'
+
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -166,239 +168,249 @@ struct Chat {
 
   build() {
     NavDestination() {
-      Column() {
+      SideBarContainer(SideBarContainerType.AUTO) {
+        Column() {
+          this.SidebarContent()
+        }
+        // 主内容区域
+        Column() {
         Stack() {
-          // 主内容区域
+          // 主界面
           Column() {
-            // 主界面
-            Column() {
-              // 标题栏
-              Row() {
-                Button() {
-                  Image($r('app.media.close_sidebar'))
-                    .size({ width: 24, height: 24 })
-                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
-                }
-                .type(ButtonType.Circle)
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
-                .size({ width: 40, height: 40 })
-                .onClick(() => {
-                  this.showSidebar();
-                })
-
-                Text(this.currentConversation?.title || '聊天助手')
-                  .fontSize(16)
-                  .fontWeight(FontWeight.Medium)
-                  .layoutWeight(1)
-                  .textAlign(TextAlign.Center)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .padding({ left: 14, right: 14 })
-
-                Button() {
-                  Image($r('app.media.square_and_pencil'))
-                    .size({ width: 24, height: 24 })
-                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
-                }
-                .type(ButtonType.Circle)
-                .size({ width: 40, height: 40 })
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
-                .onClick(() => {
-                  this.createNewConversation();
-                })
-                .margin({right:8})
-
-                Button() {
-                  Image($r('app.media.more_fill'))
-                    .size({ width: 24, height: 24 })
-                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
-                }
-                .type(ButtonType.Circle)
-                .size({ width: 40, height: 40 })
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
-                .onClick(() => {
-                  this.customPopup = !this.customPopup;
-                })
-                .bindPopup(this.customPopup, {
-                  builder: this.MoreOptionsPopup,
-                  // placement: Placement.BottomRight,
-                  // maskColor: Color.Transparent,
-                  // popupColor: Color.Transparent,
-                  enableArrow: true,
-                  showInSubWindow: true,
-                  onStateChange: (e) => {
-                    if (!e.isVisible) {
-                      this.customPopup = false;
-                    }
-                  }
-                })
+            // 标题栏
+            Row() {
+              Button() {
+                Image($r('app.media.close_sidebar'))
+                  .size({ width: 24, height: 24 })
+                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
               }
-              .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
-              .width('100%')
-              .height(56)
-              .padding({ left: 12, right: 12 })
+              .type(ButtonType.Circle)
+              .backgroundColor($r('sys.color.button_background_color_transparent'))
+              .size({ width: 40, height: 40 })
+              .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
+              .onClick(() => {
+                this.showControlButton = !this.showControlButton
+                // this.showSideBar = false
+                // 动画-关闭侧边栏
+                animateTo({
+                  duration: 500,
+                  curve: Curve.FastOutSlowIn
+                }, () => {
+                  this.showSideBar = true;
+                })
+              })
 
-              if (!this.isInitialized) {
-                // 加载界面
+              Text(this.currentConversation?.title || '聊天助手')
+                .fontSize(16)
+                .fontWeight(FontWeight.Medium)
+                .layoutWeight(1)
+                .textAlign(TextAlign.Center)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .padding({ left: 14, right: 14 })
+
+              Button() {
+                Image($r('app.media.square_and_pencil'))
+                  .size({ width: 24, height: 24 })
+                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
+              }
+              .type(ButtonType.Circle)
+              .size({ width: 40, height: 40 })
+              .backgroundColor($r('sys.color.button_background_color_transparent'))
+              .onClick(() => {
+                this.createNewConversation();
+              })
+              .margin({right:8})
+
+              Button() {
+                Image($r('app.media.more_fill'))
+                  .size({ width: 24, height: 24 })
+                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
+              }
+              .type(ButtonType.Circle)
+              .size({ width: 40, height: 40 })
+              .backgroundColor($r('sys.color.button_background_color_transparent'))
+              .onClick(() => {
+                this.customPopup = !this.customPopup;
+              })
+              .bindMenu([
+                {
+                  value: '切换模型',
+                  icon: $r('app.media.reverse_order'),
+                  action: () => {
+                    this.switchModel();
+                  }
+                }
+              ])
+              .bindSheet(this.showModelSelectorSheet,
+                this.ModelSelectorSheetBuilder(),
+                {
+                  height: SheetSize.MEDIUM,
+                  detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
+                  dragBar: true, // 启用默认拖拽条
+                  showClose: true, // 显示默认关闭按钮
+                  title: { title: "选择模型" },
+                  onDisappear: () => {
+                    this.showModelSelectorSheet = false;
+                  }
+                }
+              )
+            }
+            .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
+            .width('100%')
+            .height(56)
+            .padding({ left: 12, right: 12 })
+
+            if (!this.isInitialized) {
+              // 加载界面
+              Column() {
+                LoadingProgress()
+                  .width(24)
+                  .height(24)
+              }
+              .width('100%')
+              .height('100%')
+              .justifyContent(FlexAlign.Center)
+            } else {
+              // 消息列表
+              if (this.messages.length === 0) {
+                // 空状态
                 Column() {
-                  LoadingProgress()
-                    .width(24)
-                    .height(24)
+                  Text('有什么可以帮忙的？')
+                    .fontSize(18)
+                    .margin({ top: 16 })
+
+                  if (!this.hasSettings) {
+                    Button('配置API设置')
+                      .buttonStyle(ButtonStyleMode.NORMAL)
+                      .padding({ left: 20, right: 20 })
+                      .margin({ top: 16 })
+                      .onClick(() => {
+                        this.pathStack.pushPathByName("Settings", null);
+                        this.hideKeyboard();
+                      })
+                  }
                 }
                 .width('100%')
-                .height('100%')
+                .layoutWeight(1)
                 .justifyContent(FlexAlign.Center)
               } else {
                 // 消息列表
-                if (this.messages.length === 0) {
-                  // 空状态
+                Scroll(this.scroller) {
                   Column() {
-                    Text('有什么可以帮忙的？')
-                      .fontSize(18)
-                      .margin({ top: 16 })
-
-                    if (!this.hasSettings) {
-                      Button('配置API设置')
-                        .buttonStyle(ButtonStyleMode.NORMAL)
-                        .padding({ left: 20, right: 20 })
-                        .margin({ top: 16 })
-                        .onClick(() => {
-                          this.pathStack.pushPathByName("Settings", null, false);
-                          this.hideKeyboard();
-                        })
-                    }
-                  }
-                  .width('100%')
-                  .layoutWeight(1)
-                  .justifyContent(FlexAlign.Center)
-                } else {
-                  // 消息列表
-                  Scroll(this.scroller) {
-                    Column() {
-                      ForEach(this.messages, (message: ChatMessage, index: number) => {
-                        MessageItem({
-                          message: message,
-                          onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                          onEdit: (msg: ChatMessage): void => { this.editMessage(msg); },
-                          onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
-                          onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
-                        })
-                      }, (message: ChatMessage, index: number) => {
-                        // 简化的 key 生成策略
-                        if (message.id !== undefined) {
-                          // 已保存的消息使用 ID + 内容长度
-                          return `saved_${message.id}_${message.content.length}`;
-                        } else {
-                          // 临时消息使用索引 + 角色 + 内容长度 + 时间戳的一部分
-                          return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
-                        }
+                    ForEach(this.messages, (message: ChatMessage, index: number) => {
+                      MessageItem({
+                        message: message,
+                        onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
+                        onEdit: (msg: ChatMessage): void => { this.editMessage(msg); },
+                        onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
+                        onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
                       })
-                    }
-                    .padding({ left: 16, right: 16, top: 16, bottom: 16 })
-                    .width('100%')
-                    .alignItems(HorizontalAlign.Center)
-                    .justifyContent(FlexAlign.Start)
+                    }, (message: ChatMessage, index: number) => {
+                      // 简化的 key 生成策略
+                      if (message.id !== undefined) {
+                        // 已保存的消息使用 ID + 内容长度
+                        return `saved_${message.id}_${message.content.length}`;
+                      } else {
+                        // 临时消息使用索引 + 角色 + 内容长度 + 时间戳的一部分
+                        return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+                      }
+                    })
                   }
-                  .layoutWeight(1)
-                  .scrollable(ScrollDirection.Vertical)
-                  .scrollBar(BarState.Off)
+                  .padding({ left: 16, right: 16, top: 16, bottom: 16 })
                   .width('100%')
-                  .align(Alignment.TopStart)
-                  .onClick(() => {
-                    this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
-                  })
+                  .alignItems(HorizontalAlign.Center)
+                  .justifyContent(FlexAlign.Start)
                 }
+                .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
+                .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
+                .onScrollFrameBegin((offset, state) => {
+                  // 动态调整滚动量实现自定义阻尼
+                  return { offsetRemain: offset * 0.7 }
+                })
+                .layoutWeight(1)
+                .scrollable(ScrollDirection.Vertical)
+                .scrollBar(BarState.Off)
+                .width('100%')
+                .align(Alignment.TopStart)
+                .onClick(() => {
+                  this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
+                })
               }
-
-              // 输入
-              Column() {
-                TextArea({ placeholder: '输入你的消息...', text: this.inputText })
-                  .fontSize(16)
-                  .backgroundColor($r('app.color.input_area_color'))
-                  .showCounter(true)
-                  .onChange((value: string) => {
-                    this.inputText = value;
-                  })
-
-                Row() {
-                  Button() {
-                    if (this.isLoading) {
-                      LoadingProgress()
-                        .width(24)
-                        .height(24)
-                        .color(Color.Red)
-                    } else {
-                      SymbolGlyph($r('sys.symbol.arrow_up_circle'))
-                        .fontSize(24)
-                        .fontColor([$r('app.color.text_color')])
-                    }
-                  }
-                  .type(ButtonType.Circle)
-                  .backgroundColor($r('sys.color.button_background_color_transparent'))
-                  .size({ width: 40, height: 40 })
-                  .margin({right:12})
-                  .enabled(this.inputText.trim() !== '' && !this.isLoading)
-                  .onClick(() => {
-                    this.sendMessage();
-                  })
-                }
-                .margin( {bottom: 12} ) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
-              }
-              .backgroundColor($r('app.color.input_area_color'))
-              .borderWidth({top:1})
-              .borderColor($r('app.color.text_secondary'))
-              .borderRadius({topLeft:20, topRight:20})
-              .width('100%')
-              .padding({ left: 2, right: 2, top: 6, bottom: 4 })
-              .alignItems(HorizontalAlign.End)
-
             }
+
+            // 输入
+            Column() {
+              TextArea({ placeholder: '输入你的消息...', text: this.inputText })
+                .fontSize(16)
+                .backgroundColor($r('app.color.input_area_color'))
+                .showCounter(true)
+                .onChange((value: string) => {
+                  this.inputText = value;
+                })
+
+              Row() {
+                Button() {
+                  if (this.isLoading) {
+                    LoadingProgress()
+                      .width(24)
+                      .height(24)
+                      .color(Color.Red)
+                  } else {
+                    SymbolGlyph($r('sys.symbol.arrow_up_circle'))
+                      .fontSize(24)
+                      .fontColor([$r('app.color.text_color')])
+                  }
+                }
+                .type(ButtonType.Circle)
+                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .size({ width: 40, height: 40 })
+                .margin({right:12})
+                .enabled(this.inputText.trim() !== '' && !this.isLoading)
+                .onClick(() => {
+                  this.sendMessage();
+                })
+              }
+              .margin( {bottom: 12} ) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+            }
+            .backgroundColor($r('app.color.input_area_color'))
+            // .borderWidth({top:1})
+            .borderColor($r('app.color.text_secondary'))
+            .borderRadius({topLeft:20, topRight:20})
             .width('100%')
-            .height('100%')
+            .padding({ left: 2, right: 2, top: 6, bottom: 4 })
+            .alignItems(HorizontalAlign.End)
+
           }
           .width('100%')
           .height('100%')
-          .blur(this.backgroundBlurRadius)
 
-          // 侧边栏
-          if (this.isSidebarVisible) {
-            Row() {
-              this.SidebarContent()
+          if (this.showSideBar) {
+            Column()
+              .width('100%')
+              .height('100%')
+              .backdropBlur(15)              // 关键属性：背景模糊度
+              .onClick(() => {
+                if (this.showSideBar) {
+                  this.showControlButton = !this.showControlButton
+                  animateTo({
+                    duration: 300,
+                    curve: Curve.FastOutSlowIn
+                  }, () => {
+                    this.showSideBar = false;
+                  })
+                }
+              })
+              .transition(TransitionEffect.OPACITY)
+          }
 
-              // 右侧透明区域，点击关闭侧边栏
-              Column()
-                .layoutWeight(1)
-                .height('100%')
-                .onClick(() => {
-                  this.hideSidebar();
-                })
-            }
-            .width('100%')
-            .height('100%')
-            .translate({ x: this.sidebarOffset })
-            .justifyContent(FlexAlign.Start)
           }
         }
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          // 点击空白区域时隐藏键盘
-          this.hideKeyboard();
-        })
-        .bindSheet(this.showModelSelectorSheet,
-          this.ModelSelectorSheetBuilder(),
-          {
-            height: SheetSize.MEDIUM,
-            detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
-            dragBar: true, // 启用默认拖拽条
-            showClose: true, // 显示默认关闭按钮
-            title: { title: "选择模型" },
-            onDisappear: () => {
-              this.showModelSelectorSheet = false;
-            }
-          }
-        )
+
       }
+      .autoHide(false)
+      .showControlButton(false)
+      .showSideBar($$this.showSideBar)
       .width('100%')
       .height('100%')
     }
@@ -708,19 +720,19 @@ struct Chat {
     }
   }
 
-  showSidebar() {
-    // 显示侧栏时隐藏键盘
-    this.hideKeyboard();
-
-    this.isSidebarVisible = true;
-    animateTo({
-      duration: 300,
-      curve: Curve.FastOutSlowIn
-    }, () => {
-      this.sidebarOffset = 0;
-      this.backgroundBlurRadius = 15; // 增加模糊强度
-    });
-  }
+  // showSidebar() {
+  //   // 显示侧栏时隐藏键盘
+  //   this.hideKeyboard();
+  //
+  //   this.isSidebarVisible = true;
+  //   animateTo({
+  //     duration: 300,
+  //     curve: Curve.FastOutSlowIn
+  //   }, () => {
+  //     this.sidebarOffset = 0;
+  //     this.backgroundBlurRadius = 15; // 增加模糊强度
+  //   });
+  // }
 
   hideSidebar() {
     // 关闭侧边栏时隐藏键盘
@@ -1658,7 +1670,7 @@ struct Chat {
         .textAlign(TextAlign.Start)
 
       // 该日期下的对话列表
-      List({ space: 4 }) {
+      List({ space: 2 }) {
         ForEach(this.getConversationsForDate(dateKey), (conversation: Conversation, index: number) => {
           ListItem() {
             this.ConversationItem(conversation)
@@ -1669,7 +1681,6 @@ struct Chat {
           })
         })
       }
-      .height('100%')
       .width('100%')
       .scrollBar(BarState.Off)
     })
@@ -1768,55 +1779,66 @@ struct Chat {
   SidebarContent() {
     Column() {
       // 侧边栏标题
-      Row() {
-        Text('对话列表')
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
-          .layoutWeight(1)
+      Column() {
+        Row() {
+          Text('对话列表')
+            .fontSize(20)
+            .fontWeight(FontWeight.Medium)
+            .layoutWeight(1)
 
-        Button() {
-          Image($r('app.media.open_sidebar'))
-            .size({ width: 24, height: 24 })
-            .fillColor($r('sys.color.ohos_id_color_text_primary'))
-        }
-        .type(ButtonType.Circle)
-        .size({ width: 40, height: 40 })
-        .backgroundColor($r('sys.color.button_background_color_transparent'))
-        .onClick(() => {
-          this.hideSidebar();
-        })
-      }
-      .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
-      .width('100%')
-      .height(56)
-      .padding({ left: 20, right: 16 })
-      .justifyContent(FlexAlign.SpaceBetween)
-
-      // 新建对话按钮
-      Row() {
-        Button('新建对话')
-          .fontColor($r('app.color.text_color'))
-          .width('90%')
+          Button() {
+            Image($r('app.media.open_sidebar'))
+              .size({ width: 24, height: 24 })
+              .fillColor($r('sys.color.ohos_id_color_text_primary'))
+          }
+          .type(ButtonType.Circle)
+          .size({ width: 40, height: 40 })
           .backgroundColor($r('sys.color.button_background_color_transparent'))
-          .borderRadius(24)
           .onClick(() => {
-            this.createNewConversation();
+            this.hideSidebar();
+            this.showControlButton = !this.showControlButton;
+            animateTo({
+              duration: 300,
+              curve: Curve.FastOutSlowIn
+            }, () => {
+              this.showSideBar = false;
+            })
           })
+        }
+        .width('100%')
+        .height(56)
+        .padding({ left: 20, right: 16 })
+        .justifyContent(FlexAlign.SpaceBetween)
+
+        // 新建对话按钮
+        Row() {
+          Button('新建对话')
+            .fontColor($r('app.color.text_color'))
+            .width('90%')
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
+            .borderRadius(24)
+            .onClick(() => {
+              this.createNewConversation();
+            })
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
         .margin({ top: 12, bottom: 12 })
+      }
+      .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
 
       // 对话列表
       if (this.conversations.length === 0) {
-        Column() {
-          Text('还没有对话记录')
-            .fontSize(14)
-            .margin({ top: 12 })
+        Scroll() {
+          Column() {
+            Text('还没有对话记录')
+              .fontSize(14)
+              .margin({ top: 12 })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
         }
-        .width('100%')
         .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -1827,8 +1849,8 @@ struct Chat {
           .alignItems(HorizontalAlign.Start)
           .justifyContent(FlexAlign.Start)
         }
-        .layoutWeight(1)
         .width('100%')
+        .layoutWeight(1)
         .scrollable(ScrollDirection.Vertical)
         .scrollBar(BarState.Off)
         .align(Alignment.TopStart)
@@ -1836,28 +1858,28 @@ struct Chat {
 
       // 底部功能按钮
       Column() {
-        Divider()
-          .margin({ bottom: 12 })
-
         // 设置按钮
-        Button('设置')
-          .fontColor($r('app.color.text_color'))
-          .width('90%')
-          .backgroundColor($r('sys.color.button_background_color_transparent'))
-          .borderRadius(24)
-          .onClick(() => {
-            this.pathStack.pushPathByName("Settings", null, false);
-            this.hideKeyboard();
-            this.hideSidebar();
-          })
+        Row() {
+          Button('设置')
+            .fontColor($r('app.color.text_color'))
+            .width('90%')
+            .backgroundColor($r('sys.color.button_background_color_transparent'))
+            .borderRadius(24)
+            .onClick(() => {
+              this.pathStack.pushPathByName("Settings", null);
+              this.hideKeyboard();
+              this.showSideBar = !this.showSideBar
+              this.showControlButton = !this.showControlButton
+            })
+            .margin({ top: 12, bottom: 12 })
         }
-        .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
-        .width('100%')
-        .justifyContent(FlexAlign.End)
+      }
+      .width('100%')
+      .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
     }
-    .width(300)
+    .width('100%')
     .height('100%')
-    .backgroundColor($r('sys.color.background_primary'))
+    .backgroundColor($r('app.color.common_background'))
     .alignItems(HorizontalAlign.Start)
     .justifyContent(FlexAlign.Start)
   }
@@ -1898,28 +1920,6 @@ struct Chat {
   }
 
   @Builder
-  MoreOptionsPopup() {
-    Column({ space: 4 }) {
-      Button() {
-        Row() {
-          Text('切换模型')
-            .fontSize(14)
-            .fontColor($r('app.color.text_color'))
-        }
-        .alignItems(VerticalAlign.Center)
-      }
-      .type(ButtonType.Normal)
-      .width(140)
-      .height(40)
-      .backgroundColor($r('sys.color.button_background_color_transparent'))
-      .onClick(() => {
-        this.customPopup = false;
-        this.switchModel();
-      })
-    }
-  }
-
-  @Builder
   ConversationItem(conversation: Conversation) {
     Row() {
       Column() {
@@ -1934,7 +1934,7 @@ struct Chat {
         // 显示时间（时:分格式）
         Text(this.formatTime(conversation.updatedAt))
           .fontSize(12)
-          .margin({ top: 4 })
+          .margin({ top: 2 })
           .width('100%')
           .textAlign(TextAlign.Start)
       }
@@ -1947,6 +1947,13 @@ struct Chat {
     .borderRadius(8)
     .onClick(() => {
       this.selectConversation(conversation);
+      animateTo({
+        duration: 300,
+        curve: Curve.FastOutSlowIn
+      }, () => {
+        this.showControlButton = true
+        this.showSideBar = false;
+      })
     })
   }
 

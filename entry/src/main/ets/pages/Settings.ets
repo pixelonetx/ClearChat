@@ -35,7 +35,7 @@ struct Settings {
               {
                 title: '模型提供方',
                 onClick: () => {
-                  this.pathStack.pushPathByName("ModelSettings", null, false);
+                  this.pathStack.pushPathByName("ModelSettings", null);
                 }
               }
             ]);
@@ -51,28 +51,28 @@ struct Settings {
             //   }
             // ]);
 
-            // // 帮助与支持
-            // this.SettingGroup('帮助与支持', [
-            //   {
-            //     title: '帮助文档',
-            //     onClick: () => {
-            //       this.pathStack.pushPathByName("About", null, false);
-            //     }
-            //   }
-            // ]);
+            // 帮助与支持
+            this.SettingGroup('帮助与支持', [
+              {
+                title: '隐私政策',
+                onClick: () => {
+                  this.openUrl('https://docs.qq.com/doc/p/28bffd5a157cb22b5fb753798d91c0224dee5745?nlc=1');
+                }
+              }
+            ]);
 
             // 关于
             this.SettingGroup('关于', [
               {
                 title: '关于',
                 onClick: () => {
-                  this.pathStack.pushPathByName("About", null, false);
+                  this.pathStack.pushPathByName("About", null);
                 }
               },
               {
                 title: '意见反馈',
                 onClick: () => {
-                  this.openFeedbackUrl();
+                  this.openUrl('https://www.wjx.top/vm/P9ruqRM.aspx');
                 }
               }
             ]);
@@ -213,12 +213,12 @@ struct Settings {
   //   }
   // }
 
-  private openFeedbackUrl() {
-    const feedbackUrl = 'https://www.wjx.top/vm/P9ruqRM.aspx';
+  private openUrl(url: string) {
+    const useUrl = url;
 
     AlertDialog.show({
       title: '打开外部链接',
-      message: `即将在系统浏览器中打开意见反馈页面，是否继续？\n\n${feedbackUrl}`,
+      message: `即将在系统浏览器中打开${useUrl}，是否继续？`,
       primaryButton: {
         value: '取消',
         action: () => {
@@ -228,7 +228,7 @@ struct Settings {
       secondaryButton: {
         value: '打开',
         action: () => {
-          this.openUrlInBrowser(feedbackUrl);
+          this.openUrlInBrowser(useUrl);
         }
       }
     });

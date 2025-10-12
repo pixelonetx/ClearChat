@@ -106,7 +106,7 @@ struct About {
             // 版本信息
             this.InfoCard(
               '版本信息',
-              '版本号：0.2.4 (10240)\n构建时间：2025年10月10日'
+              '版本号：0.2.4 (10242)\n构建时间：2025年10月12日'
             )
 
             // 数据安全
@@ -135,8 +135,7 @@ struct About {
 
               Row() {
                 Text(`QQ群：${this.qqGroupNumber}`)
-                  .fontSize(16)
-                  .fontColor('#007AFF')
+                  .fontColor($r('app.color.text_color'))
                   .fontWeight(FontWeight.Medium)
                   .layoutWeight(1)
 
@@ -165,6 +164,12 @@ struct About {
           }
           .padding(16)
         }
+        .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
+        .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
+        .onScrollFrameBegin((offset, state) => {
+          // 动态调整滚动量实现自定义阻尼
+          return { offsetRemain: offset * 0.7 }
+        })
         .scrollable(ScrollDirection.Vertical)
         .scrollBar(BarState.Off)
         .layoutWeight(1)
