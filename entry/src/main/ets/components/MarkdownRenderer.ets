@@ -528,7 +528,7 @@ export struct MarkdownRenderer {
 
         Blank()
 
-        Image(this.expandedSections.has(id) ? $r('app.media.ic_arrow_down') : $r('app.media.ic_arrow_right'))
+        Image(this.expandedSections.has(id) ? $r('app.media.chevron_down') : $r('app.media.chevron_right'))
           .width(16)
           .height(16)
           .fillColor($r('app.color.icon_secondary'))

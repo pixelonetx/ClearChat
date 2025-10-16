@@ -4,6 +4,7 @@ import { AppSettings } from '../services/DataModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { BrowserHelper } from '../services/BrowserHelper';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 // 跳转页面入口函数
 @Builder
@@ -23,6 +24,7 @@ struct Settings {
 
   private databaseManager: DatabaseManager = DatabaseManager.getInstance();
   @State appSettings: AppSettings | null = null;
+  @State qqGroupNumber: string = '428701303'; // 后续填写QQ群号
 
   build() {
     NavDestination() {
@@ -67,6 +69,12 @@ struct Settings {
                 title: '关于',
                 onClick: () => {
                   this.pathStack.pushPathByName("About", null);
+                }
+              },
+              {
+                title: 'QQ交流群',
+                onClick: () => {
+                this.copyToClipboard(this.qqGroupNumber);
                 }
               },
               {
@@ -261,6 +269,24 @@ struct Settings {
           console.warn('Toast display failed (打开链接失败):', toastErr);
         }
       });
+  }
+
+  private copyToClipboard(text: string) {
+    try {
+      const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      const systemPasteboard = pasteboard.getSystemPasteboard();
+      systemPasteboard.setData(pasteData);
+
+      promptAction.showToast({
+        message: 'QQ群号已复制到剪贴板',
+        duration: 2000
+      });
+    } catch (error) {
+      promptAction.showToast({
+        message: '复制失败',
+        duration: 2000
+      });
+    }
   }
 }
 

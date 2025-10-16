@@ -1,6 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { AppSettings, AIProvider, AIModel, ChatMessage } from '../services/DataModels';
+import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManager } from '../services/NetworkManager';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
@@ -28,20 +29,15 @@ struct ModelSettings {
   bottomRectHeight: number = 0;
   @StorageProp('topRectHeight')
   topRectHeight: number = 0;
-
   @State isLoading: boolean = false;
   @State isTesting: boolean = false;
-
   // 新版本多服务商状态
   @State providers: AIProvider[] = [];
   @State currentProviderIndex: number = 0;
   @State activeProviderId: string = '';
   @State activeModelId: string = '';
-
-
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
-
   // bindSheet 状态
   @State private isSettingsSheetVisible: boolean = false;
   @State private activeSheetType: string = '';
@@ -52,6 +48,9 @@ struct ModelSettings {
   @State private modelEditIndex: number = -1;
   private hasLoadedSettings: boolean = false;
   private isRefreshingSettings: boolean = false;
+  // 为每个服务商的模型列表建立数据源映射，按 providerId 缓存
+  private modelsDataSources: Record<string, ArrayDataSource<AIModel>> = {};
+
   async aboutToAppear() {
     await this.ensureSettingsLoaded();
   }
@@ -133,13 +132,26 @@ struct ModelSettings {
     return new Error('Unknown error');
   }
 
+  // 获取某服务商的模型虚拟化数据源并保持与其 models 引用同步
+  private getModelsDataSource(provider: AIProvider): ArrayDataSource<AIModel> {
+    const key = provider.id;
+    let ds = this.modelsDataSources[key];
+    if (!ds) {
+      ds = new ArrayDataSource<AIModel>(provider.models);
+      this.modelsDataSources[key] = ds;
+    } else {
+      ds.setDataRef(provider.models);
+    }
+    return ds;
+  }
 
   private cloneModel(model: AIModel): AIModel {
     return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
   }
 
   private cloneProvider(provider: AIProvider): AIProvider {
-    const clonedProvider = new AIProvider(provider.id, provider.name, provider.displayName, provider.apiUrl, provider.apiKey);
+    const clonedProvider =
+      new AIProvider(provider.id, provider.name, provider.displayName, provider.apiUrl, provider.apiKey);
     clonedProvider.isActive = provider.isActive;
     clonedProvider.models = provider.models.map(model => this.cloneModel(model));
     return clonedProvider;
@@ -299,9 +311,10 @@ struct ModelSettings {
       const activeIndex = storedProviders.findIndex(provider => provider.id === settings.activeProviderId);
       const resolvedIndex = activeIndex >= 0 ? activeIndex : 0;
       const resolvedProvider = storedProviders[resolvedIndex];
-      const resolvedModelId = (settings.activeModelId && resolvedProvider.models.some(model => model.id === settings.activeModelId))
-        ? settings.activeModelId
-        : (resolvedProvider.models[0]?.id || '');
+      const resolvedModelId =
+        (settings.activeModelId && resolvedProvider.models.some(model => model.id === settings.activeModelId))
+          ? settings.activeModelId
+          : (resolvedProvider.models[0]?.id || '');
 
       this.providers = storedProviders.map(provider => this.cloneProvider(provider));
       this.currentProviderIndex = resolvedIndex;
@@ -512,7 +525,8 @@ struct ModelSettings {
       const normalizedError = this.ensureError(error as ErrorInput);
       console.error('Connection test failed:', normalizedError);
       const msg = (normalizedError.message || '').toLowerCase();
-      if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('forbidden') || msg.includes('invalid api')) {
+      if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('forbidden') ||
+      msg.includes('invalid api')) {
         this.showToast('API密钥无效，请检查设置');
       } else if (msg.includes('404') || msg.includes('not found')) {
         this.showToast('API地址无效，请检查是否为“基地址或兼容地址”');
@@ -520,7 +534,8 @@ struct ModelSettings {
         this.showToast('请求超时，请稍后重试');
       } else if (msg.includes('network') || msg.includes('网络') || msg.includes('connection')) {
         this.showToast('网络连接失败，请检查网络设置');
-      } else if (msg.includes('model') && (msg.includes('not found') || msg.includes('unknown') || msg.includes('does not exist'))) {
+      } else if (msg.includes('model') &&
+        (msg.includes('not found') || msg.includes('unknown') || msg.includes('does not exist'))) {
         this.showToast('模型不可用或模型ID错误');
       } else {
         this.showToast('连接测试失败');
@@ -577,18 +592,7 @@ struct ModelSettings {
               .onClick(() => {
                 this.addProvider();
               })
-              .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
-                height: SheetSize.FIT_CONTENT,
-                detents: [SheetSize.FIT_CONTENT],
-                blurStyle: BlurStyle.Thick,
-                showClose: true,
-                enableOutsideInteractive: false,
-                dragBar: true,
-                onDisappear: () => {
-                  this.isSettingsSheetVisible = false;
-                  this.resetSheetState();
-                }
-              })
+
           }
           .width('100%')
           .layoutWeight(1)
@@ -598,18 +602,35 @@ struct ModelSettings {
           Tabs({ barPosition: BarPosition.Start, index: this.currentProviderIndex }) {
             ForEach(this.providers, (provider: AIProvider, index: number) => {
               TabContent() {
-                this.ProviderContent(provider, index)
+                if (this.currentProviderIndex === index) {
+                  this.ProviderContent(provider, index)
+                } else {
+                  // 非活动标签避免构建重内容，保持空占位
+                  Column().width('100%').height('100%').justifyContent(FlexAlign.Start)
+                }
               }
               .tabBar(provider.displayName)
             })
           }
           .layoutWeight(1)
-          .barMode(BarMode.Scrollable) // 可滚动的页签
           .onChange((index: number) => {
             this.currentProviderIndex = index;
           })
         }
       }
+      .bindSheet(this.isSettingsSheetVisible, this.SettingsSheetBuilder(), {
+        height: SheetSize.FIT_CONTENT,
+        detents: [SheetSize.FIT_CONTENT],
+        blurStyle: BlurStyle.Thick,
+        showClose: true,
+        preferType: SheetType.BOTTOM,
+        enableOutsideInteractive: false,
+        dragBar: true,
+        onDisappear: () => {
+          this.isSettingsSheetVisible = false;
+          this.resetSheetState();
+        }
+      })
       .width('100%')
       .height('100%')
     }
@@ -640,10 +661,7 @@ struct ModelSettings {
             Button('添加模型')
               .fontSize(14)
               .fontColor($r('app.color.text_color'))
-              .backgroundColor($r('sys.color.button_background_color_transparent'))
-              .border({
-                width: 1
-              })
+              .backgroundColor(Color.Transparent)
               .borderRadius(16)
               .padding({ left: 16, right: 16 })
               .height(32)
@@ -660,13 +678,14 @@ struct ModelSettings {
               .textAlign(TextAlign.Center)
               .padding(24)
           } else {
-            ForEach(provider.models, (model: AIModel, modelIndex: number) => {
+            LazyForEach(this.getModelsDataSource(provider), (model: AIModel, modelIndex: number) => {
               this.ModelItem(model, provider.id, providerIndex, modelIndex)
-            })
+            }, (model: AIModel) => `${provider.id}_${model.id ?? model.name}`)
           }
         }
         .width('100%')
         .padding(16)
+        .backgroundColor($r('app.color.bg_secondary'))
         .borderRadius(12)
 
         // 测试连接按钮
@@ -676,10 +695,7 @@ struct ModelSettings {
             .width('100%')
             .height(48)
             .fontSize(16)
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .border({
-              width: 1
-            })
+            .backgroundColor(Color.Transparent)
             .borderRadius(24)
             .enabled(!this.isTesting)
             .onClick(() => {
@@ -694,10 +710,7 @@ struct ModelSettings {
             .layoutWeight(1)
             .height(48)
             .fontSize(16)
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .border({
-              width: 1
-            })
+            .backgroundColor(Color.Transparent)
             .borderRadius(24)
             .onClick(() => {
               this.editProvider(providerIndex);
@@ -709,10 +722,7 @@ struct ModelSettings {
               .layoutWeight(1)
               .height(48)
               .fontSize(16)
-              .backgroundColor($r('sys.color.button_background_color_transparent'))
-              .border({
-                width: 1
-              })
+              .backgroundColor(Color.Transparent)
               .borderRadius(24)
               .onClick(() => {
                 const targetName = provider.displayName || provider.name || provider.id || '该服务商';
@@ -736,10 +746,7 @@ struct ModelSettings {
           .width('100%')
           .height(48)
           .fontSize(16)
-          .backgroundColor($r('sys.color.button_background_color_transparent'))
-          .border({
-            width: 1
-          })
+          .backgroundColor(Color.Transparent)
           .borderRadius(24)
           .onClick(() => {
             this.addProvider();
@@ -770,11 +777,14 @@ struct ModelSettings {
             Text('使用中')
               .fontColor($r('app.color.text_color'))
               .fontSize(12)
-              .border({
-                width: 1,
+              .backgroundColor($r('app.color.bg_secondary'))
+              .padding({
+                left: 8,
+                right: 8,
+                top: 2,
+                bottom: 2
               })
-              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-              .borderRadius(8)
+              .borderRadius(12)
               .margin({ left: 8 })
               .flexShrink(0) // 防止压缩
           }
@@ -797,10 +807,7 @@ struct ModelSettings {
           Button('使用')
             .fontSize(12)
             .fontColor($r('app.color.text_color'))
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .border({
-              width: 1
-            })
+            .backgroundColor(Color.Transparent)
             .borderRadius(12)
             .padding({ left: 12, right: 12 })
             .height(28)
@@ -816,10 +823,7 @@ struct ModelSettings {
         Button('编辑')
           .fontSize(12)
           .fontColor($r('app.color.text_color'))
-          .backgroundColor($r('sys.color.button_background_color_transparent'))
-          .border({
-            width: 1
-          })
+          .backgroundColor(Color.Transparent)
           .borderRadius(12)
           .padding({ left: 12, right: 12 })
           .height(28)
@@ -833,10 +837,7 @@ struct ModelSettings {
           Button('删除')
             .fontColor($r('app.color.text_color'))
             .fontSize(12)
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .border({
-              width: 1
-            })
+            .backgroundColor(Color.Transparent)
             .borderRadius(12)
             .padding({ left: 12, right: 12 })
             .height(28)
@@ -856,7 +857,12 @@ struct ModelSettings {
       .flexShrink(0) // 防止整个按钮区域被压缩
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .padding({
+      left: 12,
+      right: 12,
+      top: 8,
+      bottom: 8
+    })
     .borderRadius(8)
     .margin({ bottom: 8 })
     .onClick(() => {
