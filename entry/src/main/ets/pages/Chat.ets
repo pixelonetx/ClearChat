@@ -1,9 +1,11 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 
 import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
+import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManager } from '../services/NetworkManager';
@@ -35,6 +37,11 @@ class ToastOptions {
   }
 }
 
+// 明确手势事件类型，避免使用对象字面量类型
+interface PanUpdateEvent {
+  offsetX: number;
+}
+
 // 跳转页面入口函数
 @Builder
 export function ChatBuilder() {
@@ -54,11 +61,11 @@ struct Chat {
   settingsVersion: number = 0;
   @State showControlButton: boolean = true // 显示控制按钮开关
   @State showSideBar: boolean = false // 显示侧边栏开关
-
   @State messages: ChatMessage[] = [];
   @State inputText: string = '';
   @State isLoading: boolean = false;
   @State isInitialized: boolean = false;
+  @State ctrlFlag: boolean = false;
   @State hasSettings: boolean = false;
   @State currentConversation: Conversation | null = null;
   @State isSidebarVisible: boolean = false;
@@ -68,9 +75,7 @@ struct Chat {
   @State showModelSelectorSheet: boolean = false; // 控制半模态弹窗显示
   @State customPopup: boolean = false; // 更多按钮
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
-
   @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm'
-
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -80,6 +85,12 @@ struct Chat {
   private pendingSettingsReload: Promise<void> | null = null;
   private requestedSettingsVersion: number = 0;
   private handledReloadVersion: number = 0;
+  private messageDataSource: ArrayDataSource<ChatMessage> = new ArrayDataSource<ChatMessage>(this.messages);
+
+  private notifyMessagesUpdated(): void {
+    // 更新数据源引用与刷新（数组引用经常被替换）
+    this.messageDataSource.setDataRef(this.messages);
+  }
 
   private cloneChatMessage(message: ChatMessage): ChatMessage {
     const clone = new ChatMessage(message.content, message.role, {
@@ -107,10 +118,12 @@ struct Chat {
     const nextMessages = [...this.messages];
     nextMessages[index] = cloned;
     this.messages = nextMessages;
+    this.notifyMessagesUpdated();
   }
 
   private appendMessage(message: ChatMessage): number {
     this.messages = [...this.messages, message];
+    this.notifyMessagesUpdated();
     return this.messages.length - 1;
   }
 
@@ -138,11 +151,14 @@ struct Chat {
       return '请求超时，请稍后重试';
     }
 
-    if (normalized.includes('network') || normalized.includes('connection') || normalized.includes('fetch') || rawMessage.includes('网络')) {
+    if (normalized.includes('network') || normalized.includes('connection') || normalized.includes('fetch') ||
+    rawMessage.includes('网络')) {
       return '网络连接失败，请检查网络设置';
     }
 
-    if (normalized.includes('unauthorized') || normalized.includes('forbidden') || normalized.includes('invalid api key') || normalized.includes('401') || normalized.includes('403') || rawMessage.includes('授权') || rawMessage.includes('认证')) {
+    if (normalized.includes('unauthorized') || normalized.includes('forbidden') ||
+    normalized.includes('invalid api key') || normalized.includes('401') || normalized.includes('403') ||
+    rawMessage.includes('授权') || rawMessage.includes('认证')) {
       return 'API密钥无效，请检查设置';
     }
 
@@ -150,7 +166,8 @@ struct Chat {
       return '请求过于频繁，请稍后再试';
     }
 
-    if (normalized.includes('model') && (normalized.includes('not found') || normalized.includes('does not exist') || normalized.includes('unknown'))) {
+    if (normalized.includes('model') &&
+      (normalized.includes('not found') || normalized.includes('does not exist') || normalized.includes('unknown'))) {
       return '模型不可用，请检查模型ID';
     }
 
@@ -165,244 +182,344 @@ struct Chat {
     return `发送失败：${rawMessage}`;
   }
 
-
   build() {
     NavDestination() {
       SideBarContainer(SideBarContainerType.AUTO) {
         Column() {
           this.SidebarContent()
         }
+
         // 主内容区域
         Column() {
-        Stack() {
-          // 主界面
-          Column() {
-            // 标题栏
-            Row() {
-              Button() {
-                Image($r('app.media.close_sidebar'))
-                  .size({ width: 24, height: 24 })
-                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
-              }
-              .type(ButtonType.Circle)
-              .backgroundColor($r('sys.color.button_background_color_transparent'))
-              .size({ width: 40, height: 40 })
-              .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
-              .onClick(() => {
-                this.showControlButton = !this.showControlButton
-                // this.showSideBar = false
-                // 动画-关闭侧边栏
-                animateTo({
-                  duration: 500,
-                  curve: Curve.FastOutSlowIn
-                }, () => {
-                  this.showSideBar = true;
-                })
-              })
-
-              Text(this.currentConversation?.title || '聊天助手')
-                .fontSize(16)
-                .fontWeight(FontWeight.Medium)
-                .layoutWeight(1)
-                .textAlign(TextAlign.Center)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .padding({ left: 14, right: 14 })
-
-              Button() {
-                Image($r('app.media.square_and_pencil'))
-                  .size({ width: 24, height: 24 })
-                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
-              }
-              .type(ButtonType.Circle)
-              .size({ width: 40, height: 40 })
-              .backgroundColor($r('sys.color.button_background_color_transparent'))
-              .onClick(() => {
-                this.createNewConversation();
-              })
-              .margin({right:8})
-
-              Button() {
-                Image($r('app.media.more_fill'))
-                  .size({ width: 24, height: 24 })
-                  .fillColor($r('sys.color.ohos_id_color_text_primary'))
-              }
-              .type(ButtonType.Circle)
-              .size({ width: 40, height: 40 })
-              .backgroundColor($r('sys.color.button_background_color_transparent'))
-              .onClick(() => {
-                this.customPopup = !this.customPopup;
-              })
-              .bindMenu([
-                {
-                  value: '切换模型',
-                  icon: $r('app.media.reverse_order'),
-                  action: () => {
-                    this.switchModel();
-                  }
-                }
-              ])
-              .bindSheet(this.showModelSelectorSheet,
-                this.ModelSelectorSheetBuilder(),
-                {
-                  height: SheetSize.MEDIUM,
-                  detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
-                  dragBar: true, // 启用默认拖拽条
-                  showClose: true, // 显示默认关闭按钮
-                  title: { title: "选择模型" },
-                  onDisappear: () => {
-                    this.showModelSelectorSheet = false;
-                  }
-                }
-              )
-            }
-            .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
-            .width('100%')
-            .height(56)
-            .padding({ left: 12, right: 12 })
-
-            if (!this.isInitialized) {
-              // 加载界面
-              Column() {
-                LoadingProgress()
-                  .width(24)
-                  .height(24)
-              }
-              .width('100%')
-              .height('100%')
-              .justifyContent(FlexAlign.Center)
-            } else {
-              // 消息列表
-              if (this.messages.length === 0) {
-                // 空状态
-                Column() {
-                  Text('有什么可以帮忙的？')
-                    .fontSize(18)
-                    .margin({ top: 16 })
-
-                  if (!this.hasSettings) {
-                    Button('配置API设置')
-                      .buttonStyle(ButtonStyleMode.NORMAL)
-                      .padding({ left: 20, right: 20 })
-                      .margin({ top: 16 })
-                      .onClick(() => {
-                        this.pathStack.pushPathByName("Settings", null);
-                        this.hideKeyboard();
-                      })
-                  }
-                }
-                .width('100%')
-                .layoutWeight(1)
-                .justifyContent(FlexAlign.Center)
-              } else {
-                // 消息列表
-                Scroll(this.scroller) {
-                  Column() {
-                    ForEach(this.messages, (message: ChatMessage, index: number) => {
-                      MessageItem({
-                        message: message,
-                        onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                        onEdit: (msg: ChatMessage): void => { this.editMessage(msg); },
-                        onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
-                        onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
-                      })
-                    }, (message: ChatMessage, index: number) => {
-                      // 简化的 key 生成策略
-                      if (message.id !== undefined) {
-                        // 已保存的消息使用 ID + 内容长度
-                        return `saved_${message.id}_${message.content.length}`;
-                      } else {
-                        // 临时消息使用索引 + 角色 + 内容长度 + 时间戳的一部分
-                        return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
-                      }
-                    })
-                  }
-                  .padding({ left: 16, right: 16, top: 16, bottom: 16 })
-                  .width('100%')
-                  .alignItems(HorizontalAlign.Center)
-                  .justifyContent(FlexAlign.Start)
-                }
-                .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
-                .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
-                .onScrollFrameBegin((offset, state) => {
-                  // 动态调整滚动量实现自定义阻尼
-                  return { offsetRemain: offset * 0.7 }
-                })
-                .layoutWeight(1)
-                .scrollable(ScrollDirection.Vertical)
-                .scrollBar(BarState.Off)
-                .width('100%')
-                .align(Alignment.TopStart)
-                .onClick(() => {
-                  this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
-                })
-              }
-            }
-
-            // 输入
+          Stack() {
+            // 主界面
             Column() {
-              TextArea({ placeholder: '输入你的消息...', text: this.inputText })
-                .fontSize(16)
-                .backgroundColor($r('app.color.input_area_color'))
-                .showCounter(true)
-                .onChange((value: string) => {
-                  this.inputText = value;
-                })
-
+              // 标题栏
               Row() {
                 Button() {
-                  if (this.isLoading) {
-                    LoadingProgress()
-                      .width(24)
-                      .height(24)
-                      .color(Color.Red)
-                  } else {
-                    SymbolGlyph($r('sys.symbol.arrow_up_circle'))
-                      .fontSize(24)
-                      .fontColor([$r('app.color.text_color')])
-                  }
+                  Image($r('app.media.close_sidebar'))
+                    .size({ width: 24, height: 24 })
+                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
                 }
                 .type(ButtonType.Circle)
                 .backgroundColor($r('sys.color.button_background_color_transparent'))
                 .size({ width: 40, height: 40 })
-                .margin({right:12})
-                .enabled(this.inputText.trim() !== '' && !this.isLoading)
+                .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
                 .onClick(() => {
-                  this.sendMessage();
-                })
-              }
-              .margin( {bottom: 12} ) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
-            }
-            .backgroundColor($r('app.color.input_area_color'))
-            // .borderWidth({top:1})
-            .borderColor($r('app.color.text_secondary'))
-            .borderRadius({topLeft:20, topRight:20})
-            .width('100%')
-            .padding({ left: 2, right: 2, top: 6, bottom: 4 })
-            .alignItems(HorizontalAlign.End)
-
-          }
-          .width('100%')
-          .height('100%')
-
-          if (this.showSideBar) {
-            Column()
-              .width('100%')
-              .height('100%')
-              .backdropBlur(15)              // 关键属性：背景模糊度
-              .onClick(() => {
-                if (this.showSideBar) {
                   this.showControlButton = !this.showControlButton
+                  // this.showSideBar = false
+                  // 动画-关闭侧边栏
                   animateTo({
-                    duration: 300,
+                    duration: 500,
                     curve: Curve.FastOutSlowIn
                   }, () => {
-                    this.showSideBar = false;
+                    this.showSideBar = true;
+                  })
+                })
+
+                Text(this.currentConversation?.title || '聊天助手')
+                  .fontSize(18) //16
+                  .fontWeight(FontWeight.Bold)
+                  .layoutWeight(1)
+                  .textAlign(TextAlign.JUSTIFY)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .padding({ left: 14, right: 14 })
+
+                Button() {
+                  Image($r('app.media.chat_new_line'))
+                    .size({ width: 24, height: 24 })
+                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
+                }
+                .type(ButtonType.Circle)
+                .size({ width: 40, height: 40 })
+                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .onClick(() => {
+                  this.createNewConversation();
+                })
+                .margin({ right: 8 })
+
+                Button() {
+                  Image($r('app.media.dot_grid_2x2'))
+                    .size({ width: 24, height: 24 })
+                    .fillColor($r('sys.color.ohos_id_color_text_primary'))
+                }
+                .type(ButtonType.Circle)
+                .size({ width: 40, height: 40 })
+                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .onClick(() => {
+                  this.customPopup = !this.customPopup;
+                })
+                .bindMenu([
+                  {
+                    value: '切换模型',
+                    icon: $r('app.media.reverse_order'),
+                    action: () => {
+                      this.switchModel();
+                    }
+                  },
+                  {
+                    value: '更多',
+                    icon: $r('app.media.more_fill'),
+                    enabled: false,
+                    action: () => {}
+                  }
+                ])
+                .bindSheet(this.showModelSelectorSheet,
+                  this.ModelSelectorSheetBuilder(),
+                  {
+                    height: SheetSize.MEDIUM,
+                    detents: [SheetSize.MEDIUM, SheetSize.LARGE, SheetSize.LARGE],
+                    dragBar: true, // 启用默认拖拽条
+                    showClose: true, // 显示默认关闭按钮
+                    title: { title: "选择模型" },
+                    onDisappear: () => {
+                      this.showModelSelectorSheet = false;
+                    }
+                  }
+                )
+              }
+              .margin({ top: this.getUIContext().px2vp(this.topRectHeight) })
+              .width('100%')
+              .height(60) //56
+              .padding({ left: 12, right: 12 })
+
+              if (!this.isInitialized) {
+                // 加载界面
+                Column() {
+                  LoadingProgress()
+                    .width(24)
+                    .height(24)
+                }
+                .width('100%')
+                .height('100%')
+                .justifyContent(FlexAlign.Center)
+              } else {
+                // 消息列表
+                if (this.messages.length === 0) {
+                  // 空状态
+                  Column() {
+                    Text('有什么可以帮忙的？')
+                      .fontSize(18)
+                      .margin({ top: 16 })
+
+                    if (!this.hasSettings) {
+                      Button('配置API设置')
+                        .buttonStyle(ButtonStyleMode.NORMAL)
+                        .padding({ left: 20, right: 20 })
+                        .margin({ top: 16 })
+                        .onClick(() => {
+                          this.pathStack.pushPathByName("Settings", null);
+                          this.hideKeyboard();
+                        })
+                    }
+                  }
+                  .width('100%')
+                  .layoutWeight(1)
+                  .justifyContent(FlexAlign.Center)
+                } else {
+                  // 消息列表（使用 LazyForEach 虚拟化以提升性能）
+                  Scroll(this.scroller) {
+                    Column() {
+                      LazyForEach(this.messageDataSource, (message: ChatMessage, index: number) => {
+                        MessageItem({
+                          message: message,
+                          onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
+                          onEdit: (msg: ChatMessage): void => {
+                            this.editMessage(msg);
+                          },
+                          onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
+                          onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
+                        })
+                      }, (message: ChatMessage, index: number) => {
+                        // 稳定的 key 生成策略，减少重建和提升滚动性能
+                        if (message.id !== undefined) {
+                          return `saved_${message.id}_${message.content.length}`;
+                        } else {
+                          return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+                        }
+                      })
+                    }
+                    .padding({
+                      left: 16,
+                      right: 16,
+                      top: 16,
+                      bottom: 16
+                    })
+                    .width('100%')
+                    .alignItems(HorizontalAlign.Center)
+                    .justifyContent(FlexAlign.Start)
+                  }
+                  .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
+                  .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
+                  .onScrollFrameBegin((offset, state) => {
+                    // 动态调整滚动量实现自定义阻尼
+                    return { offsetRemain: offset * 0.7 }
+                  })
+                  .layoutWeight(1)
+                  .scrollable(ScrollDirection.Vertical)
+                  .scrollBar(BarState.Off)
+                  .width('100%')
+                  .align(Alignment.TopStart)
+                  .onClick(() => {
+                    this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
                   })
                 }
+              }
+
+              // 输入
+              Column() {
+                TextArea({ placeholder: '输入你的消息...', text: this.inputText })
+                  .fontSize(16)
+                  .backgroundColor($r('app.color.input_area_color'))
+                  .showCounter(true)
+                  .onChange((value: string) => {
+                    this.inputText = value;
+                  })
+                  .enterKeyType(EnterKeyType.Send)
+                  .onSubmit((enterKey: EnterKeyType) => {
+                    if (this.ctrlFlag) {
+                      this.inputText += '\n'; // 手动添加换行
+                    } else {
+                      this.sendMessage();
+                    }
+                  })
+                  .onKeyEvent((event: KeyEvent) => {
+                    this.ctrlFlag = event.getModifierKeyState?.(['Ctrl']) ?? false;
+                  })
+
+                Row() {
+                  Button() {
+                    if (this.isLoading) {
+                      LoadingProgress()
+                        .width(24)
+                        .height(24)
+                        .color(Color.Red)
+                    } else {
+                      SymbolGlyph($r('sys.symbol.arrow_up_circle'))
+                        .fontSize(24)
+                        .fontColor([$r('app.color.text_color')])
+                    }
+                  }
+                  .type(ButtonType.Circle)
+                  .backgroundColor($r('sys.color.button_background_color_transparent'))
+                  .size({ width: 40, height: 40 })
+                  .margin({ right: 12 })
+                  .enabled(this.inputText.trim() !== '' && !this.isLoading)
+                  .onClick(() => {
+                    this.sendMessage();
+                  })
+                }
+                .margin({ bottom: 12 }) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+              }
+              .backgroundColor($r('app.color.input_area_color'))
+              // .borderWidth({top:1})
+              .borderColor($r('app.color.text_secondary'))
+              .borderRadius({ topLeft: 20, topRight: 20 })
+              .width('100%')
+              .padding({
+                left: 2,
+                right: 2,
+                top: 6,
+                bottom: 4
               })
-              .transition(TransitionEffect.OPACITY)
-          }
+              .alignItems(HorizontalAlign.End)
+
+            }
+            .width('100%')
+            .height('100%')
+
+            // 左缘手势区域：仅手机从左向右滑动打开侧栏
+            // 作为 Stack 的一个子节点，覆盖在主内容左侧边缘，避免与消息列表垂直滚动冲突
+            if (!this.showSideBar) {
+              Column()
+                .width(this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs' ? 24 : 18) // 仅手机需要较宽触发区
+                .height('100%')
+                .backgroundColor(Color.Transparent)
+                .align(Alignment.TopStart)
+                .position({ x: 0, y: 0 })
+                .zIndex(9)
+                .visibility((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') ? Visibility.Visible : Visibility.Hidden)
+                .gesture(
+                  PanGesture({ 
+                    direction: PanDirection.Horizontal, 
+                    fingers: 1,
+                    distance: 5 // 增加最小滑动距离，避免误触
+                  })
+                    .onActionStart(() => {
+                      console.error(`[GESTURE DEBUG] Open gesture started`);
+                    })
+                    .onActionUpdate((event: PanUpdateEvent) => {
+                      // 向右滑超过阈值，打开侧栏（仅手机）
+                      if ((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') && !this.showSideBar) {
+                        console.error(`[GESTURE DEBUG] Open gesture - offsetX: ${event.offsetX}, breakpoint: ${this.currentBreakPoint}, showSideBar: ${this.showSideBar}`);
+                        const openThreshold = 30; // 增加阈值，减少误触
+                        if (event.offsetX > openThreshold) {
+                          console.error(`[GESTURE DEBUG] Opening sidebar - threshold reached`);
+                          animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
+                            this.showControlButton = false;
+                            this.showSideBar = true;
+                          })
+                        }
+                      }
+                    })
+                    .onActionEnd(() => {
+                      console.error(`[GESTURE DEBUG] Open gesture ended`);
+                    })
+                )
+            }
+
+            // 仅在小屏（sm）渲染遮罩层；平板和桌面不显示遮罩，保留嵌入式布局
+            // 遮罩层：仅在手机显示，平板和桌面不渲染
+            if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
+              Column()
+                .width('100%')
+                .height('100%')
+                .position({ x: 0, y: 0 })
+                .zIndex(10)
+                .backgroundColor('rgba(0, 0, 0, 0.3)') // 仅半透明阴影，无模糊
+                .onAppear(() => {
+                  console.error(`[OVERLAY DEBUG] Rendering overlay - showSideBar: ${this.showSideBar}, currentBreakPoint: ${this.currentBreakPoint}`);
+                })
+                .gesture(
+                  PanGesture({ 
+                    direction: PanDirection.Horizontal, 
+                    fingers: 1,
+                    distance: 5 // 增加最小滑动距离，避免误触
+                  })
+                    .onActionStart(() => {
+                      console.error(`[GESTURE DEBUG] Close gesture started`);
+                    })
+                    .onActionUpdate((event: PanUpdateEvent) => {
+                      console.error(`[GESTURE DEBUG] Pan gesture - offsetX: ${event.offsetX}`);
+                      // 向左滑超过阈值，关闭侧栏
+                      const closeThreshold = -30; // 增加阈值，减少误触
+                      if (event.offsetX < closeThreshold) {
+                        console.error(`[GESTURE DEBUG] Closing sidebar - threshold reached`);
+                        animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
+                          this.showSideBar = false;
+                          this.showControlButton = true;
+                        })
+                      }
+                    })
+                    .onActionEnd(() => {
+                      console.error(`[GESTURE DEBUG] Close gesture ended`);
+                    })
+                )
+                .onClick(() => {
+                  console.error(`[OVERLAY DEBUG] Overlay clicked - closing sidebar`);
+                  if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
+                    animateTo({
+                      duration: 300,
+                      curve: Curve.FastOutSlowIn
+                    }, () => {
+                      this.showSideBar = false;
+                      this.showControlButton = true;
+                    })
+                  }
+                })
+                .transition(TransitionEffect.OPACITY)
+            }
 
           }
         }
@@ -419,7 +536,7 @@ struct Chat {
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
     })
-    }
+  }
 
   private renameDialogController: CustomDialogController = new CustomDialogController({
     builder: RenameConversationDialog({}),
@@ -442,6 +559,21 @@ struct Chat {
     this.requestedSettingsVersion = this.previousSettingsVersion;
     this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
+    
+    // 添加断点检测逻辑
+    this.updateBreakpoint();
+    // 监听窗口尺寸变化
+    try {
+      const context = this.getUIContext()?.getHostContext() as common.UIAbilityContext;
+      if (context?.windowStage) {
+        const windowClass = await context.windowStage.getMainWindow();
+        windowClass.on('windowSizeChange', () => {
+          this.updateBreakpoint();
+        });
+      }
+    } catch (err) {
+      console.error('Failed to setup window listener:', err);
+    }
   }
 
   async onPageShow() {
@@ -452,6 +584,7 @@ struct Chat {
       console.info(`Chat: onPageShow detected conversationsReloadVersion change -> ${latestVersion} (handled=${this.handledReloadVersion})`);
       this.currentConversation = null;
       this.messages = [];
+      this.notifyMessagesUpdated();
       this.conversations = [];
       this.handledReloadVersion = latestVersion;
       await this.reloadChatState('conversationsReloadVersion');
@@ -477,7 +610,8 @@ struct Chat {
       await this.databaseManager.initDatabase(context);
 
       // 补充 AppStorage 默认值
-  const storedReloadVersion: number | undefined = AppStorage.get('conversationsReloadVersion') as (number | undefined);
+      const storedReloadVersion: number | undefined =
+        AppStorage.get('conversationsReloadVersion') as (number | undefined);
       if (typeof storedReloadVersion !== 'number' || Number.isNaN(storedReloadVersion)) {
         AppStorage.SetOrCreate('conversationsReloadVersion', 0);
       }
@@ -494,7 +628,7 @@ struct Chat {
       // 加载聊天记录
       await this.loadChatHistory();
 
-    this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
+      this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
       this.isInitialized = true;
     } catch (error) {
       console.error('Failed to initialize app:', error);
@@ -583,6 +717,7 @@ struct Chat {
         if (this.conversations.length === 0) {
           this.currentConversation = null;
           this.messages = [];
+          this.notifyMessagesUpdated();
         } else {
           await this.loadChatHistory();
         }
@@ -655,6 +790,7 @@ struct Chat {
       } else {
         this.messages = await this.databaseManager.getChatMessages();
       }
+      this.notifyMessagesUpdated();
 
       // 滚动到底部
       setTimeout(() => {
@@ -776,6 +912,7 @@ struct Chat {
 
       this.currentConversation = newConversation;
       this.messages = [];
+      this.notifyMessagesUpdated();
 
       // 等待数据库操作完成
       await this.loadConversations();
@@ -852,9 +989,11 @@ struct Chat {
         if (updatedConversations.length > 0) {
           this.currentConversation = updatedConversations[0];
           this.messages = await this.databaseManager.getChatMessages(this.currentConversation.id);
+          this.notifyMessagesUpdated();
         } else {
           this.currentConversation = null;
           this.messages = [];
+          this.notifyMessagesUpdated();
         }
       }
 
@@ -883,7 +1022,9 @@ struct Chat {
 
   // 切换到选定的模型
   async changeModel(providerId: string, modelId: string) {
-    if (!this.currentSettings) return;
+    if (!this.currentSettings) {
+      return;
+    }
 
     try {
       // 更新当前设置
@@ -914,7 +1055,9 @@ struct Chat {
   }
 
   async generateConversationTitle() {
-    if (!this.currentConversation || !this.currentSettings) return;
+    if (!this.currentConversation || !this.currentSettings) {
+      return;
+    }
 
     try {
       const title: string = await this.titleGenerationService.generateTitle(
@@ -943,7 +1086,8 @@ struct Chat {
       return { modelName: 'unknown', providerName: 'unknown' };
     }
 
-    const activeProvider = this.currentSettings.providers.find(provider => provider.id === this.currentSettings!.activeProviderId);
+    const activeProvider =
+      this.currentSettings.providers.find(provider => provider.id === this.currentSettings!.activeProviderId);
     if (!activeProvider) {
       return { modelName: 'unknown', providerName: 'unknown' };
     }
@@ -1169,7 +1313,8 @@ struct Chat {
 
       // 将流式消息添加到界面，后续会实时更新内容
       streamingMessageIndex = this.appendMessage(streamingAiMessage);
-      console.info('Added streaming AI message, index:', streamingMessageIndex, 'total messages:', this.messages.length);
+      console.info('Added streaming AI message, index:', streamingMessageIndex, 'total messages:',
+        this.messages.length);
 
       // 立即保存空的AI消息到数据库，获取ID
       streamingMessageId = await this.databaseManager.insertChatMessage(streamingAiMessage);
@@ -1193,7 +1338,8 @@ struct Chat {
       console.info('Target conversation ID:', targetConversationId);
 
       // 发送流式请求，立即更新UI
-      if (!this.currentSettings || !this.currentSettings.apiUrl || !this.currentSettings.apiKey || !this.currentSettings.modelName) {
+      if (!this.currentSettings || !this.currentSettings.apiUrl || !this.currentSettings.apiKey ||
+        !this.currentSettings.modelName) {
         console.error('Current settings are incomplete or null');
         return;
       }
@@ -1263,7 +1409,8 @@ struct Chat {
                 this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
                   message.content += chunk;
                 });
-                console.info('Updated message content, new length:', this.messages[streamingMessageIndex].content.length);
+                console.info('Updated message content, new length:',
+                  this.messages[streamingMessageIndex].content.length);
               }
             }
           },
@@ -1382,6 +1529,7 @@ struct Chat {
 
         // 从UI中移除这些消息
         this.messages = this.messages.slice(0, messageIndex);
+        this.notifyMessagesUpdated();
 
         this.showToast('已移除此消息及后续对话，请重新编辑发送');
       } else {
@@ -1404,6 +1552,7 @@ struct Chat {
 
       // 从本地列表删除消息
       this.messages = this.messages.filter(msg => msg.id !== message.id);
+      this.notifyMessagesUpdated();
 
       this.showToast('消息已删除');
     } catch (error) {
@@ -1450,6 +1599,7 @@ struct Chat {
         }
       }
       this.messages = this.messages.slice(0, messageIndex + 1);
+      this.notifyMessagesUpdated();
 
       // 清空当前AI消息的内容，保留消息结构用于重新生成，并更新模型信息
       const modelInfo = this.getCurrentModelInfo();
@@ -1557,7 +1707,8 @@ struct Chat {
                 this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
                   regeneratedMessage.content += chunk;
                 });
-                console.info('After update - regenerated message content length:', this.messages[streamingMessageIndex].content.length);
+                console.info('After update - regenerated message content length:',
+                  this.messages[streamingMessageIndex].content.length);
               }
             }
           },
@@ -1624,6 +1775,7 @@ struct Chat {
     try {
       await this.databaseManager.clearChatHistory();
       this.messages = [];
+      this.notifyMessagesUpdated();
       this.showToast('聊天记录已清空');
     } catch (error) {
       console.error('Failed to clear history:', error);
@@ -1825,7 +1977,7 @@ struct Chat {
         .justifyContent(FlexAlign.Center)
         .margin({ top: 12, bottom: 12 })
       }
-      .margin( {top: this.getUIContext().px2vp(this.topRectHeight)} )
+      .margin({ top: this.getUIContext().px2vp(this.topRectHeight) })
 
       // 对话列表
       if (this.conversations.length === 0) {
@@ -1875,7 +2027,7 @@ struct Chat {
         }
       }
       .width('100%')
-      .margin( {bottom: this.getUIContext().px2vp(this.bottomRectHeight)} )
+      .margin({ bottom: this.getUIContext().px2vp(this.bottomRectHeight) })
     }
     .width('100%')
     .height('100%')
@@ -1943,7 +2095,12 @@ struct Chat {
     }
     .width('100%')
     .height(64)
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .padding({
+      left: 12,
+      right: 12,
+      top: 8,
+      bottom: 8
+    })
     .borderRadius(8)
     .onClick(() => {
       this.selectConversation(conversation);
@@ -2015,5 +2172,46 @@ struct Chat {
         this.showModelSelectorSheet = false;
       }
     })
+  }
+
+  // 根据窗口宽度计算断点
+  private updateBreakpoint(): void {
+    try {
+      const context = this.getUIContext()?.getHostContext() as common.UIAbilityContext;
+      if (context?.windowStage) {
+        context.windowStage.getMainWindow().then((windowClass: window.Window) => {
+          return windowClass.getWindowProperties();
+        }).then((properties: window.WindowProperties) => {
+          const width: number = properties.windowRect.width;
+          const uiCtx = this.getUIContext();
+          const widthVp: number = uiCtx ? uiCtx.px2vp(width) : width;
+          
+          console.error(`[BREAKPOINT DEBUG] Window width: ${width}px, Width in vp: ${widthVp}`);
+          
+          let breakpoint: string = 'sm';
+          
+          if (widthVp >= 1440) {
+            breakpoint = 'xl';
+          } else if (widthVp >= 840) {
+            breakpoint = 'lg';
+          } else if (widthVp >= 600) {
+            breakpoint = 'md';
+          } else if (widthVp >= 320) {
+            breakpoint = 'sm';
+          } else {
+            breakpoint = 'xs';
+          }
+          
+          console.error(`[BREAKPOINT DEBUG] Calculated breakpoint: ${breakpoint}`);
+          
+          // 只使用AppStorage更新，@StorageLink会自动同步
+          AppStorage.setOrCreate('currentBreakPoint', breakpoint);
+        }).catch((err: Error) => {
+          console.error('Failed to get window properties:', err);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to update breakpoint:', err);
+    }
   }
 }

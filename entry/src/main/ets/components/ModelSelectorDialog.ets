@@ -46,7 +46,7 @@ export struct ModelSelectorSheet {
                     if (provider.id === this.currentProviderId &&
                       model.id === this.currentModelId) {
                       SymbolGlyph($r('sys.symbol.checkmark_circle'))
-                        .fontSize(16)
+                        .fontSize(20)
                         .fontColor([Color.Green])
                     }
                   }

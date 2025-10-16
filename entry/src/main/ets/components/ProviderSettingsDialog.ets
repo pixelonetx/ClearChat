@@ -39,14 +39,14 @@ export struct ProviderSettingsDialog {
   build() {
     Column() {
       // 标题
-      Text(this.isEditMode ? '编辑服务商' : '添加服务商')
+      Text(this.isEditMode ? '编辑提供方' : '添加提供方')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
         .margin({ bottom: 24 })
 
       // 服务商名称
       Column() {
-        Text('服务商名称')
+        Text('模型提供方名称')
           .fontSize(14)
           .alignSelf(ItemAlign.Start)
           .margin({ bottom: 8 })
@@ -170,7 +170,7 @@ export struct ProviderSettingsDialog {
 
   private confirmProvider() {
     if (!this.editableProvider.displayName.trim()) {
-      this.showToast('请输入服务商名称');
+      this.showToast('请输入提供方名称');
       return;
     }
 
