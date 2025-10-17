@@ -1,29 +1,78 @@
 /**
- * 聊天消息实体类
+ * DataModels - 数据模型定义
+ * 
+ * 功能说明：
+ * - 定义应用中所有数据实体的结构和类型
+ * - 包含聊天消息、AI模型、提供商、设置等核心数据模型
+ * - 提供类型安全和数据验证
+ * - 支持数据序列化和反序列化
+ * 
+ * 主要模型：
+ * - ChatMessage: 聊天消息实体
+ * - AIModel: AI模型配置
+ * - AIProvider: AI服务提供商
+ * - AppSettings: 应用设置
+ * - Conversation: 对话会话
+ * 
+ * 设计原则：
+ * - 强类型定义确保数据一致性
+ * - 可选参数支持灵活配置
+ * - 接口和类结合使用提供最佳实践
+ */
+
+/**
+ * 聊天消息初始化参数接口
+ * 用于创建ChatMessage实例时的可选配置
  */
 export interface ChatMessageInit {
+  /** 对话ID，默认为'default' */
   conversationId?: string;
+  /** 使用的AI模型名称 */
   modelName?: string;
+  /** AI服务提供商名称 */
   providerName?: string;
+  /** 消息时间戳，默认为当前时间 */
   timestamp?: number;
+  /** AI服务返回的消息ID */
   providerMessageId?: string;
+  /** AI服务返回的创建时间（秒） */
   providerCreatedAt?: number;
+  /** AI服务返回的系统指纹 */
   systemFingerprint?: string;
 }
 
+/**
+ * 聊天消息实体类
+ * 表示用户和AI之间的单条消息记录
+ */
 export class ChatMessage {
+  /** 数据库主键ID */
   id?: number;
+  /** 消息内容 */
   content: string;
-  role: 'user' | 'assistant'; // user: 用户消息, assistant: AI回复
+  /** 消息角色：user(用户) | assistant(AI助手) */
+  role: 'user' | 'assistant';
+  /** 消息时间戳 */
   timestamp: number;
+  /** 所属对话ID */
   conversationId: string;
-  // 新增：AI消息的模型信息
-  modelName?: string; // 使用的模型名称
-  providerName?: string; // 使用的服务商名称
-  providerMessageId?: string; // AI服务返回的消息ID
-  providerCreatedAt?: number; // AI服务返回的创建时间（秒）
-  systemFingerprint?: string; // AI服务返回的系统指纹
+  /** 使用的AI模型名称 */
+  modelName?: string;
+  /** AI服务提供商名称 */
+  providerName?: string;
+  /** AI服务返回的消息ID */
+  providerMessageId?: string;
+  /** AI服务返回的创建时间（秒） */
+  providerCreatedAt?: number;
+  /** AI服务返回的系统指纹 */
+  systemFingerprint?: string;
 
+  /**
+   * 构造函数
+   * @param content 消息内容
+   * @param role 消息角色
+   * @param init 可选的初始化参数
+   */
   constructor(content: string, role: 'user' | 'assistant', init?: ChatMessageInit) {
     this.content = content;
     this.role = role;
@@ -37,12 +86,22 @@ export class ChatMessage {
   }
 }
 
+/**
+ * 聊天消息元数据更新接口
+ * 用于更新消息的附加信息，不包含核心内容
+ */
 export interface ChatMessageMetadataUpdate {
+  /** 更新时间戳 */
   timestamp?: number;
+  /** AI服务消息ID */
   providerMessageId?: string | null;
+  /** AI服务创建时间 */
   providerCreatedAt?: number | null;
+  /** 系统指纹 */
   systemFingerprint?: string | null;
+  /** 模型名称 */
   modelName?: string | null;
+  /** 提供商名称 */
   providerName?: string | null;
 }
 

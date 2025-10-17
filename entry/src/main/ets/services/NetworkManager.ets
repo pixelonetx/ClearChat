@@ -11,6 +11,7 @@ import {
   ChatRequestBody,
   ReasoningContentItem
 } from '../services/DataModels';
+import { AbortController } from '../interfaces/AbortController';
 import { NetworkError } from '../components/Errors';
 
 /**
@@ -46,6 +47,7 @@ interface StreamParseState {
   // 当检测到错误并已通知回调时，避免重复上报
   errorDispatched: boolean;
   reasoningStarted?: boolean; // 跟踪<reasoning_content>是否已开启
+  userAborted?: boolean; // 标记用户主动中断
 }
 
 interface StreamBufferState {
@@ -126,7 +128,7 @@ export class NetworkManager {
    * 发送流式聊天请求到AI服务
    */
   async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[],
-    callbacks: StreamCallbacks): Promise<void> {
+    callbacks: StreamCallbacks, abortController?: AbortController): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const sanitizedApiUrl = (apiUrl || '').trim();
       const sanitizedModel = this.sanitizeIdentifier(model || '');
@@ -160,6 +162,23 @@ export class NetworkManager {
       };
 
       const httpRequest = http.createHttp();
+
+      // 如果提供了AbortController，监听中断信号
+      if (abortController) {
+        abortController.signal.addEventListener('abort', () => {
+          console.info('Request aborted by user');
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          // 标记为用户主动中断，避免触发错误回调
+          parseState.userAborted = true;
+          // 调用onComplete而不是onError，保留已生成的内容
+          wrappedCallbacks.onComplete();
+          this.destroyStreamRequest(httpRequest);
+          resolve(); // 正常结束，不是错误
+        });
+      }
 
       console.info('Request URL:', url);
       console.info('Request body:', JSON.stringify(requestBody));
@@ -199,7 +218,12 @@ export class NetworkManager {
       }, 30000);
 
       // 按需订阅HTTP流式响应事件
-      const parseState: StreamParseState = { metadataDispatched: false, completed: false, errorDispatched: false };
+      const parseState: StreamParseState = { 
+        metadataDispatched: false, 
+        completed: false, 
+        errorDispatched: false,
+        userAborted: false
+      };
       const bufferState: StreamBufferState = { pending: '' };
       // 捕获非 SSE 的错误响应体（如 HTTP 4xx/5xx 返回 JSON 文本）
       let rawErrorBody: string = '';
@@ -353,8 +377,8 @@ export class NetworkManager {
           // 流式数据接收已在 dataReceive 和 dataEnd 事件中处理
           console.info('Stream request successful');
         } else {
-          // 如果先前已经根据错误体上报过更具体的信息，则不再重复覆盖
-          if (!parseState.errorDispatched) {
+          // 如果先前已经根据错误体上报过更具体的信息，或者是用户主动中断，则不再重复覆盖
+          if (!parseState.errorDispatched && !parseState.userAborted) {
             wrappedCallbacks.onError(new Error(`HTTP ${responseCode}`));
           }
         }
@@ -366,7 +390,7 @@ export class NetworkManager {
           timeoutId = null;
         }
         console.error('Stream request error:', err);
-        if (!parseState.errorDispatched) {
+        if (!parseState.errorDispatched && !parseState.userAborted) {
           wrappedCallbacks.onError(new Error(`流式请求失败: ${err.message || err}`));
         }
         try {
@@ -587,7 +611,7 @@ export class NetworkManager {
     console.info('API URL:', sanitizedApiUrl);
     console.info('Model:', sanitizedModel);
     console.info('Messages count:', messages.length);
-    console.info('API Key length:', apiKey.length);
+    console.info('API Key configured:', !!apiKey && apiKey.length > 0);
 
     const requestUrl = this.resolveChatCompletionsUrl(sanitizedApiUrl);
     console.info('Resolved chat endpoint:', requestUrl);
@@ -636,7 +660,9 @@ export class NetworkManager {
         if (err) {
           console.error('HTTP request failed:', err);
           httpRequest.destroy();
-          reject(new NetworkError(`网络请求失败: ${err.message || err}`));
+          // 提供更详细的错误信息
+          const errorMessage = this.getNetworkErrorMessage(err);
+          reject(new NetworkError(errorMessage));
           return;
         }
 
@@ -665,10 +691,11 @@ export class NetworkManager {
             try {
               const errorData = JSON.parse(data.result as string) as ErrorResponse;
               if (errorData.error && errorData.error.message) {
-                errorMessage = errorData.error.message;
+                errorMessage = this.getApiErrorMessage(errorData.error.message, data.responseCode);
               }
             } catch (e) {
               // 解析错误信息失败，使用默认错误消息
+              errorMessage = this.getHttpErrorMessage(data.responseCode);
             }
 
             console.error('HTTP request failed with status:', data.responseCode);
@@ -682,6 +709,74 @@ export class NetworkManager {
         }
       });
     });
+  }
+
+  /**
+   * 获取网络错误的用户友好消息
+   */
+  private getNetworkErrorMessage(error: Error): string {
+    const errorStr = error.message || String(error);
+    
+    if (errorStr.includes('timeout') || errorStr.includes('TIMEOUT')) {
+      return '请求超时，请检查网络连接或稍后重试';
+    }
+    if (errorStr.includes('ENOTFOUND') || errorStr.includes('DNS')) {
+      return '无法连接到服务器，请检查网络设置或API地址';
+    }
+    if (errorStr.includes('ECONNREFUSED')) {
+      return '服务器拒绝连接，请检查API地址是否正确';
+    }
+    if (errorStr.includes('certificate') || errorStr.includes('SSL')) {
+      return 'SSL证书验证失败，请检查网络安全设置';
+    }
+    
+    return `网络请求失败: ${errorStr}`;
+  }
+
+  /**
+   * 获取API错误的用户友好消息
+   */
+  private getApiErrorMessage(apiError: string, statusCode: number): string {
+    if (statusCode === 401) {
+      return 'API密钥无效或已过期，请检查密钥设置';
+    }
+    if (statusCode === 403) {
+      return 'API访问被拒绝，请检查权限设置';
+    }
+    if (statusCode === 429) {
+      return 'API调用频率超限，请稍后重试';
+    }
+    if (statusCode === 500) {
+      return 'AI服务内部错误，请稍后重试';
+    }
+    
+    return apiError || `API错误 (${statusCode})`;
+  }
+
+  /**
+   * 获取HTTP状态码对应的用户友好消息
+   */
+  private getHttpErrorMessage(statusCode: number): string {
+    switch (statusCode) {
+      case 400:
+        return '请求参数错误，请检查输入内容';
+      case 401:
+        return 'API密钥无效，请检查密钥设置';
+      case 403:
+        return 'API访问被拒绝，请检查权限';
+      case 404:
+        return 'API接口不存在，请检查API地址';
+      case 429:
+        return 'API调用频率超限，请稍后重试';
+      case 500:
+        return 'AI服务内部错误，请稍后重试';
+      case 502:
+        return 'AI服务网关错误，请稍后重试';
+      case 503:
+        return 'AI服务暂时不可用，请稍后重试';
+      default:
+        return `请求失败，状态码: ${statusCode}`;
+    }
   }
 
   /**

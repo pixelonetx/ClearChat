@@ -16,6 +16,7 @@ import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { MessageItem } from '../components/MessageItem';
 import { RenameConversationDialog } from '../components/RenameConversationDialog';
 import { ModelSelectorSheet } from '../components/ModelSelectorDialog';
+import { AbortController, createAbortController } from '../interfaces/AbortController';
 
 // 定义模型信息接口
 interface ModelInfo {
@@ -53,29 +54,39 @@ export function ChatBuilder() {
 @Component
 struct Chat {
   pathStack: NavPathStack = new NavPathStack();
-  @StorageProp('bottomRectHeight')
-  bottomRectHeight: number = 0;
-  @StorageProp('topRectHeight')
-  topRectHeight: number = 0;
-  @StorageProp('settingsVersion')
-  settingsVersion: number = 0;
-  @State showControlButton: boolean = true // 显示控制按钮开关
-  @State showSideBar: boolean = false // 显示侧边栏开关
-  @State messages: ChatMessage[] = [];
-  @State inputText: string = '';
-  @State isLoading: boolean = false;
-  @State isInitialized: boolean = false;
-  @State ctrlFlag: boolean = false;
-  @State hasSettings: boolean = false;
-  @State currentConversation: Conversation | null = null;
-  @State isSidebarVisible: boolean = false;
-  @State sidebarOffset: number = -300;
-  @State backgroundBlurRadius: number = 0; // 控制背景模糊程度
-  @State conversations: Conversation[] = [];
-  @State showModelSelectorSheet: boolean = false; // 控制半模态弹窗显示
-  @State customPopup: boolean = false; // 更多按钮
+  // 常量定义
+  private static readonly SIDEBAR_WIDTH = 300;
+  private static readonly ANIMATION_DURATION = 300;
+  private static readonly DEBOUNCE_DELAY = 300;
+  
+  // 状态管理
+  @StorageProp('bottomRectHeight') bottomRectHeight: number = 0;
+  @StorageProp('topRectHeight') topRectHeight: number = 0;
+  @StorageProp('settingsVersion') settingsVersion: number = 0;
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
-  @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm'
+  @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm';
+  
+  // UI 状态
+  @State showControlButton: boolean = true;
+  @State showSideBar: boolean = false;
+  @State isSidebarVisible: boolean = false;
+  @State sidebarOffset: number = -Chat.SIDEBAR_WIDTH;
+  @State backgroundBlurRadius: number = 0;
+  @State showModelSelectorSheet: boolean = false;
+  @State customPopup: boolean = false;
+  
+  // 数据状态
+  @State messages: ChatMessage[] = [];
+  @State conversations: Conversation[] = [];
+  @State currentConversation: Conversation | null = null;
+  @State inputText: string = '';
+  
+  // 应用状态
+  @State isLoading: boolean = false;
+  @State isGenerating: boolean = false; // 新增：跟踪是否正在生成内容
+  @State isInitialized: boolean = false;
+  @State hasSettings: boolean = false;
+  @State ctrlFlag: boolean = false;
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -86,6 +97,9 @@ struct Chat {
   private requestedSettingsVersion: number = 0;
   private handledReloadVersion: number = 0;
   private messageDataSource: ArrayDataSource<ChatMessage> = new ArrayDataSource<ChatMessage>(this.messages);
+  private currentAbortController: AbortController | null = null; // 新增：用于中断请求
+  private shouldAbortRequest: boolean = false; // 中断请求标志
+  private userAbortedGeneration: boolean = false; // 用户主动停止标记
 
   private notifyMessagesUpdated(): void {
     // 更新数据源引用与刷新（数组引用经常被替换）
@@ -127,6 +141,11 @@ struct Chat {
     return this.messages.length - 1;
   }
 
+  /**
+   * 将错误信息转换为用户友好的提示消息
+   * @param error 原始错误对象
+   * @returns 用户友好的错误消息
+   */
   private getFriendlySendErrorMessage(error: Error): string {
     if (!error) {
       return '发送消息失败';
@@ -147,36 +166,61 @@ struct Chat {
 
     const normalized = rawMessage.toLowerCase();
 
+    // 超时错误
     if (normalized.includes('timeout') || rawMessage.includes('超时')) {
       return '请求超时，请稍后重试';
     }
 
+    // 网络连接错误
     if (normalized.includes('network') || normalized.includes('connection') || normalized.includes('fetch') ||
     rawMessage.includes('网络')) {
       return '网络连接失败，请检查网络设置';
     }
 
+    // 认证授权错误
     if (normalized.includes('unauthorized') || normalized.includes('forbidden') ||
     normalized.includes('invalid api key') || normalized.includes('401') || normalized.includes('403') ||
     rawMessage.includes('授权') || rawMessage.includes('认证')) {
       return 'API密钥无效，请检查设置';
     }
 
+    // 频率限制错误
     if (normalized.includes('rate limit') || normalized.includes('too many')) {
       return '请求过于频繁，请稍后再试';
     }
 
+    // 模型相关错误
     if (normalized.includes('model') &&
       (normalized.includes('not found') || normalized.includes('does not exist') || normalized.includes('unknown'))) {
       return '模型不可用，请检查模型ID';
     }
 
+    // HTTP状态码错误
     if (normalized.startsWith('http ') || rawMessage.startsWith('HTTP') || /http\s\d+/.test(normalized)) {
       return `服务返回错误：${rawMessage}`;
     }
 
+    // SSL证书错误
     if (normalized.includes('ssl') || normalized.includes('certificate')) {
       return 'SSL连接失败，请检查网络或证书配置';
+    }
+
+    // 内容过滤错误
+    if (normalized.includes('content_filter') || normalized.includes('content policy') || 
+        rawMessage.includes('内容过滤') || rawMessage.includes('违规')) {
+      return '消息内容不符合规范，请修改后重试';
+    }
+
+    // 配额不足错误
+    if (normalized.includes('quota') || normalized.includes('insufficient') || 
+        rawMessage.includes('配额') || rawMessage.includes('余额')) {
+      return 'API配额不足，请检查账户余额';
+    }
+
+    // 服务不可用错误
+    if (normalized.includes('service unavailable') || normalized.includes('502') || 
+        normalized.includes('503') || rawMessage.includes('服务不可用')) {
+      return 'AI服务暂时不可用，请稍后重试';
     }
 
     return `发送失败：${rawMessage}`;
@@ -389,8 +433,13 @@ struct Chat {
                   })
 
                 Row() {
+                  // 单按钮：生成中显示“停止”，否则显示“发送”
                   Button() {
-                    if (this.isLoading) {
+                    if (this.isGenerating) {
+                      SymbolGlyph($r('sys.symbol.stop_circle'))
+                        .fontSize(24)
+                        .fontColor([Color.Red])
+                    } else if (this.isLoading) {
                       LoadingProgress()
                         .width(24)
                         .height(24)
@@ -405,9 +454,13 @@ struct Chat {
                   .backgroundColor($r('sys.color.button_background_color_transparent'))
                   .size({ width: 40, height: 40 })
                   .margin({ right: 12 })
-                  .enabled(this.inputText.trim() !== '' && !this.isLoading)
+                  .enabled(this.isGenerating || (this.inputText.trim() !== '' && !this.isLoading))
                   .onClick(() => {
-                    this.sendMessage();
+                    if (this.isGenerating) {
+                      this.stopGeneration();
+                    } else {
+                      this.sendMessage();
+                    }
                   })
                 }
                 .margin({ bottom: 12 }) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
@@ -510,7 +563,7 @@ struct Chat {
                   console.error(`[OVERLAY DEBUG] Overlay clicked - closing sidebar`);
                   if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
                     animateTo({
-                      duration: 300,
+                      duration: Chat.ANIMATION_DURATION,
                       curve: Curve.FastOutSlowIn
                     }, () => {
                       this.showSideBar = false;
@@ -875,10 +928,10 @@ struct Chat {
     this.hideKeyboard();
 
     animateTo({
-      duration: 300,
-      curve: Curve.FastOutSlowIn
-    }, () => {
-      this.sidebarOffset = -300;
+          duration: Chat.ANIMATION_DURATION,
+          curve: Curve.EaseInOut
+        }, () => {
+          this.sidebarOffset = -Chat.SIDEBAR_WIDTH;
       this.backgroundBlurRadius = 0; // 侧边栏隐藏时无模糊
     });
 
@@ -1120,20 +1173,33 @@ struct Chat {
       return false;
     }
 
-    // 分别获取用户消息和AI回复
-    const userMessages = this.messages.filter(msg => msg.role === 'user');
-    const aiMessages = this.messages.filter(msg => msg.role === 'assistant');
+    // 缓存消息统计以避免重复计算
+    let userMessageCount = 0;
+    let aiMessageCount = 0;
+    let totalUserChars = 0;
+    let totalAiChars = 0;
+    let firstUserMessage: string | undefined;
 
-    const totalUserChars = userMessages.reduce((total, msg) => total + msg.content.length, 0);
-    const totalAiChars = aiMessages.reduce((total, msg) => total + msg.content.length, 0);
+    // 单次遍历计算所有统计信息
+    for (const msg of this.messages) {
+      if (msg.role === 'user') {
+        userMessageCount++;
+        totalUserChars += msg.content.length;
+        if (!firstUserMessage) {
+          firstUserMessage = msg.content.toLowerCase().trim();
+        }
+      } else if (msg.role === 'assistant') {
+        aiMessageCount++;
+        totalAiChars += msg.content.length;
+      }
+    }
 
     // 检查是否包含常见的简单问候语
     const greetings = ['你好', 'hello', 'hi', '您好', '在吗', '在不在', '早上好', '晚上好', '下午好'];
-    const firstUserMessage = userMessages[0]?.content.toLowerCase().trim();
 
     // 如果第一条消息是简单问候语
     if (firstUserMessage && greetings.some(greeting =>
-    firstUserMessage.includes(greeting.toLowerCase()) && firstUserMessage.length <= 10)) {
+    firstUserMessage!.includes(greeting.toLowerCase()) && firstUserMessage!.length <= 10)) {
 
       // 即使是问候语开头，如果AI回复很长，说明可能有有意义的对话
       if (totalAiChars >= 50) {
@@ -1155,7 +1221,20 @@ struct Chat {
   }
 
   async sendMessage() {
-    if (!this.inputText.trim() || this.isLoading) {
+    const trimmedInput = this.inputText.trim();
+    if (!trimmedInput || this.isLoading || this.isGenerating) {
+      return;
+    }
+
+    // 输入验证
+    if (trimmedInput.length > 10000) {
+      this.showToast('消息内容不能超过10000个字符');
+      return;
+    }
+
+    // 检查是否包含潜在的恶意内容
+    if (this.containsSuspiciousContent(trimmedInput)) {
+      this.showToast('消息内容包含不当内容，请修改后重试');
       return;
     }
 
@@ -1206,7 +1285,8 @@ struct Chat {
 
     // 锁定当前对话ID，防止在等待AI回复期间切换对话导致回复错乱
     const targetConversationId = this.currentConversation.id;
-    const userMessage = new ChatMessage(this.inputText.trim(), 'user', {
+    this.inputText = trimmedInput;
+    const userMessage = new ChatMessage(trimmedInput, 'user', {
       conversationId: targetConversationId
     });
 
@@ -1285,11 +1365,15 @@ struct Chat {
       }
 
       this.isLoading = false;
+      this.isGenerating = false; // 重置生成状态
+      this.currentAbortController = null; // 清理中断控制器
       this.showToast(toastMessage);
     };
 
     try {
       this.isLoading = true;
+      this.isGenerating = true; // 设置生成状态
+      this.currentAbortController = createAbortController(); // 创建简单的中断控制器
       console.info('Started sending message, isLoading set to true');
 
       // 添加用户消息到界面和数据库
@@ -1439,8 +1523,8 @@ struct Chat {
                 }
               }
 
-              // 生成对话标题
-              if (this.shouldGenerateTitle()) {
+              // 生成对话标题（用户主动停止则跳过）
+              if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
                 await this.generateConversationTitle();
               }
 
@@ -1453,6 +1537,9 @@ struct Chat {
 
             // 设置加载状态为false
             this.isLoading = false;
+            this.isGenerating = false; // 重置生成状态
+            this.currentAbortController = null; // 清理中断控制器
+            this.userAbortedGeneration = false; // 清除用户停止标记
           },
 
           // onError: 处理错误
@@ -1461,7 +1548,8 @@ struct Chat {
               console.error('Failed to handle streaming error:', failureError);
             });
           }
-        }
+        },
+        this.currentAbortController // 传入AbortController
       );
 
     } catch (error) {
@@ -1469,6 +1557,19 @@ struct Chat {
     } finally {
       // 不在这里设置isLoading = false，因为流式请求的回调是异步的
       console.info('Message sending request initiated');
+    }
+  }
+
+  /**
+   * 停止当前的AI生成
+   */
+  stopGeneration() {
+    if (this.currentAbortController && this.isGenerating) {
+      console.info('Stopping AI generation...');
+      this.userAbortedGeneration = true;
+      this.currentAbortController.abort();
+      // 不立即设置状态，让onComplete回调来处理
+      this.showToast('已停止生成');
     }
   }
 
@@ -1628,6 +1729,8 @@ struct Chat {
 
       // 设置为重新生成模式
       this.isLoading = true;
+      this.isGenerating = true;
+      this.currentAbortController = createAbortController();
       const targetConversationId = this.currentConversation.id;
       const streamingMessageIndex = messageIndex;
 
@@ -1743,7 +1846,8 @@ struct Chat {
             }
 
             this.isLoading = false;
-            this.showToast('消息已重新生成');
+            this.isGenerating = false;
+            this.currentAbortController = null;
           },
 
           // 重新生成错误处理
@@ -1759,9 +1863,12 @@ struct Chat {
             }
 
             this.isLoading = false;
+            this.isGenerating = false;
+            this.currentAbortController = null;
             this.showToast('重新生成失败');
           }
-        }
+        },
+        this.currentAbortController
       );
 
     } catch (error) {
@@ -2175,6 +2282,31 @@ struct Chat {
   }
 
   // 根据窗口宽度计算断点
+  /**
+   * 检查输入内容是否包含可疑内容
+   */
+  private containsSuspiciousContent(input: string): boolean {
+    // 检查是否包含潜在的脚本注入
+    const scriptPatterns = [
+      /<script[^>]*>.*?<\/script>/gi,
+      /javascript:/gi,
+      /on\w+\s*=/gi,
+      /<iframe[^>]*>/gi,
+      /<object[^>]*>/gi,
+      /<embed[^>]*>/gi
+    ];
+
+    // 检查是否包含SQL注入模式
+    const sqlPatterns = [
+      /(\bUNION\b|\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b).*(\bFROM\b|\bWHERE\b|\bINTO\b)/gi,
+      /['";].*(-{2}|\/\*)/gi
+    ];
+
+    // 检查所有模式
+    const allPatterns = [...scriptPatterns, ...sqlPatterns];
+    return allPatterns.some(pattern => pattern.test(input));
+  }
+
   private updateBreakpoint(): void {
     try {
       const context = this.getUIContext()?.getHostContext() as common.UIAbilityContext;
