@@ -34,6 +34,21 @@ export struct MarkdownRenderer {
   private parser: MarkdownParser = new MarkdownParser();
   private context = getContext(this) as common.UIAbilityContext;
   @State private expandedSections: Set<number> = new Set<number>(); // 显式声明泛型类型
+  
+  // 缓存解析结果以提升性能
+  @State private parsedContent: ContentPart[] = [];
+  @State private lastContent: string = '';
+
+  aboutToAppear() {
+    this.updateParsedContent();
+  }
+
+  private updateParsedContent() {
+    if (this.content !== this.lastContent) {
+      this.parsedContent = this.parseThinkingContent(this.content || '');
+      this.lastContent = this.content;
+    }
+  }
 
   /**
    * 解析思考模型内容
@@ -326,70 +341,77 @@ export struct MarkdownRenderer {
   @Builder
   renderTable(block: MarkdownBlock) {
     if (block.tableData && block.tableData.length > 0) {
-      Column() {
-        ForEach(block.tableData, (row: string[], rowIndex: number) => {
-          Row() {
-            ForEach(row, (cell: string, cellIndex: number) => {
-              Column() {
-                Text() {
-                  ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
-                    if (segment.code) {
-                      Span(segment.text)
-                        .fontSize(12)
-                        .fontColor('#D63384')
-                        .fontFamily('monospace')
-                    } else if (segment.isLink) {
-                      Span(segment.text)
-                        .fontSize(12)
-                        .fontColor('#007AFF')
-                        .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-                        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-                        .decoration({
-                          type: TextDecorationType.Underline,
-                          color: '#007AFF'
-                        })
-                        .onClick(() => {
-                          this.showLinkActionSheet(segment.url);
-                        })
-                    } else {
-                      Span(segment.text)
-                        .fontSize(12)
+      Scroll() {
+        Column() {
+          ForEach(block.tableData, (row: string[], rowIndex: number) => {
+            Row() {
+              ForEach(row, (cell: string, cellIndex: number) => {
+                Column() {
+                  Text() {
+                    ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
+                      if (segment.code) {
+                        Span(segment.text)
+                          .fontSize(12)
+                          .fontColor('#D63384')
+                          .fontFamily('monospace')
+                      } else if (segment.isLink) {
+                        Span(segment.text)
+                          .fontSize(12)
+                          .fontColor('#007AFF')
+                          .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
+                          .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+                          .decoration({
+                            type: TextDecorationType.Underline,
+                            color: '#007AFF'
+                          })
+                          .onClick(() => {
+                            this.showLinkActionSheet(segment.url);
+                          })
+                      } else {
+                        Span(segment.text)
+                          .fontSize(12)
 
-                        .fontWeight(segment.bold ? FontWeight.Bold : (rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal))
-                        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-                        .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+                          .fontWeight(segment.bold ? FontWeight.Bold : (rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal))
+                          .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+                          .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+                      }
+                    })
+
+                    // 空内容占位，保证空白单元格有最小高度
+                    if (cell.trim().length === 0) {
+                      Span('\u00A0')
+                        .fontSize(12)
                     }
-                  })
+                  }
+                  .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+                  .textAlign(this.getTableCellTextAlign(block, cellIndex))
+                  .wordBreak(WordBreak.BREAK_WORD)
                 }
-                .padding({ left: 6, right: 6, top: 8, bottom: 8 })
-                .textAlign(TextAlign.Start)
-                .maxLines(3)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .wordBreak(WordBreak.BREAK_ALL)
-              }
-              .layoutWeight(1)
-              .height(40)
+                .constraintSize({ minWidth: this.getTableCellWidth(block, cellIndex), maxWidth: this.getTableCellWidth(block, cellIndex) })
 
-              .border({
-                width: 1,
-                color: '#E0E0E0'
+                .border({
+                  width: 1,
+                  color: '#E0E0E0'
+                })
+                .alignItems(this.getTableCellAlignment(block, cellIndex))
+                .justifyContent(FlexAlign.Start)
               })
-              .alignItems(HorizontalAlign.Start)
-              .justifyContent(FlexAlign.Center)
-            })
-          }
-          .height(40)
+            }
+          })
+        }
+        .margin({ top: 8, bottom: 8 })
+        .border({
+          width: 1,
+          color: '#E0E0E0',
+          radius: 4
         })
+        .clip(true)
+        .alignItems(HorizontalAlign.Start)
       }
-      .margin({ top: 8, bottom: 8 })
-      .border({
-        width: 1,
-        color: '#E0E0E0',
-        radius: 4
-      })
-      .constraintSize({ maxWidth: '100%' })
-      .clip(true)
-      .alignItems(HorizontalAlign.Start)
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Auto)
+      .scrollBarWidth(4)
+      .edgeEffect(EdgeEffect.None)
     }
   }
 
@@ -482,8 +504,10 @@ export struct MarkdownRenderer {
    */
   private getTableCellWidth(block: MarkdownBlock, columnIndex: number): number {
     const tableColumns: TableColumn[] = block.tableColumns || [];
-    const columnWidths = this.parser.getTableColumnWidths(tableColumns, 300, 60);
-    return columnWidths[columnIndex] || 60;
+    const totalWidth: number = Math.max(tableColumns.length, 1) * 160;
+    const minColumnWidth: number = 120;
+    const columnWidths: number[] = this.parser.getTableColumnWidths(tableColumns, totalWidth, minColumnWidth);
+    return columnWidths[columnIndex] || minColumnWidth;
   }
 
   /**
@@ -577,8 +601,8 @@ export struct MarkdownRenderer {
 
   build() {
     Column() {
-      // 解析内容，区分思考部分和普通部分
-      ForEach(this.parseThinkingContent(this.content || ''), (part: ContentPart, index: number) => {
+      // 使用缓存的解析结果
+      ForEach(this.parsedContent, (part: ContentPart, index: number) => {
         if (part.type === 'thinking' && part.id !== undefined) {
           // 渲染思考部分
           this.renderThinkingSection(part.content, part.id)
@@ -586,11 +610,12 @@ export struct MarkdownRenderer {
           // 渲染普通内容
           ForEach(this.parser.parse(part.content || ''), (block: MarkdownBlock, blockIndex: number) => {
             this.renderBlock(block)
-          })
+          }, (block: MarkdownBlock, blockIndex: number) => `block_${index}_${blockIndex}_${block.type}`)
         }
-      })
+      }, (part: ContentPart, index: number) => `part_${index}_${part.type}_${part.id || 'normal'}`)
     }
-    .constraintSize({ maxWidth: this.maxWidth === 'auto' ? '100%' : this.maxWidth })
+    .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .constraintSize({ maxWidth: this.maxWidth === 'auto' ? '100%' : this.maxWidth })
   }
 }

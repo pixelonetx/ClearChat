@@ -386,63 +386,95 @@ export class MarkdownParser {
     let i = startIndex;
     let hasAlignment = false;
 
+    // 安全拆分：忽略转义管道（\|）与代码片段中的管道（`|`）
+    const splitRow = (line: string): string[] => {
+      const cells: string[] = [];
+      let current = '';
+      let inCode = false;
+      for (let idx = 0; idx < line.length; idx++) {
+        const ch = line[idx];
+        const prev = idx > 0 ? line[idx - 1] : '';
+
+        if (ch === '`') {
+          // 处理行内代码切换
+          inCode = !inCode;
+          current += ch;
+          continue;
+        }
+
+        if (ch === '\\' && !inCode && idx + 1 < line.length && line[idx + 1] === '|') {
+          // 处理转义管道 \|
+          current += '|';
+          idx++;
+          continue;
+        }
+
+        if (ch === '|') {
+          if (!inCode && prev !== '\\') {
+            // 作为分隔符
+            cells.push(current.trim());
+            current = '';
+          } else {
+            // 作为普通字符
+            current += ch;
+          }
+          continue;
+        }
+
+        current += ch;
+      }
+
+      // 推入最后一个单元格
+      cells.push(current.trim());
+
+      // 去掉由于首尾管道导致的空单元格
+      if (cells.length > 0 && cells[0] === '') { cells.shift(); }
+      if (cells.length > 0 && cells[cells.length - 1] === '') { cells.pop(); }
+
+      return cells;
+    };
+
     while (i < lines.length) {
       const line = lines[i].trim();
-      if (line.includes('|')) {
-        // 检查是否是分隔行（如 |---|---|、| --- | --- |、|:---|---:|等）
-        const alignmentMatch = line.match(/^\|(\s*:?-+:?\s*\|)+$/);
-        if (alignmentMatch) {
-          // 这是表格分隔行，解析对齐信息
-          if (!hasAlignment) {
-            const alignmentCells = line.split('|');
-            // 移除首尾空的单元格
-            if (alignmentCells.length > 0 && alignmentCells[0].trim() === '') {
-              alignmentCells.shift();
-            }
-            if (alignmentCells.length > 0 && alignmentCells[alignmentCells.length - 1].trim() === '') {
-              alignmentCells.pop();
-            }
 
-            alignmentCells.forEach((cell: string) => {
-              const trimmedCell = cell.trim();
-              if (trimmedCell.startsWith(':') && trimmedCell.endsWith(':')) {
-                alignments.push(TableAlignment.CENTER);
-              } else if (trimmedCell.endsWith(':')) {
-                alignments.push(TableAlignment.RIGHT);
-              } else {
-                alignments.push(TableAlignment.LEFT);
-              }
-            });
-            hasAlignment = true;
-          }
-          i++;
-          continue;
-        }
-
-        // 跳过其他类型的分隔行
-        if (line.match(/^\|[\s\-\:\|]+\|$/)) {
-          i++;
-          continue;
-        }
-
-        // 解析表格数据行
-        const cells = line.split('|');
-        // 移除首尾空的单元格（来自开头和结尾的|符号）
-        if (cells.length > 0 && cells[0].trim() === '') {
-          cells.shift();
-        }
-        if (cells.length > 0 && cells[cells.length - 1].trim() === '') {
-          cells.pop();
-        }
-        // 保留空单元格但去除首尾空白
-        const trimmedCells = cells.map((cell: string) => cell.trim());
-        if (trimmedCells.length > 0) {
-          tableData.push(trimmedCells);
-        }
-        i++;
-      } else {
+      if (!line.includes('|')) {
         break;
       }
+
+      // 兼容无首尾管道的对齐分隔行
+      if (this.isTableSeparatorLine(line)) {
+        if (!hasAlignment) {
+          const alignmentCells = splitRow(line);
+          alignmentCells.forEach((cell: string) => {
+            const trimmedCell = cell.trim();
+            const startsColon = trimmedCell.startsWith(':');
+            const endsColon = trimmedCell.endsWith(':');
+            if (startsColon && endsColon) {
+              alignments.push(TableAlignment.CENTER);
+            } else if (endsColon) {
+              alignments.push(TableAlignment.RIGHT);
+            } else {
+              alignments.push(startsColon ? TableAlignment.LEFT : TableAlignment.LEFT);
+            }
+          });
+          hasAlignment = true;
+        }
+        i++;
+        continue;
+      }
+
+      // 跳过纯分隔字符行（避免被当作数据行）
+      if (/^[\|\s:\-]+$/.test(line)) {
+        i++;
+        continue;
+      }
+
+      // 解析表格数据行（安全拆分）
+      const cells = splitRow(line);
+      if (cells.length > 0) {
+        tableData.push(cells);
+      }
+      i++;
     }
 
     // 如果没有明确的对齐信息，默认左对齐
@@ -454,8 +486,10 @@ export class MarkdownParser {
     }
 
     // 计算每列的最大宽度并标准化表格数据
-    const columnCount =
-      Math.max(alignments.length, tableData.length > 0 ? Math.max(...tableData.map(row => row.length)) : 0);
+    const columnCount = Math.max(
+      alignments.length,
+      tableData.length > 0 ? Math.max(...tableData.map(row => row.length)) : 0
+    );
     const columnWidths: number[] = new Array(columnCount).fill(0);
 
     // 标准化所有行的列数
@@ -482,7 +516,7 @@ export class MarkdownParser {
       return {
         alignment: alignment,
         width: columnWidth,
-        relativeWidth: totalWidth > 0 ? columnWidth / totalWidth : 1 / alignments.length
+        relativeWidth: totalWidth > 0 ? columnWidth / totalWidth : 1 / Math.max(alignments.length, 1)
       };
     });
 

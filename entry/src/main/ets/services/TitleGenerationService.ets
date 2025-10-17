@@ -1,3 +1,18 @@
+/**
+ * TitleGenerationService - 对话标题生成服务
+ * 
+ * 功能说明：
+ * - 基于对话内容自动生成简洁的标题
+ * - 过滤无意义的问候语，专注于核心内容
+ * - 提供智能的备用标题生成策略
+ * - 支持多种AI模型进行标题生成
+ * 
+ * 使用场景：
+ * - 新对话创建时自动生成标题
+ * - 对话内容更新后重新生成标题
+ * - 提升用户体验，便于对话管理
+ */
+
 import { ChatMessage } from '../services/DataModels';
 import { NetworkManager } from '../services/NetworkManager';
 
@@ -8,6 +23,14 @@ export class TitleGenerationService {
     this.networkManager = NetworkManager.getInstance();
   }
 
+  /**
+   * 生成对话标题
+   * @param messages 对话消息列表
+   * @param apiKey API密钥
+   * @param baseUrl API基础URL
+   * @param model 使用的AI模型
+   * @returns Promise<string> 生成的标题
+   */
   async generateTitle(messages: ChatMessage[], apiKey: string, baseUrl: string, model: string): Promise<string> {
     try {
       if (!messages || messages.length === 0) {
@@ -70,7 +93,11 @@ ${conversationText}
     }
   }
 
-  // 过滤有意义的消息，排除简单问候语
+  /**
+   * 过滤有意义的消息，排除简单问候语
+   * @param messages 原始消息列表
+   * @returns ChatMessage[] 过滤后的有意义消息列表
+   */
   private filterMeaningfulMessages(messages: ChatMessage[]): ChatMessage[] {
     const greetingPatterns = [
       /^(你好|hello|hi|您好|在吗|在不在)[\s]*[?？。！!]*$/i,
@@ -109,7 +136,11 @@ ${conversationText}
     });
   }
 
-  // 检查是否为通用无意义标题
+  /**
+   * 检查是否为通用无意义标题
+   * @param title 待检查的标题
+   * @returns boolean 是否为通用标题
+   */
   private isGenericTitle(title: string): boolean {
     const genericTitles = [
       '你好', '问候', '聊天', '对话', '交流', 'hello', 'hi',
@@ -121,6 +152,11 @@ ${conversationText}
     );
   }
 
+  /**
+   * 生成备用标题
+   * @param messages 可选的消息列表
+   * @returns string 备用标题
+   */
   private getFallbackTitle(messages?: ChatMessage[]): string {
     if (messages && messages.length > 0) {
       const firstUserMessage: ChatMessage | undefined = messages.find((msg: ChatMessage): boolean => msg.role === 'user');

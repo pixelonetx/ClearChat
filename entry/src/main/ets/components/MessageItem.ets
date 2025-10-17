@@ -1,3 +1,13 @@
+/**
+ * MessageItem 组件 - 聊天消息项
+ * 
+ * 功能说明：
+ * - 渲染用户和AI助手的消息内容
+ * - 提供消息操作功能（复制、删除、重新生成等）
+ * - 支持Markdown格式渲染
+ * - 优化性能，缓存计算结果
+ */
+
 import { ChatMessage } from '../services/DataModels';
 import { Constants } from '../components/Constants';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -6,14 +16,27 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 export struct MessageItem {
   @Prop message: ChatMessage;
 
-  // 回调函数
+  // 回调函数 - 消息操作事件
   onCopy?: (message: ChatMessage) => void | Promise<void>;
   onEdit?: (message: ChatMessage) => void | Promise<void>;
   onDelete?: (message: ChatMessage) => void | Promise<void>;
   onRegenerate?: (message: ChatMessage) => void | Promise<void>;
 
+  // 下拉菜单显示状态
   @State showUserMenu: boolean = false;
   @State showAssistantMenu: boolean = false;
+
+  // 缓存计算结果以提升性能，避免重复计算
+  @State private isUserMessage: boolean = false;
+  @State private messageContent: string = '';
+
+  /**
+   * 组件初始化时缓存常用计算结果
+   */
+  aboutToAppear() {
+    this.isUserMessage = this.message.role === 'user';
+    this.messageContent = this.message.content;
+  }
 
   @Builder
   UserDropdownMenu() {
@@ -196,7 +219,7 @@ export struct MessageItem {
         Blank()
         Row() {
           Column() {
-            Text(this.message.content)
+            Text(this.messageContent)
               .fontSize(14)
               .fontColor($r('app.color.text_color'))
               .maxLines(999)
@@ -306,9 +329,9 @@ export struct MessageItem {
 
   build() {
     Column() {
-      if (this.message.role === 'user') {
+      if (this.isUserMessage) {
         this.UserMessage()
-      } else if (this.message.content === '...') {
+      } else if (this.messageContent === '...') {
         // 显示加载动画
         this.LoadingMessage()
       } else {

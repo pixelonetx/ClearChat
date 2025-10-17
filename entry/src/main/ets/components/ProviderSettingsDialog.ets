@@ -169,22 +169,51 @@ export struct ProviderSettingsDialog {
   }
 
   private confirmProvider() {
-    if (!this.editableProvider.displayName.trim()) {
+    // 验证提供方名称
+    const displayName = this.editableProvider.displayName.trim();
+    if (!displayName) {
       this.showToast('请输入提供方名称');
       return;
     }
+    if (displayName.length > 50) {
+      this.showToast('提供方名称不能超过50个字符');
+      return;
+    }
 
-    if (!this.editableProvider.apiUrl.trim()) {
+    // 验证API地址
+    const apiUrl = this.editableProvider.apiUrl.trim();
+    if (!apiUrl) {
       this.showToast('请输入API地址');
       return;
     }
-
-    if (!this.editableProvider.apiKey.trim()) {
-      this.showToast('请输入API密钥');
+    if (!this.isValidUrl(apiUrl)) {
+      this.showToast('请输入有效的API地址');
       return;
     }
 
+    // 验证API密钥
+    const apiKey = this.editableProvider.apiKey.trim();
+    if (!apiKey) {
+      this.showToast('请输入API密钥');
+      return;
+    }
+    if (apiKey.length < 10 || apiKey.length > 200) {
+      this.showToast('API密钥长度应在10-200个字符之间');
+      return;
+    }
+
+    // 更新编辑的提供方数据
+    this.editableProvider.displayName = displayName;
+    this.editableProvider.apiUrl = apiUrl;
+    this.editableProvider.apiKey = apiKey;
+
     this.onConfirm(this.cloneProvider(this.editableProvider));
+  }
+
+  private isValidUrl(url: string): boolean {
+    // 简单的URL格式验证，适用于ArkTS环境
+    const urlPattern = /^https?:\/\/([\w\-]+(\.[\w\-]+)*)(:\d+)?(\/.*)?$/i;
+    return urlPattern.test(url.trim());
   }
 
   private cloneProvider(source: AIProvider): AIProvider {

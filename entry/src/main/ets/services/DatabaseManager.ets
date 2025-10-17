@@ -1,3 +1,26 @@
+/**
+ * DatabaseManager - 数据库管理服务
+ * 
+ * 功能说明：
+ * - 管理应用的关系型数据库操作
+ * - 提供对话、消息、设置、AI提供商等数据的CRUD操作
+ * - 实现数据库版本管理和迁移
+ * - 确保数据一致性和事务安全
+ * 
+ * 数据表结构：
+ * - conversations: 对话记录表
+ * - messages: 消息记录表
+ * - settings: 应用设置表
+ * - providers: AI提供商配置表
+ * - models: AI模型配置表
+ * 
+ * 特性：
+ * - 单例模式确保数据库连接唯一性
+ * - 支持数据库版本升级和结构迁移
+ * - 提供完整的错误处理和日志记录
+ * - 优化查询性能和内存使用
+ */
+
 import { relationalStore } from '@kit.ArkData';
 import { Constants } from '../components/Constants';
 import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel } from '../services/DataModels';
@@ -23,7 +46,8 @@ interface ProviderRecord {
 }
 
 /**
- * 数据库管理器
+ * 数据库管理器 - 单例模式
+ * 负责应用所有数据的持久化存储和管理
  */
 export class DatabaseManager {
   private static instance: DatabaseManager;
@@ -31,6 +55,10 @@ export class DatabaseManager {
 
   private constructor() {}
 
+  /**
+   * 获取数据库管理器单例实例
+   * @returns DatabaseManager 数据库管理器实例
+   */
   static getInstance(): DatabaseManager {
     if (!DatabaseManager.instance) {
       DatabaseManager.instance = new DatabaseManager();
@@ -39,13 +67,15 @@ export class DatabaseManager {
   }
 
   /**
-   * 初始化数据库
+   * 初始化数据库连接和配置
+   * @param context 应用上下文
+   * @throws DatabaseError 数据库初始化失败时抛出
    */
   async initDatabase(context: Context): Promise<void> {
     const config: relationalStore.StoreConfig = {
       name: Constants.DB_NAME,
-      securityLevel: relationalStore.SecurityLevel.S1,
-      encrypt: false
+      securityLevel: relationalStore.SecurityLevel.S2, // 提升安全级别
+      encrypt: true // 启用数据库加密
     };
 
     try {
@@ -59,7 +89,9 @@ export class DatabaseManager {
   }
 
   /**
-   * 创建数据表
+   * 创建所有必要的数据表
+   * @private
+   * @throws DatabaseError 表创建失败时抛出
    */
   private async createTables(): Promise<void> {
     if (!this.rdbStore) {
@@ -107,12 +139,32 @@ export class DatabaseManager {
       )
     `;
 
+    // 创建索引以优化查询性能
+    const createChatIndexes = [
+      `CREATE INDEX IF NOT EXISTS idx_messages_conv_ts ON ${Constants.CHAT_TABLE}(conversation_id, timestamp)`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_provider_msg_id ON ${Constants.CHAT_TABLE}(provider_message_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON ${Constants.CHAT_TABLE}(timestamp)`
+    ];
+
+    const createConversationIndexes = [
+      `CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_conversations_active ON conversations(is_active)`
+    ];
+
     try {
       await this.rdbStore.executeSql(createChatTable);
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
 
-      console.info('Database tables created successfully');
+      // 创建索引
+      for (const indexSql of createChatIndexes) {
+        await this.rdbStore.executeSql(indexSql);
+      }
+      for (const indexSql of createConversationIndexes) {
+        await this.rdbStore.executeSql(indexSql);
+      }
+
+      console.info('Database tables and indexes created successfully');
     } catch (error) {
       console.error('Failed to create tables:', error);
       throw new DatabaseError(`Failed to create tables: ${error}`);
@@ -398,7 +450,7 @@ export class DatabaseManager {
     console.info('Saving settings:', {
       apiUrl: settings.apiUrl,
       modelName: settings.modelName,
-      apiKeyLength: settings.apiKey.length,
+      apiKeyConfigured: !!settings.apiKey && settings.apiKey.length > 0,
       providersCount: settings.providers?.length || 0,
       activeProviderId: settings.activeProviderId,
       activeModelId: settings.activeModelId
@@ -507,7 +559,7 @@ export class DatabaseManager {
           id: resolvedSettings.id,
           apiUrl: resolvedSettings.apiUrl,
           modelName: resolvedSettings.modelName,
-          apiKeyLength: resolvedSettings.apiKey.length,
+          apiKeyConfigured: !!resolvedSettings.apiKey && resolvedSettings.apiKey.length > 0,
           providersCount: resolvedSettings.providers.length,
           activeProviderId: resolvedSettings.activeProviderId,
           activeModelId: resolvedSettings.activeModelId
@@ -602,10 +654,14 @@ export class DatabaseManager {
     }
 
     try {
-      const countPredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
-      countPredicates.equalTo('conversation_id', conversationId);
-      const resultSet = await this.rdbStore.query(countPredicates);
-      const messageCount = resultSet.rowCount;
+      // 使用 COUNT 查询优化性能
+      const countSql = `SELECT COUNT(*) as message_count FROM ${Constants.CHAT_TABLE} WHERE conversation_id = ?`;
+      const resultSet = await this.rdbStore.querySql(countSql, [conversationId]);
+      
+      let messageCount = 0;
+      if (resultSet.goToFirstRow()) {
+        messageCount = resultSet.getLong(resultSet.getColumnIndex('message_count'));
+      }
       resultSet.close();
 
       const valueBucket: relationalStore.ValuesBucket = {
