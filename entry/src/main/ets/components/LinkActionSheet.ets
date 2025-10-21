@@ -3,6 +3,10 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { BrowserHelper } from '../services/BrowserHelper';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0000;
+const TAG = 'LinkActionSheet';
 
 /**
  * 链接操作工具类
@@ -50,7 +54,7 @@ export class LinkActionHelper {
       }
     }).catch(() => {
       // 简化错误处理，不使用类型注解
-      console.error('ActionSheet error occurred');
+      hilog.error(DOMAIN, TAG, 'ActionSheet error occurred');
     });
   }
 
@@ -71,7 +75,7 @@ export class LinkActionHelper {
       }
     }).catch(() => {
       // 简化错误处理
-      console.error('Failed to open browser');
+      hilog.error(DOMAIN, TAG, 'Failed to open browser');
       promptAction.showToast({
         message: '打开浏览器失败',
         duration: 2000
@@ -96,7 +100,7 @@ export class LinkActionHelper {
       });
     } catch (error) {
       // 简化错误处理
-      console.error('Copy link exception:', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, 'Copy link exception: %{public}s', JSON.stringify(error));
       promptAction.showToast({
         message: '复制链接失败',
         duration: 2000

@@ -1,5 +1,9 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0000;
+const TAG = 'CodeBlock';
 
 @Component
 export struct CodeBlock {
@@ -14,7 +18,7 @@ export struct CodeBlock {
       await systemPasteboard.setData(pasteboardData);
       promptAction.showToast({ message: '代码已复制到剪贴板' });
     } catch (error) {
-      console.error('Failed to copy to clipboard:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to copy to clipboard: %{public}s', String(error));
       promptAction.showToast({ message: '复制失败' });
     }
   }

@@ -30,6 +30,7 @@ struct About {
 
       Text(content)
         .fontSize(14)
+        .maxLines(Number.MAX_SAFE_INTEGER)
         .fontColor($r('app.color.text_sec_color'))
         .lineHeight(20)
         .width('100%')
@@ -56,13 +57,12 @@ struct About {
                   .width(80)
                   .height(80)
                   .borderRadius(16)
-                  .margin({ bottom: 12 })
                 Image($r('app.media.foreground'))
                   .width(80)
                   .height(80)
                   .borderRadius(16)
-                  .margin({ bottom: 12 })
               }
+              .margin({ bottom: 12 })
 
               Text('ClearChat')
                 .fontSize(24)
@@ -82,11 +82,11 @@ struct About {
               'ClearChat 是一款简洁、高效的 AI 对话客户端，支持连接多种大语言模型服务，为您提供写作、编程、学习等全方位的智能辅助。'
             )
 
-            // 版本信息
-            this.InfoCard(
-              '版本信息',
-              '版本号：0.2.4（10244）\n构建时间：2025年10月16日'
-            )
+            // // 版本信息
+            // this.InfoCard(
+            //   '版本信息',
+            //   '版本号：0.2.4（10246）\n构建时间：2025年10月18日'
+            // )
 
             // 数据安全
             this.InfoCard(

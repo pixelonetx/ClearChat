@@ -5,6 +5,9 @@ import { DatabaseManager } from '../services/DatabaseManager';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'Settings';
 
 // 跳转页面入口函数
 @Builder
@@ -230,7 +233,7 @@ struct Settings {
       primaryButton: {
         value: '取消',
         action: () => {
-          console.log('用户取消打开链接');
+          hilog.info(DOMAIN, TAG, '用户取消打开链接');
         }
       },
       secondaryButton: {
@@ -254,19 +257,19 @@ struct Settings {
               duration: 2000
             });
           } catch (toastErr) {
-            console.warn('Toast display failed (无法打开浏览器):', toastErr);
+            hilog.warn(DOMAIN, TAG, 'Toast display failed (无法打开浏览器): %{public}s', String(toastErr));
           }
         }
       })
       .catch((error: Error) => {
-        console.error('Failed to open URL:', error);
+        hilog.error(DOMAIN, TAG, 'Failed to open URL: %{public}s', String(error));
         try {
           promptAction.showToast({
             message: '打开链接失败',
             duration: 2000
           });
         } catch (toastErr) {
-          console.warn('Toast display failed (打开链接失败):', toastErr);
+          hilog.warn(DOMAIN, TAG, 'Toast display failed (打开链接失败): %{public}s', String(toastErr));
         }
       });
   }

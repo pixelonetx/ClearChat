@@ -1,3 +1,5 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
 /**
  * Markdown块类型枚举
  * 定义了支持的Markdown块类型
@@ -112,6 +114,9 @@ interface QuoteResult {
  * Markdown解析器类
  * 提供将Markdown文本解析为结构化数据的功能
  */
+const DOMAIN = 0x0000;
+const TAG = 'MarkdownParser';
+
 export class MarkdownParser {
   /**
    * 解析Markdown文本
@@ -428,8 +433,12 @@ export class MarkdownParser {
       cells.push(current.trim());
 
       // 去掉由于首尾管道导致的空单元格
-      if (cells.length > 0 && cells[0] === '') { cells.shift(); }
-      if (cells.length > 0 && cells[cells.length - 1] === '') { cells.pop(); }
+      if (cells.length > 0 && cells[0] === '') {
+        cells.shift();
+      }
+      if (cells.length > 0 && cells[cells.length - 1] === '') {
+        cells.pop();
+      }
 
       return cells;
     };
@@ -875,7 +884,7 @@ export class MarkdownParser {
       segments.push(...this.parseFormattingWithoutLinks(remainingText));
     }
 
-    console.info(`Parsed text "${text}" into ${segments.length} segments`);
+    hilog.info(DOMAIN, TAG, 'Parsed text "%{public}s" into %{public}d segments', String(text), segments.length);
     return segments;
   }
 
@@ -907,7 +916,8 @@ export class MarkdownParser {
           // url属性为可选，不需要在这里初始化
         };
         segments.push(segment);
-        console.info(`Text segment: "${currentText}", bold: ${bold}, italic: ${italic}`);
+        hilog.info(DOMAIN, TAG, 'Text segment: "%{public}s", bold=%{public}s italic=%{public}s', currentText,
+          String(bold), String(italic));
         currentText = '';
       }
     };
@@ -919,7 +929,7 @@ export class MarkdownParser {
       if (char === '*' && nextChar === '*') {
         pushSegment();
         bold = !bold;
-        console.info(`Toggled bold to: ${bold} at position ${i}`);
+        hilog.info(DOMAIN, TAG, 'Toggled bold to: %{public}s at position %{public}d', String(bold), i);
         i += 2;
         continue;
       }
@@ -927,7 +937,7 @@ export class MarkdownParser {
       if (char === '*') {
         pushSegment();
         italic = !italic;
-        console.info(`Toggled italic to: ${italic} at position ${i}`);
+        hilog.info(DOMAIN, TAG, 'Toggled italic to: %{public}s at position %{public}d', String(italic), i);
         i++;
         continue;
       }
@@ -935,7 +945,7 @@ export class MarkdownParser {
       if (char === '`') {
         pushSegment();
         code = !code;
-        console.info(`Toggled code to: ${code} at position ${i}`);
+        hilog.info(DOMAIN, TAG, 'Toggled code to: %{public}s at position %{public}d', String(code), i);
         i++;
         continue;
       }
@@ -943,7 +953,8 @@ export class MarkdownParser {
       if (char === '~' && nextChar === '~') {
         pushSegment();
         strikethrough = !strikethrough;
-        console.info(`Toggled strikethrough to: ${strikethrough} at position ${i}`);
+        hilog.info(DOMAIN, TAG, 'Toggled strikethrough to: %{public}s at position %{public}d', String(strikethrough),
+          i);
         i += 2;
         continue;
       }

@@ -26,6 +26,9 @@ import { Constants } from '../components/Constants';
 import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseError } from '../components/Errors';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'DatabaseManager';
 
 interface ProviderModelRecord {
   id?: string;
@@ -81,9 +84,9 @@ export class DatabaseManager {
     try {
       this.rdbStore = await relationalStore.getRdbStore(context, config);
       await this.createTables();
-      console.info('Database initialized successfully');
+      hilog.info(DOMAIN, TAG, 'Database initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize database:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to initialize database: %{public}s', String(error));
       throw new DatabaseError(`Failed to initialize database: ${error}`);
     }
   }
@@ -164,9 +167,9 @@ export class DatabaseManager {
         await this.rdbStore.executeSql(indexSql);
       }
 
-      console.info('Database tables and indexes created successfully');
+      hilog.info(DOMAIN, TAG, 'Database tables and indexes created successfully');
     } catch (error) {
-      console.error('Failed to create tables:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to create tables: %{public}s', String(error));
       throw new DatabaseError(`Failed to create tables: ${error}`);
     }
   }
@@ -193,10 +196,10 @@ export class DatabaseManager {
 
     try {
       const rowId = await this.rdbStore.insert(Constants.CHAT_TABLE, valueBucket);
-      console.info('Chat message inserted with ID:', rowId);
+      hilog.info(DOMAIN, TAG, 'Chat message inserted with ID: %{public}s', String(rowId));
       return rowId;
     } catch (error) {
-      console.error('Failed to insert chat message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to insert chat message: %{public}s', String(error));
       throw new DatabaseError(`Failed to insert chat message: ${error}`);
     }
   }
@@ -218,12 +221,12 @@ export class DatabaseManager {
 
     try {
       const rowsAffected = await this.rdbStore.update(valueBucket, predicates);
-      console.info('Chat message updated, rows affected:', rowsAffected);
+      hilog.info(DOMAIN, TAG, 'Chat message updated, rows affected: %{public}s', String(rowsAffected));
       if (rowsAffected === 0) {
         throw new DatabaseError(`No message found with ID: ${messageId}`);
       }
     } catch (error) {
-      console.error('Failed to update chat message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to update chat message: %{public}s', String(error));
       throw new DatabaseError(`Failed to update chat message: ${error}`);
     }
   }
@@ -258,7 +261,7 @@ export class DatabaseManager {
     }
 
     if (Object.keys(valueBucket).length === 0) {
-      console.info('No metadata fields provided to update for message:', messageId);
+      hilog.info(DOMAIN, TAG, 'No metadata fields provided to update for message: %{public}s', String(messageId));
       return;
     }
 
@@ -267,12 +270,12 @@ export class DatabaseManager {
 
     try {
       const rowsAffected = await this.rdbStore.update(valueBucket, predicates);
-      console.info('Chat message metadata updated, rows affected:', rowsAffected);
+      hilog.info(DOMAIN, TAG, 'Chat message metadata updated, rows affected: %{public}s', String(rowsAffected));
       if (rowsAffected === 0) {
         throw new DatabaseError(`No message found with ID: ${messageId}`);
       }
     } catch (error) {
-      console.error('Failed to update chat message metadata:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to update chat message metadata: %{public}s', String(error));
       throw new DatabaseError(`Failed to update chat message metadata: ${error}`);
     }
   }
@@ -334,7 +337,7 @@ export class DatabaseManager {
       resultSet.close();
       return messages;
     } catch (error) {
-      console.error('Failed to get chat messages:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to get chat messages: %{public}s', String(error));
       throw new DatabaseError(`Failed to get chat messages: ${error}`);
     }
   }
@@ -376,7 +379,7 @@ export class DatabaseManager {
       resultSet.close();
       return counts;
     } catch (error) {
-      console.error('Failed to query conversation message counts:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to query conversation message counts: %{public}s', String(error));
       throw new DatabaseError(`Failed to query conversation message counts: ${error}`);
     }
   }
@@ -394,9 +397,9 @@ export class DatabaseManager {
 
     try {
       await this.rdbStore.delete(predicates);
-      console.info('Chat history cleared for conversation:', conversationId);
+      hilog.info(DOMAIN, TAG, 'Chat history cleared for conversation: %{public}s', conversationId);
     } catch (error) {
-      console.error('Failed to clear chat history:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to clear chat history: %{public}s', String(error));
       throw new DatabaseError(`Failed to clear chat history: ${error}`);
     }
   }
@@ -432,9 +435,9 @@ export class DatabaseManager {
 
     try {
       await this.rdbStore.delete(predicates);
-      console.info('Message deleted:', messageId);
+      hilog.info(DOMAIN, TAG, 'Message deleted: %{public}s', String(messageId));
     } catch (error) {
-      console.error('Failed to delete message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to delete message: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete message: ${error}`);
     }
   }
@@ -447,14 +450,14 @@ export class DatabaseManager {
       throw new DatabaseError('Database not initialized');
     }
 
-    console.info('Saving settings:', {
+    hilog.info(DOMAIN, TAG, 'Saving settings: %{public}s', JSON.stringify({
       apiUrl: settings.apiUrl,
       modelName: settings.modelName,
       apiKeyConfigured: !!settings.apiKey && settings.apiKey.length > 0,
       providersCount: settings.providers?.length || 0,
       activeProviderId: settings.activeProviderId,
       activeModelId: settings.activeModelId
-    });
+    }));
 
     const valueBucket: relationalStore.ValuesBucket = {
       'api_url': settings.apiUrl,
@@ -468,13 +471,13 @@ export class DatabaseManager {
     try {
       // 首先删除现有设置
       await this.rdbStore.executeSql(`DELETE FROM ${Constants.SETTINGS_TABLE}`);
-      console.info('Deleted existing settings');
+      hilog.info(DOMAIN, TAG, 'Deleted existing settings');
 
       // 插入新设置
       const rowId = await this.rdbStore.insert(Constants.SETTINGS_TABLE, valueBucket);
-      console.info('Settings saved successfully with ID:', rowId);
+      hilog.info(DOMAIN, TAG, 'Settings saved successfully with ID: %{public}s', String(rowId));
     } catch (error) {
-      console.error('Failed to save settings:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to save settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to save settings: ${error}`);
     }
   }
@@ -493,7 +496,7 @@ export class DatabaseManager {
       const resultSet = await this.rdbStore.query(predicates);
       let settings: AppSettings | null = null;
 
-      console.info('Query settings result count:', resultSet.rowCount);
+      hilog.info(DOMAIN, TAG, 'Query settings result count: %{public}d', resultSet.rowCount);
 
       if (resultSet.goToFirstRow()) {
         const resolvedSettings = new AppSettings(
@@ -508,7 +511,7 @@ export class DatabaseManager {
         const activeModelIdIndex = resultSet.getColumnIndex('active_model_id');
 
         if (providersDataIndex < 0) {
-          console.warn('Settings record missing providers_data column, treating as legacy configuration.');
+          hilog.warn(DOMAIN, TAG, 'Settings record missing providers_data column; using legacy configuration');
           resultSet.close();
           return null;
         }
@@ -519,7 +522,7 @@ export class DatabaseManager {
         const hydratedProviders = this.parseProvidersJson(providersJson);
 
         if (hydratedProviders.length === 0) {
-          console.warn('Settings record contains no valid providers, treating as unconfigured.');
+          hilog.warn(DOMAIN, TAG, 'Settings record contains no valid providers; treating as unconfigured');
           resultSet.close();
           return null;
         }
@@ -555,7 +558,7 @@ export class DatabaseManager {
         resolvedSettings.apiUrl = activeProvider.apiUrl;
         resolvedSettings.apiKey = activeProvider.apiKey;
 
-        console.info('Retrieved settings using provider-centric format:', {
+        hilog.info(DOMAIN, TAG, 'Retrieved settings using provider-centric format: %{public}s', JSON.stringify({
           id: resolvedSettings.id,
           apiUrl: resolvedSettings.apiUrl,
           modelName: resolvedSettings.modelName,
@@ -563,17 +566,17 @@ export class DatabaseManager {
           providersCount: resolvedSettings.providers.length,
           activeProviderId: resolvedSettings.activeProviderId,
           activeModelId: resolvedSettings.activeModelId
-        });
+        }));
 
         settings = resolvedSettings;
       } else {
-        console.info('No settings found in database');
+        hilog.info(DOMAIN, TAG, 'No settings found in database');
       }
 
       resultSet.close();
       return settings;
     } catch (error) {
-      console.error('Failed to get settings:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to get settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to get settings: ${error}`);
     }
   }
@@ -616,7 +619,7 @@ export class DatabaseManager {
       resultSet.close();
       return conversations;
     } catch (error) {
-      console.error('Failed to get conversations:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to get conversations: %{public}s', String(error));
       throw new DatabaseError(`Failed to get conversations: ${error}`);
     }
   }
@@ -638,9 +641,9 @@ export class DatabaseManager {
       conversationPredicates.equalTo('id', conversationId);
       await this.rdbStore.delete(conversationPredicates);
 
-      console.info('Conversation deleted:', conversationId);
+      hilog.info(DOMAIN, TAG, 'Conversation deleted: %{public}s', conversationId);
     } catch (error) {
-      console.error('Failed to delete conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete conversation: ${error}`);
     }
   }
@@ -673,9 +676,9 @@ export class DatabaseManager {
       predicates.equalTo('id', conversationId);
       await this.rdbStore.update(valueBucket, predicates);
 
-      console.info('Conversation message count updated:', conversationId, messageCount);
+      hilog.info(DOMAIN, TAG, 'Conversation message count updated: id=%{public}s count=%{public}d', conversationId, messageCount);
     } catch (error) {
-      console.error('Failed to update conversation message count:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to update conversation message count: %{public}s', String(error));
       throw new DatabaseError(`Failed to update conversation message count: ${error}`);
     }
   }
@@ -707,10 +710,10 @@ export class DatabaseManager {
 
     try {
       await this.rdbStore.insert('conversations', valueBucket);
-      console.info('Conversation created:', conversation.id);
+      hilog.info(DOMAIN, TAG, 'Conversation created: %{public}s', conversation.id);
       return conversation;
     } catch (error) {
-      console.error('Failed to create conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to create conversation: %{public}s', String(error));
       throw new DatabaseError(`Failed to create conversation: ${error}`);
     }
   }
@@ -733,9 +736,9 @@ export class DatabaseManager {
 
     try {
       await this.rdbStore.update(valueBucket, predicates);
-      console.info('Conversation title updated:', conversationId, title);
+      hilog.info(DOMAIN, TAG, 'Conversation title updated: id=%{public}s title=%{public}s', conversationId, title);
     } catch (error) {
-      console.error('Failed to update conversation title:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to update conversation title: %{public}s', String(error));
       throw new DatabaseError(`Failed to update conversation title: ${error}`);
     }
   }
@@ -760,7 +763,7 @@ export class DatabaseManager {
       }
       parsedValue = parsed;
     } catch (error) {
-      console.error('Failed to parse providers data:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to parse providers data: %{public}s', String(error));
       return [];
     }
 
