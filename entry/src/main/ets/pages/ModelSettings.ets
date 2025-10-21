@@ -8,6 +8,10 @@ import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { ModelSettingsDialog } from '../components/ModelSettingsDialog';
 import { DatabaseError } from '../components/Errors';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0000;
+const TAG = 'ModelSettings';
 
 interface ErrorLike {
   message?: string;
@@ -88,7 +92,8 @@ struct ModelSettings {
           return await this.databaseManager.getSettings();
         } catch (initError) {
           const normalizedInitError = this.ensureError(initError as ErrorInput);
-          console.error('Failed to initialize database while loading settings:', normalizedInitError);
+          hilog.error(DOMAIN, TAG, 'Failed to initialize database while loading settings: %{public}s',
+            String(normalizedInitError));
           throw normalizedInitError;
         }
       }
@@ -125,7 +130,7 @@ struct ModelSettings {
           return new Error(serialized);
         }
       } catch (serializationError) {
-        console.warn('Failed to serialize error object:', serializationError);
+        hilog.warn(DOMAIN, TAG, 'Failed to serialize error object: %{public}s', String(serializationError));
       }
     }
 
@@ -192,13 +197,14 @@ struct ModelSettings {
     try {
       const version = Date.now();
       const updated = AppStorage.Set('settingsVersion', version);
-      console.info('ModelSettings: bump settingsVersion', version, 'updated existing key:', updated);
+      hilog.info(DOMAIN, TAG, 'ModelSettings: bump settingsVersion %{public}d updated existing key: %{public}s',
+        version, String(updated));
       if (!updated) {
         AppStorage.SetOrCreate('settingsVersion', version);
-        console.info('ModelSettings: settingsVersion created with value', version);
+        hilog.info(DOMAIN, TAG, 'ModelSettings: settingsVersion created with value %{public}d', version);
       }
     } catch (error) {
-      console.error('Failed to update settings version:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to update settings version: %{public}s', String(error));
     }
   }
 
@@ -206,7 +212,7 @@ struct ModelSettings {
     try {
       promptAction.showToast({ message });
     } catch (toastError) {
-      console.error('Failed to show toast:', toastError);
+      hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(toastError));
     }
   }
 
@@ -243,7 +249,7 @@ struct ModelSettings {
       await this.persistSettingsSilently();
       this.showToast(toastMessage);
     } catch (error) {
-      console.error('Failed to save provider changes:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to save provider changes: %{public}s', String(error));
       this.showToast('保存设置失败');
     } finally {
       this.closeSettingsSheet();
@@ -278,7 +284,7 @@ struct ModelSettings {
       await this.persistSettingsSilently();
       this.showToast(toastMessage);
     } catch (error) {
-      console.error('Failed to save model changes:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to save model changes: %{public}s', String(error));
       this.showToast('保存设置失败');
     } finally {
       this.closeSettingsSheet();
@@ -289,7 +295,7 @@ struct ModelSettings {
     try {
       const settings = await this.fetchSettings();
       if (!settings) {
-        console.info('No settings found in database');
+        hilog.info(DOMAIN, TAG, 'No settings found in database');
         this.providers = [];
         this.activeProviderId = '';
         this.activeModelId = '';
@@ -304,7 +310,7 @@ struct ModelSettings {
         this.activeProviderId = '';
         this.activeModelId = '';
         this.currentProviderIndex = 0;
-        console.info('Settings found but no providers configured.');
+        hilog.info(DOMAIN, TAG, 'Settings found but no providers configured.');
         return true;
       }
 
@@ -321,10 +327,10 @@ struct ModelSettings {
       this.activeProviderId = resolvedProvider.id;
       this.activeModelId = resolvedModelId;
 
-      console.info('Loaded providers from database:', storedProviders.length);
+      hilog.info(DOMAIN, TAG, 'Loaded providers from database: %{public}d', storedProviders.length);
       return true;
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to load settings: %{public}s', String(error));
       this.showToast('加载设置失败');
       return false;
     }
@@ -337,7 +343,7 @@ struct ModelSettings {
       await this.persistSettingsSilently();
       this.showToast('设置已保存');
     } catch (error) {
-      console.error('Failed to save settings:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to save settings: %{public}s', String(error));
       this.showToast('保存设置失败');
     } finally {
       this.isLoading = false;
@@ -389,7 +395,7 @@ struct ModelSettings {
           await this.persistSettingsSilently();
           this.showToast('服务商已删除并保存');
         } catch (error) {
-          console.error('Failed to save after deleting provider:', error);
+          hilog.error(DOMAIN, TAG, 'Failed to save after deleting provider: %{public}s', String(error));
           this.showToast('保存设置失败');
         }
       }
@@ -420,7 +426,7 @@ struct ModelSettings {
       await this.persistSettingsSilently();
       return true;
     } catch (error) {
-      console.error('Failed to save active provider/model:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to save active provider/model: %{public}s', String(error));
       this.showToast('保存设置失败');
       return false;
     }
@@ -475,7 +481,7 @@ struct ModelSettings {
         await this.persistSettingsSilently();
         this.showToast('模型已删除并保存');
       } catch (error) {
-        console.error('Failed to save after deleting model:', error);
+        hilog.error(DOMAIN, TAG, 'Failed to save after deleting model: %{public}s', String(error));
         this.showToast('保存设置失败');
       }
     }
@@ -523,7 +529,6 @@ struct ModelSettings {
       this.showToast('连接测试成功！');
     } catch (error) {
       const normalizedError = this.ensureError(error as ErrorInput);
-      console.error('Connection test failed:', normalizedError);
       const msg = (normalizedError.message || '').toLowerCase();
       if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('forbidden') ||
       msg.includes('invalid api')) {
@@ -647,71 +652,66 @@ struct ModelSettings {
 
   @Builder
   ProviderContent(provider: AIProvider, providerIndex: number) {
-    Scroll() {
-      Column({ space: 24 }) {
-        // 模型列表
-        Column({ space: 16 }) {
-          Row() {
-            Text('模型列表')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
+    Flex({direction: FlexDirection.Column, justifyContent: FlexAlign.SpaceAround}) {
+      // 模型列表
+      Column({ space: 16 }) {
+        Row() {
+          Text('模型列表')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
 
-            Blank()
+          Blank()
 
-            Button('添加模型')
-              .fontSize(14)
-              .fontColor($r('app.color.text_color'))
-              .backgroundColor(Color.Transparent)
-              .borderRadius(16)
-              .padding({ left: 16, right: 16 })
-              .height(32)
-              .onClick(() => {
-                this.addModel(providerIndex);
-              })
-          }
-          .width('100%')
-
-          if (provider.models.length === 0) {
-            Text('还没有配置模型')
-              .fontSize(14)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .padding(24)
-          } else {
-            LazyForEach(this.getModelsDataSource(provider), (model: AIModel, modelIndex: number) => {
-              this.ModelItem(model, provider.id, providerIndex, modelIndex)
-            }, (model: AIModel) => `${provider.id}_${model.id ?? model.name}`)
-          }
+          Button('添加模型')
+            .fontSize(14)
+            .fontColor($r('app.color.text_color'))
+            .backgroundColor(Color.Transparent)
+            .borderRadius(16)
+            .padding({ left: 16, right: 16 })
+            .height(32)
+            .onClick(() => {
+              this.addModel(providerIndex);
+            })
         }
         .width('100%')
-        .padding(16)
-        .backgroundColor($r('app.color.bg_secondary'))
-        .borderRadius(12)
 
+        if (provider.models.length === 0) {
+          Text('还没有配置模型')
+            .fontSize(14)
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding(24)
+        } else {
+          LazyForEach(this.getModelsDataSource(provider), (model: AIModel, modelIndex: number) => {
+            this.ModelItem(model, provider.id, providerIndex, modelIndex)
+          }, (model: AIModel) => `${provider.id}_${model.id ?? model.name}`)
+        }
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor($r('app.color.bg_secondary'))
+      .borderRadius(12)
+
+      Column() {
         // 测试连接按钮
         if (provider.apiUrl && provider.apiKey && provider.models.length > 0) {
           Button(this.isTesting ? '测试中...' : '测试连接')
             .fontColor($r('app.color.text_color'))
-            .width('100%')
-            .height(48)
             .fontSize(16)
             .backgroundColor(Color.Transparent)
-            .borderRadius(24)
             .enabled(!this.isTesting)
             .onClick(() => {
               this.testProviderConnection(provider);
             })
+            .margin({ bottom: 12 })
         }
 
         // 操作按钮
-        Row({ space: 12 }) {
+        Column({ space: 12 }) {
           Button('编辑服务商')
             .fontColor($r('app.color.text_color'))
-            .layoutWeight(1)
-            .height(48)
             .fontSize(16)
             .backgroundColor(Color.Transparent)
-            .borderRadius(24)
             .onClick(() => {
               this.editProvider(providerIndex);
             })
@@ -719,11 +719,8 @@ struct ModelSettings {
           if (this.providers.length > 1) {
             Button('删除服务商')
               .fontColor($r('app.color.text_color'))
-              .layoutWeight(1)
-              .height(48)
               .fontSize(16)
               .backgroundColor(Color.Transparent)
-              .borderRadius(24)
               .onClick(() => {
                 const targetName = provider.displayName || provider.name || provider.id || '该服务商';
                 NativeDialogHelper.showDeleteConfirmDialog(
@@ -731,7 +728,8 @@ struct ModelSettings {
                   '此操作无法撤销，服务商及其模型配置将永久删除。',
                   () => {
                     this.deleteProvider(providerIndex).catch((error: Error) => {
-                      console.error('Failed to delete provider after confirmation:', error);
+                      hilog.error(DOMAIN, TAG, 'Failed to delete provider after confirmation: %{public}s',
+                        String(error));
                     });
                   }
                 );
@@ -743,22 +741,14 @@ struct ModelSettings {
 
         Button('新建服务商')
           .fontColor($r('app.color.text_color'))
-          .width('100%')
-          .height(48)
           .fontSize(16)
           .backgroundColor(Color.Transparent)
-          .borderRadius(24)
           .onClick(() => {
             this.addProvider();
           })
       }
-      .width('100%')
-      .padding(16)
-      .alignItems(HorizontalAlign.Start) // 从上对齐
     }
-    .layoutWeight(1)
     .width('100%')
-    .align(Alignment.TopStart) // 确保内容从顶部开始
   }
 
   @Builder

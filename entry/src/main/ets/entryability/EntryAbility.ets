@@ -33,9 +33,9 @@ export default class EntryAbility extends UIAbility {
       // 设置窗口全屏
       let isLayoutFullScreen = true;
       windowClass.setWindowLayoutFullScreen(isLayoutFullScreen).then(() => {
-        console.info('Succeeded in setting the window layout to full-screen mode.');
+        hilog.info(DOMAIN, 'testTag', 'Succeeded in setting the window layout to full-screen mode.');
       }).catch((err: BusinessError) => {
-        console.error(`Failed to set the window layout to full-screen mode. Code is ${err.code}, message is ${err.message}`);
+        hilog.error(DOMAIN, 'testTag', 'Failed to set the window layout to full-screen mode. Code is %{public}d, message is %{public}s', err.code, err.message);
       });
       // 获取布局避让遮挡的区域
       let type = window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR; // 此处以导航条避让为例

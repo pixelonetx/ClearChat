@@ -3,6 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
@@ -17,6 +18,9 @@ import { MessageItem } from '../components/MessageItem';
 import { RenameConversationDialog } from '../components/RenameConversationDialog';
 import { ModelSelectorSheet } from '../components/ModelSelectorDialog';
 import { AbortController, createAbortController } from '../interfaces/AbortController';
+
+const DOMAIN = 0x0000;
+const TAG = 'Chat';
 
 // 定义模型信息接口
 interface ModelInfo {
@@ -58,14 +62,12 @@ struct Chat {
   private static readonly SIDEBAR_WIDTH = 300;
   private static readonly ANIMATION_DURATION = 300;
   private static readonly DEBOUNCE_DELAY = 300;
-  
   // 状态管理
   @StorageProp('bottomRectHeight') bottomRectHeight: number = 0;
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @StorageProp('settingsVersion') settingsVersion: number = 0;
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
   @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm';
-  
   // UI 状态
   @State showControlButton: boolean = true;
   @State showSideBar: boolean = false;
@@ -74,13 +76,11 @@ struct Chat {
   @State backgroundBlurRadius: number = 0;
   @State showModelSelectorSheet: boolean = false;
   @State customPopup: boolean = false;
-  
   // 数据状态
   @State messages: ChatMessage[] = [];
   @State conversations: Conversation[] = [];
   @State currentConversation: Conversation | null = null;
   @State inputText: string = '';
-  
   // 应用状态
   @State isLoading: boolean = false;
   @State isGenerating: boolean = false; // 新增：跟踪是否正在生成内容
@@ -206,20 +206,20 @@ struct Chat {
     }
 
     // 内容过滤错误
-    if (normalized.includes('content_filter') || normalized.includes('content policy') || 
-        rawMessage.includes('内容过滤') || rawMessage.includes('违规')) {
+    if (normalized.includes('content_filter') || normalized.includes('content policy') ||
+    rawMessage.includes('内容过滤') || rawMessage.includes('违规')) {
       return '消息内容不符合规范，请修改后重试';
     }
 
     // 配额不足错误
-    if (normalized.includes('quota') || normalized.includes('insufficient') || 
-        rawMessage.includes('配额') || rawMessage.includes('余额')) {
+    if (normalized.includes('quota') || normalized.includes('insufficient') ||
+    rawMessage.includes('配额') || rawMessage.includes('余额')) {
       return 'API配额不足，请检查账户余额';
     }
 
     // 服务不可用错误
-    if (normalized.includes('service unavailable') || normalized.includes('502') || 
-        normalized.includes('503') || rawMessage.includes('服务不可用')) {
+    if (normalized.includes('service unavailable') || normalized.includes('502') ||
+    normalized.includes('503') || rawMessage.includes('服务不可用')) {
       return 'AI服务暂时不可用，请稍后重试';
     }
 
@@ -306,7 +306,8 @@ struct Chat {
                     value: '更多',
                     icon: $r('app.media.more_fill'),
                     enabled: false,
-                    action: () => {}
+                    action: () => {
+                    }
                   }
                 ])
                 .bindSheet(this.showModelSelectorSheet,
@@ -484,43 +485,47 @@ struct Chat {
 
             // 左缘手势区域：仅手机从左向右滑动打开侧栏
             // 作为 Stack 的一个子节点，覆盖在主内容左侧边缘，避免与消息列表垂直滚动冲突
-            if (!this.showSideBar) {
-              Column()
-                .width(this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs' ? 24 : 18) // 仅手机需要较宽触发区
-                .height('100%')
-                .backgroundColor(Color.Transparent)
-                .align(Alignment.TopStart)
-                .position({ x: 0, y: 0 })
-                .zIndex(9)
-                .visibility((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') ? Visibility.Visible : Visibility.Hidden)
-                .gesture(
-                  PanGesture({ 
-                    direction: PanDirection.Horizontal, 
-                    fingers: 1,
-                    distance: 5 // 增加最小滑动距离，避免误触
-                  })
-                    .onActionStart(() => {
-                      console.error(`[GESTURE DEBUG] Open gesture started`);
-                    })
-                    .onActionUpdate((event: PanUpdateEvent) => {
-                      // 向右滑超过阈值，打开侧栏（仅手机）
-                      if ((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') && !this.showSideBar) {
-                        console.error(`[GESTURE DEBUG] Open gesture - offsetX: ${event.offsetX}, breakpoint: ${this.currentBreakPoint}, showSideBar: ${this.showSideBar}`);
-                        const openThreshold = 30; // 增加阈值，减少误触
-                        if (event.offsetX > openThreshold) {
-                          console.error(`[GESTURE DEBUG] Opening sidebar - threshold reached`);
-                          animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
-                            this.showControlButton = false;
-                            this.showSideBar = true;
-                          })
-                        }
-                      }
-                    })
-                    .onActionEnd(() => {
-                      console.error(`[GESTURE DEBUG] Open gesture ended`);
-                    })
-                )
-            }
+            // if (!this.showSideBar) {
+            //   Column()
+            //     .width(this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs' ? 24 : 18) // 仅手机需要较宽触发区
+            //     .height('100%')
+            //     .width('100%')
+            //     .backgroundColor(Color.Transparent)
+            //     .align(Alignment.TopStart)
+            //     .position({ x: 0, y: 60 })
+            //     .zIndex(9)
+            //     .visibility((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') ? Visibility.Visible :
+            //       Visibility.Hidden)
+            //     .gesture(
+            //       PanGesture({
+            //         direction: PanDirection.Horizontal,
+            //         fingers: 1,
+            //         distance: 5 // 增加最小滑动距离，避免误触
+            //       })
+            //         .onActionStart(() => {
+            //           hilog.error(DOMAIN, TAG, '[GESTURE error] Open gesture started');
+            //         })
+            //         .onActionUpdate((event: PanUpdateEvent) => {
+            //           // 向右滑超过阈值，打开侧栏（仅手机）
+            //           if ((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') && !this.showSideBar) {
+            //             hilog.error(DOMAIN, TAG,
+            //               '[GESTURE error] Open gesture - offsetX=%{public}s, breakpoint=%{public}s, showSideBar=%{public}s',
+            //               String(event.offsetX), String(this.currentBreakPoint), String(this.showSideBar));
+            //             const openThreshold = 30; // 增加阈值，减少误触
+            //             if (event.offsetX > openThreshold) {
+            //               hilog.error(DOMAIN, TAG, '[GESTURE error] Opening sidebar - threshold reached');
+            //               animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
+            //                 this.showControlButton = false;
+            //                 this.showSideBar = true;
+            //               })
+            //             }
+            //           }
+            //         })
+            //         .onActionEnd(() => {
+            //           hilog.error(DOMAIN, TAG, '[GESTURE error] Open gesture ended');
+            //         })
+            //     )
+            // }
 
             // 仅在小屏（sm）渲染遮罩层；平板和桌面不显示遮罩，保留嵌入式布局
             // 遮罩层：仅在手机显示，平板和桌面不渲染
@@ -532,23 +537,26 @@ struct Chat {
                 .zIndex(10)
                 .backgroundColor('rgba(0, 0, 0, 0.3)') // 仅半透明阴影，无模糊
                 .onAppear(() => {
-                  console.error(`[OVERLAY DEBUG] Rendering overlay - showSideBar: ${this.showSideBar}, currentBreakPoint: ${this.currentBreakPoint}`);
+                  hilog.error(DOMAIN, TAG,
+                    '[OVERLAY error] Rendering overlay - showSideBar=%{public}s, currentBreakPoint=%{public}s',
+                    String(this.showSideBar), String(this.currentBreakPoint));
                 })
                 .gesture(
-                  PanGesture({ 
-                    direction: PanDirection.Horizontal, 
+                  PanGesture({
+                    direction: PanDirection.Horizontal,
                     fingers: 1,
                     distance: 5 // 增加最小滑动距离，避免误触
                   })
                     .onActionStart(() => {
-                      console.error(`[GESTURE DEBUG] Close gesture started`);
+                      hilog.error(DOMAIN, TAG, '[GESTURE error] Close gesture started');
                     })
                     .onActionUpdate((event: PanUpdateEvent) => {
-                      console.error(`[GESTURE DEBUG] Pan gesture - offsetX: ${event.offsetX}`);
+                      hilog.error(DOMAIN, TAG, '[GESTURE error] Pan gesture - offsetX=%{public}s',
+                        String(event.offsetX));
                       // 向左滑超过阈值，关闭侧栏
                       const closeThreshold = -30; // 增加阈值，减少误触
                       if (event.offsetX < closeThreshold) {
-                        console.error(`[GESTURE DEBUG] Closing sidebar - threshold reached`);
+                        hilog.error(DOMAIN, TAG, '[GESTURE error] Closing sidebar - threshold reached');
                         animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
                           this.showSideBar = false;
                           this.showControlButton = true;
@@ -556,11 +564,11 @@ struct Chat {
                       }
                     })
                     .onActionEnd(() => {
-                      console.error(`[GESTURE DEBUG] Close gesture ended`);
+                      hilog.error(DOMAIN, TAG, '[GESTURE error] Close gesture ended');
                     })
                 )
                 .onClick(() => {
-                  console.error(`[OVERLAY DEBUG] Overlay clicked - closing sidebar`);
+                  hilog.error(DOMAIN, TAG, '[OVERLAY error] Overlay clicked - closing sidebar');
                   if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
                     animateTo({
                       duration: Chat.ANIMATION_DURATION,
@@ -573,11 +581,25 @@ struct Chat {
                 })
                 .transition(TransitionEffect.OPACITY)
             }
-
           }
         }
 
       }
+      .gesture(
+        PanGesture({
+          direction: PanDirection.Horizontal,
+          fingers: 1,
+          distance: 5 // 最小触发滑动距离
+        })
+          .onActionUpdate((event: PanUpdateEvent) => {
+            if (event.offsetX > 30) { // 向右滑动阈值
+              animateTo({ duration: 250 }, () => {
+                this.showControlButton = false;
+                this.showSideBar = true;
+              });
+            }
+          })
+      )
       .autoHide(false)
       .showControlButton(false)
       .showSideBar($$this.showSideBar)
@@ -602,7 +624,7 @@ struct Chat {
     try {
       promptAction.showToast(options);
     } catch (toastError) {
-      console.error('Failed to show toast:', toastError);
+      hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(toastError));
     }
   }
 
@@ -612,7 +634,7 @@ struct Chat {
     this.requestedSettingsVersion = this.previousSettingsVersion;
     this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
-    
+
     // 添加断点检测逻辑
     this.updateBreakpoint();
     // 监听窗口尺寸变化
@@ -625,7 +647,7 @@ struct Chat {
         });
       }
     } catch (err) {
-      console.error('Failed to setup window listener:', err);
+      hilog.error(DOMAIN, TAG, 'Failed to setup window listener: %{public}s', String(err));
     }
   }
 
@@ -634,7 +656,9 @@ struct Chat {
 
     // 页面显示时，若检测到刷新版本变化，则强制重新加载对话/消息
     if (latestVersion !== this.handledReloadVersion) {
-      console.info(`Chat: onPageShow detected conversationsReloadVersion change -> ${latestVersion} (handled=${this.handledReloadVersion})`);
+      hilog.error(DOMAIN, TAG,
+        'Chat: onPageShow detected conversationsReloadVersion change -> %{public}d (handled=%{public}d)', latestVersion,
+        this.handledReloadVersion);
       this.currentConversation = null;
       this.messages = [];
       this.notifyMessagesUpdated();
@@ -646,7 +670,7 @@ struct Chat {
 
     if (this.isInitialized) {
       // 如果不是因为清空数据，则按原逻辑检查设置版本
-      console.info('Chat: onPageShow triggered, reloading chat state due to settings version.');
+      hilog.error(DOMAIN, TAG, 'Chat: onPageShow triggered, reloading chat state due to settings version.');
       await this.reloadChatState('onPageShow');
     }
   }
@@ -684,7 +708,7 @@ struct Chat {
       this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
       this.isInitialized = true;
     } catch (error) {
-      console.error('Failed to initialize app:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to initialize app: %{public}s', String(error));
       this.showToast('应用初始化失败');
     }
   }
@@ -696,22 +720,22 @@ struct Chat {
 
       if (!settings) {
         this.hasSettings = false;
-        console.info('No settings configured yet.');
+        hilog.error(DOMAIN, TAG, 'No settings configured yet.');
         return;
       }
 
-      console.info('Loaded settings with provider count:', settings.providers.length);
+      hilog.error(DOMAIN, TAG, 'Loaded settings with provider count: %{public}s', String(settings.providers.length));
 
       const activeProvider = settings.providers.find(provider => provider.id === settings.activeProviderId);
       if (!activeProvider) {
-        console.warn('Active provider not found in settings, marking configuration as incomplete.');
+        hilog.warn(DOMAIN, TAG, 'Active provider not found in settings, marking configuration as incomplete.');
         this.hasSettings = false;
         return;
       }
 
       const activeModel = activeProvider.models.find(model => model.id === settings.activeModelId);
       if (!activeModel) {
-        console.warn('Active model not found for current provider, marking configuration as incomplete.');
+        hilog.warn(DOMAIN, TAG, 'Active model not found for current provider, marking configuration as incomplete.');
         this.hasSettings = false;
         return;
       }
@@ -724,18 +748,17 @@ struct Chat {
         settings.apiKey = activeProvider.apiKey;
         settings.modelName = activeModel.name;
         this.currentSettings = settings;
-
-        console.info('Active provider resolved:', {
+        hilog.error(DOMAIN, TAG, 'Active provider resolved', {
           providerId: activeProvider.id,
           providerName: activeProvider.displayName,
           modelId: activeModel.id,
           modelName: activeModel.name
         });
       } else {
-        console.warn('Configuration exists but required API信息未填写完整。');
+        hilog.warn(DOMAIN, TAG, 'Configuration exists but required API信息未填写完整。');
       }
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to load settings: %{public}s', String(error));
       this.hasSettings = false;
     }
   }
@@ -747,7 +770,9 @@ struct Chat {
     if (!this.pendingSettingsReload) {
       this.pendingSettingsReload = this.performSettingsReload(reason);
     } else {
-      console.info(`Chat: settings reload already in progress, updated targetVersion=${this.requestedSettingsVersion}, reason=${reason}`);
+      hilog.error(DOMAIN, TAG,
+        'Chat: settings reload already in progress, updated targetVersion=%{public}d, reason=%{public}s',
+        this.requestedSettingsVersion, String(reason));
     }
 
     try {
@@ -763,7 +788,9 @@ struct Chat {
       while (true) {
         attempt += 1;
         const targetVersion = this.requestedSettingsVersion;
-        console.info(`Chat: reloadChatState start [reason=${initialReason}] attempt=${attempt} targetVersion=${targetVersion}`);
+        hilog.error(DOMAIN, TAG,
+          'Chat: reloadChatState start [reason=%{public}s] attempt=%{public}d targetVersion=%{public}d',
+          String(initialReason), attempt, targetVersion);
         await this.loadSettings();
         await this.loadConversations();
 
@@ -782,10 +809,11 @@ struct Chat {
           break;
         }
 
-        console.info('Chat: detected newer settings reload request during execution, repeating with latest targetVersion');
+        hilog.error(DOMAIN, TAG,
+          'Chat: detected newer settings reload request during execution, repeating with latest targetVersion');
       }
     } catch (error) {
-      console.error('Chat: reloadChatState failed:', error);
+      hilog.error(DOMAIN, TAG, 'Chat: reloadChatState failed: %{public}s', String(error));
       if (error instanceof Error) {
         throw error;
       }
@@ -805,9 +833,9 @@ struct Chat {
       return;
     }
 
-    console.info('Chat: detected settingsVersion change ->', currentVersion);
+    hilog.error(DOMAIN, TAG, 'Chat: detected settingsVersion change -> %{public}s', String(currentVersion));
     this.reloadChatState('settingsVersion change', currentVersion).catch((error: Error) => {
-      console.error('Failed to refresh chat after settings change:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to refresh chat after settings change: %{public}s', String(error));
     });
   }
 
@@ -820,18 +848,21 @@ struct Chat {
 
   private logSettingsVersionState(prefix: string) {
     const current = this.normalizeSettingsVersion(this.settingsVersion);
-    console.info(`${prefix}; currentVersion=${current}, previousVersion=${this.previousSettingsVersion}`);
+    hilog.error(DOMAIN, TAG, '%{public}s; currentVersion=%{public}d, previousVersion=%{public}d', String(prefix),
+      current, this.previousSettingsVersion);
   }
 
   private async waitForLatestSettings(reason: string): Promise<void> {
     if (this.pendingSettingsReload) {
-      console.info(`Chat: awaiting pending settings reload before ${reason}`);
+      hilog.error(DOMAIN, TAG, 'Chat: awaiting pending settings reload before %{public}s', String(reason));
       await this.pendingSettingsReload;
     }
 
     const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
     if (currentVersion !== this.previousSettingsVersion) {
-      console.info(`Chat: settings version mismatch detected during ${reason}, triggering reload to ${currentVersion}`);
+      hilog.error(DOMAIN, TAG,
+        'Chat: settings version mismatch detected during %{public}s, triggering reload to %{public}d', String(reason),
+        currentVersion);
       await this.reloadChatState(reason, currentVersion);
     }
   }
@@ -850,7 +881,7 @@ struct Chat {
         this.scrollToBottom();
       }, 100);
     } catch (error) {
-      console.error('Failed to load chat history:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to load chat history: %{public}s', String(error));
       this.showToast('加载聊天记录失败');
     }
   }
@@ -859,7 +890,7 @@ struct Chat {
     try {
       this.conversations = await this.databaseManager.getAllConversations();
     } catch (error) {
-      console.error('Failed to load conversations:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to load conversations: %{public}s', String(error));
       this.showToast('加载对话列表失败');
     }
   }
@@ -874,13 +905,14 @@ struct Chat {
 
         // 设置最近使用的对话为当前对话
         this.currentConversation = sortedConversations[0];
-        console.info('Restored last conversation:', this.currentConversation.id, this.currentConversation.title);
+        hilog.error(DOMAIN, TAG, 'Restored last conversation: %{public}s %{public}s',
+          String(this.currentConversation.id), String(this.currentConversation.title));
       } else {
-        console.info('No conversations found, will start with empty state');
+        hilog.error(DOMAIN, TAG, 'No conversations found, will start with empty state');
         this.currentConversation = null;
       }
     } catch (error) {
-      console.error('Failed to restore last conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to restore last conversation: %{public}s', String(error));
       this.currentConversation = null;
     }
   }
@@ -897,14 +929,15 @@ struct Chat {
       for (const conversation of this.conversations) {
         const count = messageCounts[conversation.id] ?? 0;
         if (count === 0) {
-          console.info('Found empty conversation:', conversation.id, conversation.title);
+          hilog.error(DOMAIN, TAG, 'Found empty conversation: %{public}s %{public}s', String(conversation.id),
+            String(conversation.title));
           return conversation;
         }
       }
-      console.info('No empty conversations found');
+      hilog.error(DOMAIN, TAG, 'No empty conversations found');
       return null;
     } catch (error) {
-      console.error('Failed to find empty conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to find empty conversation: %{public}s', String(error));
       return null;
     }
   }
@@ -928,10 +961,10 @@ struct Chat {
     this.hideKeyboard();
 
     animateTo({
-          duration: Chat.ANIMATION_DURATION,
-          curve: Curve.EaseInOut
-        }, () => {
-          this.sidebarOffset = -Chat.SIDEBAR_WIDTH;
+      duration: Chat.ANIMATION_DURATION,
+      curve: Curve.EaseInOut
+    }, () => {
+      this.sidebarOffset = -Chat.SIDEBAR_WIDTH;
       this.backgroundBlurRadius = 0; // 侧边栏隐藏时无模糊
     });
 
@@ -959,9 +992,9 @@ struct Chat {
     }
 
     try {
-      console.info('Creating new conversation...');
+      hilog.error(DOMAIN, TAG, 'Creating new conversation...');
       const newConversation = await this.databaseManager.createConversation('新对话');
-      console.info('New conversation created:', newConversation);
+      hilog.error(DOMAIN, TAG, 'New conversation created');
 
       this.currentConversation = newConversation;
       this.messages = [];
@@ -976,9 +1009,9 @@ struct Chat {
       // 确保加载状态被重置
       this.isLoading = false;
 
-      console.info('New conversation setup completed');
+      hilog.error(DOMAIN, TAG, 'New conversation setup completed');
     } catch (error) {
-      console.error('Failed to create new conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to create new conversation: %{public}s', String(error));
       this.showToast('创建对话失败');
 
       // 确保加载状态被重置
@@ -1003,7 +1036,7 @@ struct Chat {
       // 确保加载状态被重置
       this.isLoading = false;
     } catch (error) {
-      console.error('Failed to select conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to select conversation: %{public}s', String(error));
       this.showToast('切换对话失败');
 
       // 确保加载状态被重置
@@ -1026,7 +1059,7 @@ struct Chat {
         }
       },
       () => {
-        console.info('User cancelled conversation deletion');
+        hilog.error(DOMAIN, TAG, 'User cancelled conversation deletion');
       }
     );
   }
@@ -1052,7 +1085,7 @@ struct Chat {
 
       this.showToast('对话已删除');
     } catch (error) {
-      console.error('Failed to delete conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
       this.showToast('删除对话失败');
     }
   }
@@ -1102,7 +1135,7 @@ struct Chat {
 
       // 模型切换完成后，弹窗会自动关闭
     } catch (error) {
-      console.error('Failed to change model:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to change model: %{public}s', String(error));
       this.showToast('切换模型失败', 2000);
     }
   }
@@ -1125,7 +1158,7 @@ struct Chat {
         await this.loadConversations();
       }
     } catch (error) {
-      console.error('Failed to generate conversation title:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to generate conversation title: %{public}s', String(error));
     }
   }
 
@@ -1258,17 +1291,17 @@ struct Chat {
 
     // 如果没有当前对话，创建一个新对话
     if (!this.currentConversation) {
-      console.info('No current conversation found, creating new one...');
+      hilog.error(DOMAIN, TAG, 'No current conversation found, creating new one...');
       try {
         const newConversation = await this.databaseManager.createConversation('新对话');
         this.currentConversation = newConversation;
         await this.loadConversations();
-        console.info('Auto-created conversation:', newConversation.id);
+        hilog.error(DOMAIN, TAG, 'Auto-created conversation ID=%{public}s', String(newConversation.id));
 
         // 等待一小段时间确保对话创建完全完成
         await new Promise<void>(resolve => setTimeout(resolve, 100));
       } catch (error) {
-        console.error('Failed to create conversation for message:', error);
+        hilog.error(DOMAIN, TAG, 'Failed to create conversation for message: %{public}s', String(error));
         this.showToast('创建对话失败');
         return;
       }
@@ -1276,12 +1309,12 @@ struct Chat {
 
     // 验证当前对话是否有效
     if (!this.currentConversation || !this.currentConversation.id) {
-      console.error('Invalid current conversation:', this.currentConversation);
+      hilog.error(DOMAIN, TAG, 'Invalid current conversation: %{public}s', String(this.currentConversation));
       this.showToast('对话状态异常，请重新创建对话');
       return;
     }
 
-    console.info('Sending message in conversation:', this.currentConversation.id);
+    hilog.error(DOMAIN, TAG, 'Sending message in conversation ID=%{public}s', String(this.currentConversation.id));
 
     // 锁定当前对话ID，防止在等待AI回复期间切换对话导致回复错乱
     const targetConversationId = this.currentConversation.id;
@@ -1305,7 +1338,7 @@ struct Chat {
       const toastMessage = this.getFriendlySendErrorMessage(errorParam);
       const assistantErrorContent = toastMessage.startsWith('发送失败') ? toastMessage : `发送失败：${toastMessage}`;
 
-      console.error('Message send failed:', errorParam);
+      hilog.error(DOMAIN, TAG, 'Message send failed: %{public}s', String(errorParam));
 
       if (this.currentConversation && this.currentConversation.id === targetConversationId) {
         let effectiveIndex = streamingMessageIndex;
@@ -1341,13 +1374,14 @@ struct Chat {
                 providerName: null
               });
             } catch (persistError) {
-              console.error('Failed to persist failed streaming message:', persistError);
+              hilog.error(DOMAIN, TAG, 'Failed to persist failed streaming message: %{public}s', String(persistError));
             }
           } else if (streamingMessageId !== undefined) {
             try {
               await this.databaseManager.deleteMessage(streamingMessageId);
             } catch (deleteError) {
-              console.error('Failed to delete pending AI message after failure:', deleteError);
+              hilog.error(DOMAIN, TAG, 'Failed to delete pending AI message after failure: %{public}s',
+                String(deleteError));
             }
           }
 
@@ -1361,7 +1395,8 @@ struct Chat {
       try {
         await this.databaseManager.updateConversationMessageCount(targetConversationId);
       } catch (countError) {
-        console.error('Failed to update conversation message count after failure:', countError);
+        hilog.error(DOMAIN, TAG, 'Failed to update conversation message count after failure: %{public}s',
+          String(countError));
       }
 
       this.isLoading = false;
@@ -1374,11 +1409,11 @@ struct Chat {
       this.isLoading = true;
       this.isGenerating = true; // 设置生成状态
       this.currentAbortController = createAbortController(); // 创建简单的中断控制器
-      console.info('Started sending message, isLoading set to true');
+      hilog.error(DOMAIN, TAG, 'Started sending message, isLoading set to true');
 
       // 添加用户消息到界面和数据库
       userMessageIndex = this.appendMessage(userMessage);
-      console.info('Added user message to UI, total messages:', this.messages.length);
+      hilog.error(DOMAIN, TAG, 'Added user message to UI, total=%{public}d', this.messages.length);
       userMessageId = await this.databaseManager.insertChatMessage(userMessage);
       this.replaceMessageAt(userMessageIndex, (message: ChatMessage) => {
         message.id = userMessageId!;
@@ -1397,7 +1432,7 @@ struct Chat {
 
       // 将流式消息添加到界面，后续会实时更新内容
       streamingMessageIndex = this.appendMessage(streamingAiMessage);
-      console.info('Added streaming AI message, index:', streamingMessageIndex, 'total messages:',
+      hilog.error(DOMAIN, TAG, 'Added streaming AI message index=%{public}d total=%{public}d', streamingMessageIndex,
         this.messages.length);
 
       // 立即保存空的AI消息到数据库，获取ID
@@ -1405,7 +1440,7 @@ struct Chat {
       this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
         message.id = streamingMessageId!;
       });
-      console.info('Created streaming AI message in database with ID:', streamingMessageId);
+      hilog.error(DOMAIN, TAG, 'Created streaming AI message in DB with ID: %{public}s', String(streamingMessageId));
 
       // 准备发送给AI的消息列表（不包括刚创建的空AI消息，取最近10条）
       const endIndex = this.messages.length - 1;
@@ -1415,16 +1450,16 @@ struct Chat {
         messagesForAI.push(this.cloneChatMessage(userMessage));
       }
 
-      console.info('Sending message to AI...');
-      console.info('API URL:', this.currentSettings.apiUrl);
-      console.info('Model:', this.currentSettings.modelName);
-      console.info('Messages count:', messagesForAI.length);
-      console.info('Target conversation ID:', targetConversationId);
+      hilog.error(DOMAIN, TAG, 'Sending message to AI...');
+      hilog.error(DOMAIN, TAG, 'API URL: %{public}s', String(this.currentSettings.apiUrl));
+      hilog.error(DOMAIN, TAG, 'Model: %{public}s', String(this.currentSettings.modelName));
+      hilog.error(DOMAIN, TAG, 'Messages count for AI=%{public}d', messagesForAI.length);
+      hilog.error(DOMAIN, TAG, 'Target conversation ID: %{public}s', String(targetConversationId));
 
       // 发送流式请求，立即更新UI
       if (!this.currentSettings || !this.currentSettings.apiUrl || !this.currentSettings.apiKey ||
         !this.currentSettings.modelName) {
-        console.error('Current settings are incomplete or null');
+        hilog.error(DOMAIN, TAG, 'Current settings are incomplete or null');
         return;
       }
       await this.networkManager.sendStreamChatRequest(
@@ -1474,18 +1509,18 @@ struct Chat {
                   modelName: persistedMessage.modelName ?? null,
                   providerName: persistedMessage.providerName ?? null
                 }).catch((metadataError: Error) => {
-                  console.error('Failed to persist streaming metadata:', metadataError);
+                  hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
                 });
               }
             }
           },
           // onData: 立即显示接收到的数据，无延迟
           onData: (chunk: string) => {
-            console.info('Received chunk immediately:', chunk);
-            console.info('Current conversation ID:', this.currentConversation?.id);
-            console.info('Target conversation ID:', targetConversationId);
-            console.info('Streaming message index:', streamingMessageIndex);
-            console.info('Total messages:', this.messages.length);
+            hilog.error(DOMAIN, TAG, 'Received chunk immediately: %{public}s', String(chunk));
+            hilog.error(DOMAIN, TAG, 'Current conversation ID: %{public}s', String(this.currentConversation?.id));
+            hilog.error(DOMAIN, TAG, 'Target conversation ID: %{public}s', String(targetConversationId));
+            hilog.error(DOMAIN, TAG, 'Streaming message index: %{public}d', streamingMessageIndex);
+            hilog.error(DOMAIN, TAG, 'Total messages: %{public}d', this.messages.length);
 
             // 检查当前显示的对话是否还是发送消息时的对话
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
@@ -1493,7 +1528,7 @@ struct Chat {
                 this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
                   message.content += chunk;
                 });
-                console.info('Updated message content, new length:',
+                hilog.error(DOMAIN, TAG, 'Updated message length: %{public}d',
                   this.messages[streamingMessageIndex].content.length);
               }
             }
@@ -1501,7 +1536,7 @@ struct Chat {
 
           // onComplete: 流式请求完成
           onComplete: async () => {
-            console.info('Stream completed');
+            hilog.error(DOMAIN, TAG, 'Stream completed');
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
@@ -1509,17 +1544,17 @@ struct Chat {
 
                 // 流式消息应该已经有ID（在开始时创建），更新数据库中的内容
                 if (streamingMessage.id !== undefined) {
-                  console.info('Updating streaming AI response in database, ID:', streamingMessage.id);
+                  hilog.error(DOMAIN, TAG, 'Updating AI response in DB, id=%{public}s', String(streamingMessage.id));
                   await this.databaseManager.updateChatMessage(streamingMessage.id, streamingMessage.content);
-                  console.info('AI response updated in database');
+                  hilog.error(DOMAIN, TAG, 'AI response updated in database');
                 } else {
-                  console.warn('Streaming message has no ID, this should not happen');
+                  hilog.warn(DOMAIN, TAG, 'Streaming message has no ID, this should not happen');
                   // 兜底方案：如果没有ID，保存到数据库
                   const savedId = await this.databaseManager.insertChatMessage(streamingMessage);
                   this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
                     message.id = savedId;
                   });
-                  console.info('AI response saved with ID:', savedId);
+                  hilog.error(DOMAIN, TAG, 'AI response saved with ID: %{public}s', String(savedId));
                 }
               }
 
@@ -1533,7 +1568,7 @@ struct Chat {
             // 更新对话的消息计数
             await this.databaseManager.updateConversationMessageCount(targetConversationId);
 
-            console.info('AI response processed successfully');
+            hilog.error(DOMAIN, TAG, 'AI response processed successfully');
 
             // 设置加载状态为false
             this.isLoading = false;
@@ -1545,7 +1580,7 @@ struct Chat {
           // onError: 处理错误
           onError: (error: Error) => {
             handleFailure(error).catch((failureError: Error) => {
-              console.error('Failed to handle streaming error:', failureError);
+              hilog.error(DOMAIN, TAG, 'Failed to handle streaming error: %{public}s', String(failureError));
             });
           }
         },
@@ -1556,7 +1591,7 @@ struct Chat {
       await handleFailure(error instanceof Error ? error : new Error(String(error)));
     } finally {
       // 不在这里设置isLoading = false，因为流式请求的回调是异步的
-      console.info('Message sending request initiated');
+      hilog.error(DOMAIN, TAG, 'Message sending request initiated');
     }
   }
 
@@ -1565,7 +1600,7 @@ struct Chat {
    */
   stopGeneration() {
     if (this.currentAbortController && this.isGenerating) {
-      console.info('Stopping AI generation...');
+      hilog.error(DOMAIN, TAG, 'Stopping AI generation...');
       this.userAbortedGeneration = true;
       this.currentAbortController.abort();
       // 不立即设置状态，让onComplete回调来处理
@@ -1578,7 +1613,7 @@ struct Chat {
       try {
         this.scroller.scrollEdge(Edge.Bottom);
       } catch (error) {
-        console.error('Failed to scroll to bottom:', error);
+        hilog.error(DOMAIN, TAG, 'Failed to scroll to bottom: %{public}s', String(error));
         // 备用方案：尝试使用scrollTo方法
         try {
           const currentOffset = this.scroller.currentOffset();
@@ -1586,7 +1621,7 @@ struct Chat {
             this.scroller.scrollTo({ xOffset: 0, yOffset: (currentOffset.yOffset || 0) + 1000 });
           }
         } catch (scrollError) {
-          console.error('Backup scroll method also failed:', scrollError);
+          hilog.error(DOMAIN, TAG, 'Backup scroll method also failed: %{public}s', String(scrollError));
         }
       }
     }
@@ -1600,12 +1635,12 @@ struct Chat {
 
       if (success) {
         this.showToast('已复制到剪贴板');
-        console.info('Message copied successfully:', message.content);
+        hilog.error(DOMAIN, TAG, 'Message copied successfully: %{public}s', String(message.content));
       } else {
         this.showToast('复制失败');
       }
     } catch (error) {
-      console.error('Failed to copy message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to copy message: %{public}s', String(error));
       this.showToast('复制失败');
     }
   }
@@ -1657,7 +1692,7 @@ struct Chat {
 
       this.showToast('消息已删除');
     } catch (error) {
-      console.error('Failed to delete message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to delete message: %{public}s', String(error));
       this.showToast('删除消息失败');
     }
   }
@@ -1725,7 +1760,7 @@ struct Chat {
       this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
         regeneratingMessage.id = newMessageId;
       });
-      console.info('Created new database record for regeneration with ID:', newMessageId);
+      hilog.error(DOMAIN, TAG, 'Created regenerated record ID=%{public}s', String(newMessageId));
 
       // 设置为重新生成模式
       this.isLoading = true;
@@ -1742,7 +1777,7 @@ struct Chat {
       // 准备发送给AI的消息列表（不包括当前正在重新生成的消息）
       const messagesForAI = this.messages.slice(0, messageIndex);
 
-      console.info('Regenerating AI message at index:', streamingMessageIndex);
+      hilog.error(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
       // 发送流式请求重新生成
       await this.networkManager.sendStreamChatRequest(
@@ -1796,21 +1831,21 @@ struct Chat {
                   modelName: regeneratedMessage.modelName ?? null,
                   providerName: regeneratedMessage.providerName ?? null
                 }).catch((metadataError: Error) => {
-                  console.error('Failed to persist regenerated metadata:', metadataError);
+                  hilog.error(DOMAIN, TAG, 'Failed to persist regenerated metadata: %{public}s', String(metadataError));
                 });
               }
             }
           },
           // 实时更新重新生成的消息
           onData: (chunk: string) => {
-            console.info('Received regenerated chunk:', chunk);
+            hilog.error(DOMAIN, TAG, 'Received regenerated chunk len=%{public}d', chunk?.length ?? 0);
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
                 this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
                   regeneratedMessage.content += chunk;
                 });
-                console.info('After update - regenerated message content length:',
+                hilog.error(DOMAIN, TAG, 'Regenerated content length=%{public}d',
                   this.messages[streamingMessageIndex].content.length);
               }
             }
@@ -1818,7 +1853,7 @@ struct Chat {
 
           // 重新生成完成
           onComplete: async () => {
-            console.info('Regeneration completed');
+            hilog.error(DOMAIN, TAG, 'Regeneration completed');
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
@@ -1827,14 +1862,15 @@ struct Chat {
                 // 更新数据库中的消息内容（消息已在开始时创建）
                 if (regeneratedMessage.id !== undefined) {
                   await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
-                  console.info('Regenerated message updated in database with ID:', regeneratedMessage.id);
+                  hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
+                    String(regeneratedMessage.id));
                 } else {
                   // 兜底方案：如果没有ID，保存到数据库
                   const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
                   this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
                     messageToPersist.id = savedId;
                   });
-                  console.info('Regenerated message saved with new ID:', savedId);
+                  hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
                 }
                 // 滚动到底部
                 setTimeout(() => {
@@ -1852,7 +1888,7 @@ struct Chat {
 
           // 重新生成错误处理
           onError: async (error: Error) => {
-            console.error('Regeneration failed:', error);
+            hilog.error(DOMAIN, TAG, 'Regeneration failed: %{public}s', String(error));
 
             if (this.currentConversation && this.currentConversation.id === targetConversationId) {
               if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
@@ -1872,7 +1908,7 @@ struct Chat {
       );
 
     } catch (error) {
-      console.error('Failed to regenerate message:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to regenerate message: %{public}s', String(error));
       this.isLoading = false;
       this.showToast('重新生成失败');
     }
@@ -1885,7 +1921,7 @@ struct Chat {
       this.notifyMessagesUpdated();
       this.showToast('聊天记录已清空');
     } catch (error) {
-      console.error('Failed to clear history:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to clear history: %{public}s', String(error));
       this.showToast('清空记录失败');
     }
   }
@@ -1907,13 +1943,13 @@ struct Chat {
       const inputMethodController = inputMethod.getController();
       inputMethodController.hideTextInput()
         .then(() => {
-          console.info('Keyboard hidden successfully');
+          hilog.error(DOMAIN, TAG, 'Keyboard hidden successfully');
         })
         .catch((error: Error) => {
-          console.error('Failed to hide keyboard:', error);
+          hilog.error(DOMAIN, TAG, 'Failed to hide keyboard: %{public}s', String(error));
         });
     } catch (error) {
-      console.error('Error getting input method controller:', error);
+      hilog.error(DOMAIN, TAG, 'Error getting input method controller: %{public}s', String(error));
     }
   }
 
@@ -2261,7 +2297,7 @@ struct Chat {
 
       this.showToast('重命名成功', 2000);
     } catch (error) {
-      console.error('Failed to rename conversation:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to rename conversation: %{public}s', String(error));
       this.showToast('重命名失败', 2000);
     }
   }
@@ -2311,39 +2347,43 @@ struct Chat {
     try {
       const context = this.getUIContext()?.getHostContext() as common.UIAbilityContext;
       if (context?.windowStage) {
-        context.windowStage.getMainWindow().then((windowClass: window.Window) => {
-          return windowClass.getWindowProperties();
-        }).then((properties: window.WindowProperties) => {
-          const width: number = properties.windowRect.width;
-          const uiCtx = this.getUIContext();
-          const widthVp: number = uiCtx ? uiCtx.px2vp(width) : width;
-          
-          console.error(`[BREAKPOINT DEBUG] Window width: ${width}px, Width in vp: ${widthVp}`);
-          
-          let breakpoint: string = 'sm';
-          
-          if (widthVp >= 1440) {
-            breakpoint = 'xl';
-          } else if (widthVp >= 840) {
-            breakpoint = 'lg';
-          } else if (widthVp >= 600) {
-            breakpoint = 'md';
-          } else if (widthVp >= 320) {
-            breakpoint = 'sm';
-          } else {
-            breakpoint = 'xs';
-          }
-          
-          console.error(`[BREAKPOINT DEBUG] Calculated breakpoint: ${breakpoint}`);
-          
-          // 只使用AppStorage更新，@StorageLink会自动同步
-          AppStorage.setOrCreate('currentBreakPoint', breakpoint);
-        }).catch((err: Error) => {
-          console.error('Failed to get window properties:', err);
-        });
+        context.windowStage.getMainWindow()
+          .then((windowClass: window.Window) => {
+            return windowClass.getWindowProperties();
+          })
+          .then((properties: window.WindowProperties) => {
+            const width: number = properties.windowRect.width;
+            const uiCtx = this.getUIContext();
+            const widthVp: number = uiCtx ? uiCtx.px2vp(width) : width;
+
+            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Window width: %{public}dpx, widthVp=%{public}d', width,
+              widthVp);
+
+            let breakpoint: string = 'sm';
+
+            if (widthVp >= 1440) {
+              breakpoint = 'xl';
+            } else if (widthVp >= 840) {
+              breakpoint = 'lg';
+            } else if (widthVp >= 600) {
+              breakpoint = 'md';
+            } else if (widthVp >= 320) {
+              breakpoint = 'sm';
+            } else {
+              breakpoint = 'xs';
+            }
+
+            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Calculated breakpoint: %{public}s', String(breakpoint));
+
+            // 只使用AppStorage更新，@StorageLink会自动同步
+            AppStorage.setOrCreate('currentBreakPoint', breakpoint);
+          })
+          .catch((err: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to get window properties: %{public}s', String(err));
+          });
       }
     } catch (err) {
-      console.error('Failed to update breakpoint:', err);
+      hilog.error(DOMAIN, TAG, 'Failed to update breakpoint: %{public}s', String(err));
     }
   }
 }

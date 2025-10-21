@@ -1,6 +1,9 @@
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'BrowserHelper';
 
 /**
  * 浏览器启动工具类
@@ -26,7 +29,7 @@ export class BrowserHelper {
             duration: 2000
           });
         } catch (toastErr) {
-          console.warn('Toast display failed (invalid url):', toastErr);
+          hilog.warn(DOMAIN, TAG, 'Toast display failed (invalid url): %{public}s', String(toastErr));
         }
         return false;
       }
@@ -42,7 +45,7 @@ export class BrowserHelper {
       };
 
       await context.startAbility(want);
-      console.info('Successfully started browser with URL:', normalizedUrl);
+      hilog.info(DOMAIN, TAG, 'Successfully started browser with URL: %{public}s', normalizedUrl);
 
       try {
         promptAction.showToast({
@@ -50,14 +53,14 @@ export class BrowserHelper {
           duration: 1500
         });
       } catch (toastErr) {
-        console.warn('Toast display failed (start browser):', toastErr);
+        hilog.warn(DOMAIN, TAG, 'Toast display failed (start browser): %{public}s', String(toastErr));
       }
 
       return true;
 
     } catch (err) {
       const error = err as BusinessError;
-      console.error(`Failed to start browser. Code: ${error.code}, message: ${error.message}`);
+      hilog.error(DOMAIN, TAG, 'Failed to start browser. Code: %{public}d, message: %{public}s', error.code, error.message);
 
       try {
         promptAction.showToast({
@@ -65,7 +68,7 @@ export class BrowserHelper {
           duration: 2000
         });
       } catch (toastErr) {
-        console.warn('Toast display failed (browser error):', toastErr);
+        hilog.warn(DOMAIN, TAG, 'Toast display failed (browser error): %{public}s', String(toastErr));
       }
 
       return false;

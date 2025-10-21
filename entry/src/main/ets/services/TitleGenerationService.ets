@@ -15,6 +15,9 @@
 
 import { ChatMessage } from '../services/DataModels';
 import { NetworkManager } from '../services/NetworkManager';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'TitleGenerationService';
 
 export class TitleGenerationService {
   private networkManager: NetworkManager;
@@ -88,7 +91,7 @@ ${conversationText}
         return this.getFallbackTitle(contextMessages);
       }
     } catch (error) {
-      console.error('Title generation failed:', error);
+      hilog.error(DOMAIN, TAG, 'Title generation failed: %{public}s', String(error));
       return this.getFallbackTitle(messages);
     }
   }

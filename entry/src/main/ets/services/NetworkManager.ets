@@ -13,6 +13,9 @@ import {
 } from '../services/DataModels';
 import { AbortController } from '../interfaces/AbortController';
 import { NetworkError } from '../components/Errors';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'NetworkManager';
 
 /**
  * 错误信息接口
@@ -134,10 +137,10 @@ export class NetworkManager {
       const sanitizedModel = this.sanitizeIdentifier(model || '');
       const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
-      console.info('Starting stream chat request...');
-      console.info('API URL:', sanitizedApiUrl);
-      console.info('Model:', sanitizedModel);
-      console.info('Messages count:', messages.length);
+      hilog.info(DOMAIN, TAG, 'Starting stream chat request...');
+      hilog.info(DOMAIN, TAG, 'API URL: %{public}s', sanitizedApiUrl);
+      hilog.info(DOMAIN, TAG, 'Model: %{public}s', sanitizedModel);
+      hilog.info(DOMAIN, TAG, 'Messages count: %{public}d', messages.length);
 
       // 声明超时定时器变量
       let timeoutId: number | null = null;
@@ -166,7 +169,7 @@ export class NetworkManager {
       // 如果提供了AbortController，监听中断信号
       if (abortController) {
         abortController.signal.addEventListener('abort', () => {
-          console.info('Request aborted by user');
+          hilog.info(DOMAIN, TAG, 'Request aborted by user');
           if (timeoutId) {
             clearTimeout(timeoutId);
             timeoutId = null;
@@ -180,8 +183,8 @@ export class NetworkManager {
         });
       }
 
-      console.info('Request URL:', url);
-      console.info('Request body:', JSON.stringify(requestBody));
+      hilog.info(DOMAIN, TAG, 'Request URL: %{public}s', url);
+      hilog.info(DOMAIN, TAG, 'Request body: %{public}s', JSON.stringify(requestBody));
 
       // 创建包装的回调，包含超时处理
       const wrappedCallbacks: StreamCallbacks = {
@@ -211,7 +214,7 @@ export class NetworkManager {
 
       // 设置30秒超时
       timeoutId = setTimeout(() => {
-        console.error('Stream request timeout');
+        hilog.error(DOMAIN, TAG, 'Stream request timeout');
         httpRequest.destroy();
         wrappedCallbacks.onError(new Error('请求超时'));
         reject(new Error('请求超时'));
@@ -238,8 +241,8 @@ export class NetworkManager {
           chunk = chunk.replace(/\r\n/g, '\n');
         }
 
-        console.info('Received streaming data chunk, length:', chunk.length);
-        console.info('Chunk preview:', chunk.substring(0, 200));
+        hilog.info(DOMAIN, TAG, 'Received streaming data chunk, length: %{public}d', chunk.length);
+        hilog.info(DOMAIN, TAG, 'Chunk preview: %{public}s', chunk.substring(0, 200));
 
         // 若未能检测到 SSE 前缀（含或不含空格），且尚未派发元信息，则尝试累积为错误体
         // 注意：正常 SSE 数据以 `data: {json}` 的行格式出现，允许 `data:` 或 `data: `
@@ -253,7 +256,7 @@ export class NetworkManager {
 
       // 订阅HTTP流式响应数据接收完毕事件
       httpRequest.on('dataEnd', () => {
-        console.info('HTTP stream data receive completed');
+        hilog.info(DOMAIN, TAG, 'HTTP stream data receive completed');
         // 处理剩余的缓冲区数据
         this.flushSSEBuffer(bufferState, wrappedCallbacks, parseState);
 
@@ -320,7 +323,7 @@ export class NetworkManager {
               }
             }
             if (errMsg && errMsg.length > 0) {
-              console.error('Stream error body parsed message:', errMsg);
+              hilog.error(DOMAIN, TAG, 'Stream error body parsed message: %{public}s', errMsg);
               parseState.errorDispatched = true;
               parseState.completed = true;
               wrappedCallbacks.onError(new Error(errMsg));
@@ -328,7 +331,7 @@ export class NetworkManager {
             }
           } catch {
             // 非 JSON，则作为原始文本透传
-            console.warn('Failed to parse error body as JSON, pass-through text');
+            hilog.warn(DOMAIN, TAG, 'Failed to parse error body as JSON, pass-through text');
             parseState.errorDispatched = true;
             parseState.completed = true;
             wrappedCallbacks.onError(new Error(body));
@@ -344,7 +347,7 @@ export class NetworkManager {
 
       // 订阅数据接收进度事件
       httpRequest.on('dataReceiveProgress', (progressInfo: http.DataReceiveProgressInfo) => {
-        console.info('Data receive progress:', progressInfo.receiveSize, '/', progressInfo.totalSize);
+        hilog.info(DOMAIN, TAG, 'Data receive progress: %{public}d/%{public}d', progressInfo.receiveSize, progressInfo.totalSize);
       });
 
       // 发起HTTP流式请求
@@ -372,10 +375,10 @@ export class NetworkManager {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
-        console.info('Stream request completed with response code:', responseCode);
+        hilog.info(DOMAIN, TAG, 'Stream request completed with response code: %{public}d', responseCode);
         if (responseCode === 200) {
           // 流式数据接收已在 dataReceive 和 dataEnd 事件中处理
-          console.info('Stream request successful');
+          hilog.info(DOMAIN, TAG, 'Stream request successful');
         } else {
           // 如果先前已经根据错误体上报过更具体的信息，或者是用户主动中断，则不再重复覆盖
           if (!parseState.errorDispatched && !parseState.userAborted) {
@@ -389,14 +392,14 @@ export class NetworkManager {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
-        console.error('Stream request error:', err);
+        hilog.error(DOMAIN, TAG, 'Stream request error: %{public}s', String(err));
         if (!parseState.errorDispatched && !parseState.userAborted) {
           wrappedCallbacks.onError(new Error(`流式请求失败: ${err.message || err}`));
         }
         try {
           this.destroyStreamRequest(httpRequest);
         } catch {
-          console.warn('Failed to destroy stream request after error');
+          hilog.warn(DOMAIN, TAG, 'Failed to destroy stream request after error');
         }
         reject(err);
       });
@@ -484,7 +487,7 @@ export class NetworkManager {
   private handleSSEDataField(dataStr: string, callbacks: StreamCallbacks, state: StreamParseState): void {
     const trimmed = (dataStr || '').trim();
     if (trimmed === '[DONE]') {
-      console.info('SSE stream completed with [DONE]');
+      hilog.info(DOMAIN, TAG, 'SSE stream completed with [DONE]');
       if (!state.completed) {
         state.completed = true;
         callbacks.onComplete();
@@ -537,7 +540,7 @@ export class NetworkManager {
         }
       }
     } catch (parseError) {
-      console.warn('Failed to parse SSE JSON:', parseError, 'Raw data:', dataStr);
+      hilog.warn(DOMAIN, TAG, 'Failed to parse SSE JSON: %{public}s Raw data: %{public}s', String(parseError), dataStr);
     }
   }
 
@@ -607,14 +610,14 @@ export class NetworkManager {
     const sanitizedModel = this.sanitizeIdentifier(modelName || '');
     const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
-    console.info('NetworkManager: Starting chat request');
-    console.info('API URL:', sanitizedApiUrl);
-    console.info('Model:', sanitizedModel);
-    console.info('Messages count:', messages.length);
-    console.info('API Key configured:', !!apiKey && apiKey.length > 0);
+    hilog.info(DOMAIN, TAG, 'NetworkManager: Starting chat request');
+    hilog.info(DOMAIN, TAG, 'API URL: %{public}s', sanitizedApiUrl);
+    hilog.info(DOMAIN, TAG, 'Model: %{public}s', sanitizedModel);
+    hilog.info(DOMAIN, TAG, 'Messages count: %{public}d', messages.length);
+    hilog.info(DOMAIN, TAG, 'API Key configured: %{public}s', String(!!apiKey && apiKey.length > 0));
 
     const requestUrl = this.resolveChatCompletionsUrl(sanitizedApiUrl);
-    console.info('Resolved chat endpoint:', requestUrl);
+    hilog.info(DOMAIN, TAG, 'Resolved chat endpoint: %{public}s', requestUrl);
 
     return new Promise((resolve, reject) => {
       // 创建HTTP请求
@@ -652,13 +655,13 @@ export class NetworkManager {
         readTimeout: Constants.DEFAULT_TIMEOUT
       };
 
-      console.info('Sending chat request to:', requestUrl);
-      console.info('Request body:', JSON.stringify(requestBody, null, 2));
+      hilog.info(DOMAIN, TAG, 'Sending chat request to: %{public}s', requestUrl);
+      hilog.info(DOMAIN, TAG, 'Request body: %{public}s', JSON.stringify(requestBody, null, 2));
 
       // 发送请求
       httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
         if (err) {
-          console.error('HTTP request failed:', err);
+          hilog.error(DOMAIN, TAG, 'HTTP request failed: %{public}s', String(err));
           httpRequest.destroy();
           // 提供更详细的错误信息
           const errorMessage = this.getNetworkErrorMessage(err);
@@ -669,7 +672,7 @@ export class NetworkManager {
         try {
           if (data.responseCode === 200) {
             const responseData = data.result as string;
-            console.info('Received response:', responseData);
+            hilog.info(DOMAIN, TAG, 'Received response: %{public}s', responseData);
 
             const response: ChatResponse = JSON.parse(responseData);
 
@@ -684,7 +687,7 @@ export class NetworkManager {
           } else {
             let errorMessage = `请求失败，状态码: ${data.responseCode}`;
             try {
-              console.error('HTTP error response body:', data.result as string);
+              hilog.error(DOMAIN, TAG, 'HTTP error response body: %{public}s', data.result as string);
             } catch (_) {
             }
 
@@ -698,12 +701,12 @@ export class NetworkManager {
               errorMessage = this.getHttpErrorMessage(data.responseCode);
             }
 
-            console.error('HTTP request failed with status:', data.responseCode);
+            hilog.error(DOMAIN, TAG, 'HTTP request failed with status: %{public}d', data.responseCode);
             httpRequest.destroy();
             reject(new NetworkError(errorMessage));
           }
         } catch (parseError) {
-          console.error('Failed to parse response:', parseError);
+          hilog.error(DOMAIN, TAG, 'Failed to parse response: %{public}s', String(parseError));
           httpRequest.destroy();
           reject(new NetworkError(`响应解析失败: ${parseError}`));
         }
@@ -788,7 +791,7 @@ export class NetworkManager {
       await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage]);
       return true;
     } catch (error) {
-      console.error('Connection test failed:', error);
+      hilog.error(DOMAIN, TAG, 'Connection test failed: %{public}s', String(error));
       return false;
     }
   }

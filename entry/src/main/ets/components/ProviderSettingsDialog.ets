@@ -1,5 +1,8 @@
 import { promptAction } from '@kit.ArkUI';
 import { AIProvider, AIModel } from '../services/DataModels';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+const DOMAIN = 0x0000;
+const TAG = 'ProviderSettingsDialog';
 
 @Component
 export struct ProviderSettingsDialog {
@@ -231,7 +234,7 @@ export struct ProviderSettingsDialog {
     try {
       promptAction.showToast({ message });
     } catch (error) {
-      console.error('Failed to show toast:', error);
+      hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(error));
     }
   }
 }

@@ -1,6 +1,7 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 export class ClipboardManager {
   private static instance: ClipboardManager;
@@ -28,10 +29,10 @@ export class ClipboardManager {
       // 写入剪贴板（无需权限）
       await this.systemPasteboard.setData(pasteData);
 
-      console.info('ClipboardManager: Text copied to clipboard successfully');
+      hilog.info(DOMAIN, TAG, 'ClipboardManager: Text copied to clipboard successfully');
       return true;
     } catch (error) {
-      console.error('ClipboardManager: Failed to copy text', error);
+      hilog.error(DOMAIN, TAG, 'ClipboardManager: Failed to copy text: %{public}s', String(error));
       return false;
     }
   }
@@ -45,11 +46,14 @@ export class ClipboardManager {
       const emptyData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, '');
       await this.systemPasteboard.setData(emptyData);
 
-      console.info('ClipboardManager: Clipboard cleared successfully');
+      hilog.info(DOMAIN, TAG, 'ClipboardManager: Clipboard cleared successfully');
       return true;
     } catch (error) {
-      console.error('ClipboardManager: Failed to clear clipboard', error);
+      hilog.error(DOMAIN, TAG, 'ClipboardManager: Failed to clear clipboard: %{public}s', String(error));
       return false;
     }
   }
 }
+
+const DOMAIN = 0x0000;
+const TAG = 'ClipboardManager';
