@@ -8,7 +8,9 @@
  * - 优化性能，缓存计算结果
  */
 
-import { ChatMessage } from '../services/DataModels';
+import { ChatMessage, Citation } from '../services/DataModels';
+import { common } from '@kit.AbilityKit';
+import { BrowserHelper } from '../services/BrowserHelper';
 import { Constants } from '../components/Constants';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
@@ -288,6 +290,51 @@ export struct MessageItem {
       .width('100%')
       .alignItems(VerticalAlign.Top)
       .justifyContent(FlexAlign.Start) // 靠左对齐，不居中
+
+      // 引用资料展示（如果有）
+      if (this.message.citations && this.message.citations.length > 0) {
+        Column() {
+          ForEach(this.message.citations, (c: Citation, idx: number) => {
+            Column() {
+              // 标题 + 链接
+              if (c.title || c.url) {
+                Row() {
+                  Text(c.title ?? c.url)
+                    .fontSize(12)
+                    .fontColor($r('app.color.text_secondary'))
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+              }
+              // 摘要
+              if (c.snippet) {
+                Text(c.snippet)
+                  .fontSize(12)
+                  .fontColor($r('app.color.text_secondary'))
+                  .margin({ top: 2 })
+              }
+              // URL
+              if (c.url) {
+                Text(c.url)
+                  .fontSize(11)
+                  .fontColor(Color.Blue)
+                  .margin({ top: 2 })
+                  .onClick(() => {
+                    try {
+                      const ctx = getContext(this) as common.UIAbilityContext;
+                      BrowserHelper.openUrl(ctx, c.url);
+                    } catch (_) {}
+                  })
+              }
+            }
+            .padding({ top: 6, bottom: 6 })
+            .borderWidth({ bottom: idx < (this.message.citations!.length - 1) ? 1 : 0 })
+            .borderColor($r('app.color.text_secondary'))
+          })
+        }
+        .width('100%')
+        .padding({ top: 8 })
+      }
 
       // 添加操作按钮
       this.AssistantActionButtons()

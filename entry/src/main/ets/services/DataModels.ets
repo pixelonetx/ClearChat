@@ -39,6 +39,8 @@ export interface ChatMessageInit {
   providerCreatedAt?: number;
   /** AI服务返回的系统指纹 */
   systemFingerprint?: string;
+  /** 引用资料（如联网搜索返回的参考链接） */
+  citations?: Citation[];
 }
 
 /**
@@ -66,6 +68,8 @@ export class ChatMessage {
   providerCreatedAt?: number;
   /** AI服务返回的系统指纹 */
   systemFingerprint?: string;
+  /** 引用资料列表（用于展示与持久化） */
+  citations?: Citation[];
 
   /**
    * 构造函数
@@ -83,7 +87,18 @@ export class ChatMessage {
     this.providerMessageId = init?.providerMessageId;
     this.providerCreatedAt = init?.providerCreatedAt;
     this.systemFingerprint = init?.systemFingerprint;
+    this.citations = init?.citations;
   }
+}
+
+/**
+ * 联网搜索引用条目
+ */
+export interface Citation {
+  title?: string;
+  url: string;
+  snippet?: string;
+  source?: string; // 额外来源标识（如引擎名/站点）
 }
 
 /**
@@ -103,6 +118,8 @@ export interface ChatMessageMetadataUpdate {
   modelName?: string | null;
   /** 提供商名称 */
   providerName?: string | null;
+  /** 引用资料（JSON持久化） */
+  citations?: Citation[] | null;
 }
 
 /**
@@ -159,6 +176,8 @@ export class AppSettings {
   providers: AIProvider[];
   activeProviderId: string;
   activeModelId: string;
+  /** 是否启用联网搜索（对支持的提供商生效，如阿里云通义千问） */
+  enableWebSearch?: boolean;
 
   constructor(apiUrl: string = '', apiKey: string = '', modelName: string = '') {
     this.apiUrl = apiUrl;
@@ -167,6 +186,7 @@ export class AppSettings {
     this.providers = [];
     this.activeProviderId = '';
     this.activeModelId = '';
+    this.enableWebSearch = false;
   }
 }
 
@@ -195,6 +215,16 @@ export interface ChatRequestBody {
   stream: boolean;
   max_tokens: number;
   temperature: number;
+  // 供应商特定扩展字段（例如阿里云通义千问的联网搜索）
+  enable_search?: boolean;
+  tools?: WebSearchTool[];
+}
+
+/**
+ * 联网搜索工具声明（用于供应商扩展字段）
+ */
+export interface WebSearchTool {
+  type: 'web_search';
 }
 
 /**
@@ -292,4 +322,28 @@ export interface StreamMetadata {
   systemFingerprint?: string;
   choiceIndex?: number;
   finishReason?: string;
+  citations?: Citation[]; // 承载供应商返回的引用信息
+}
+
+/**
+ * 扩展：支持供应商在响应顶层返回引用
+ */
+export interface ExtendedStreamResponse extends StreamResponse {
+  citations?: Citation[];
+  references?: Citation[];
+}
+
+/**
+ * 扩展：支持供应商在 delta 中返回引用
+ */
+export interface ExtendedStreamDelta extends StreamDelta {
+  citations?: Citation[];
+  references?: Citation[];
+}
+
+/**
+ * 流式请求选项（例如：是否开启联网搜索）
+ */
+export interface StreamRequestOptions {
+  enableWebSearch?: boolean;
 }

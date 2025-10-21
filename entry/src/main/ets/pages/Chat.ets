@@ -4,8 +4,14 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-
-import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
+import {
+  ChatMessage,
+  AppSettings,
+  AIProvider,
+  AIModel,
+  Citation,
+  ChatMessageMetadataUpdate
+} from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
@@ -87,6 +93,8 @@ struct Chat {
   @State isInitialized: boolean = false;
   @State hasSettings: boolean = false;
   @State ctrlFlag: boolean = false;
+  @State enableWebSearch: boolean = false; // 阿里云通义千问 联网搜索开关
+  @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -414,6 +422,7 @@ struct Chat {
 
               // 输入
               Column() {
+
                 TextArea({ placeholder: '输入你的消息...', text: this.inputText })
                   .fontSize(16)
                   .backgroundColor($r('app.color.input_area_color'))
@@ -434,6 +443,31 @@ struct Chat {
                   })
 
                 Row() {
+                  // 若当前提供商为阿里云，显示联网搜索开关（使用 @State isAliyunActive 以确保响应式更新）
+                  if (this.isAliyunActive) {
+                    Toggle({ type: ToggleType.Button, isOn: this.enableWebSearch }) {
+                      Image($r('app.media.worldclock'))
+                        .size({ width: 24, height: 24 })
+                        .fillColor(this.isAliyunActive ? Color.Gray : Color.Blue)
+                    }
+                    .onChange((on: boolean) => {
+                      this.enableWebSearch = on;
+                      if (this.currentSettings) {
+                        this.currentSettings.enableWebSearch = on;
+                        // 异步保存设置，不阻塞输入
+                        this.databaseManager.saveSettings(this.currentSettings).then(() => {
+                          // bump settingsVersion 以通知其他页面
+                          const ver = (this.settingsVersion ?? 0) + 1;
+                          AppStorage.setOrCreate('settingsVersion', ver);
+                        }).catch(() => {
+                        });
+                      }
+                    })
+                    .margin({left:12})
+                  }
+
+                  Blank()
+
                   // 单按钮：生成中显示“停止”，否则显示“发送”
                   Button() {
                     if (this.isGenerating) {
@@ -465,6 +499,8 @@ struct Chat {
                   })
                 }
                 .margin({ bottom: 12 }) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+                .justifyContent(FlexAlign.SpaceBetween) // 关键属性：两端对齐
+                .width('100%') // 必须设置宽度为 100% 才能生效
               }
               .backgroundColor($r('app.color.input_area_color'))
               // .borderWidth({top:1})
@@ -748,6 +784,10 @@ struct Chat {
         settings.apiKey = activeProvider.apiKey;
         settings.modelName = activeModel.name;
         this.currentSettings = settings;
+        // 同步联网搜索开关到页面状态
+        this.enableWebSearch = !!settings.enableWebSearch;
+        // 联动识别阿里云开关
+        this.isAliyunActive = this.isAliyunProviderActive();
         hilog.error(DOMAIN, TAG, 'Active provider resolved', {
           providerId: activeProvider.id,
           providerName: activeProvider.displayName,
@@ -801,6 +841,9 @@ struct Chat {
         } else {
           await this.loadChatHistory();
         }
+
+        // 每次设置刷新后，同步更新阿里云识别状态，驱动 UI 即时变化
+        this.isAliyunActive = this.isAliyunProviderActive();
 
         this.previousSettingsVersion = targetVersion;
         this.logSettingsVersionState('Chat: reloadChatState completed');
@@ -1127,8 +1170,18 @@ struct Chat {
         this.currentSettings.apiKey = provider.apiKey;
         this.currentSettings.modelName = model.name;
 
+        // 同步 providers 的 isActive 标志，确保状态与 activeProviderId 一致
+        if (Array.isArray(this.currentSettings.providers)) {
+          for (const p of this.currentSettings.providers) {
+            p.isActive = (p.id === providerId);
+          }
+        }
+
         // 保存到数据库
         await this.databaseManager.saveSettings(this.currentSettings);
+
+        // 切换模型后，立即刷新是否为阿里云状态，驱动 UI
+        this.isAliyunActive = this.isAliyunProviderActive();
 
         this.showToast(`已切换到${provider.displayName}的${model.displayName}`, 2000);
       }
@@ -1192,6 +1245,55 @@ struct Chat {
       modelName: activeModel.displayName || activeModel.name,
       providerName: activeProvider.displayName || activeProvider.name
     };
+  }
+
+  // 判断当前是否是阿里云通义千问提供商
+  // 兼容“快速配置”中使用中文展示名、未设置 activeProviderId、或仅依赖 apiUrl 的场景
+  private isAliyunProviderActive(): boolean {
+    const settings = this.currentSettings;
+    if (!settings) {
+      return false;
+    }
+
+    // 归一化判断函数：支持中英文关键词与 URL 特征
+    const isAliyunLike = (name: string | undefined, url: string | undefined): boolean => {
+      const n = (name || '').toLowerCase();
+      const u = (url || '').toLowerCase();
+      // 名称关键字（中英文）
+      const nameHit = n.includes('aliyun') || n.includes('dashscope') || n.includes('qwen') || n.includes('tongyi')
+        || (name || '').includes('阿里云') || (name || '').includes('通义') || (name || '').includes('千问');
+      // URL 关键字
+      const urlHit = u.includes('dashscope.aliyuncs.com') || u.includes('/compatible-mode/v1')
+        || u.includes('aliyun') || u.includes('dashscope') || u.includes('qwen');
+      return nameHit || urlHit;
+    };
+
+    // 优先：按 activeProviderId 命中
+    let provider = settings.providers.find(p => p.id === settings.activeProviderId);
+    if (provider) {
+      // 进一步结合模型名辅助判断
+      const activeModel = provider.models.find(m => m.id === settings.activeModelId) ?? provider.models[0];
+      const modelName = activeModel ? `${activeModel.name} ${activeModel.displayName}` : '';
+      if (isAliyunLike(provider.name || provider.displayName, provider.apiUrl) || isAliyunLike(modelName, '')) {
+        return true;
+      }
+    }
+
+    // 其次：根据当前 settings.apiUrl 反推（用户可能未正确设置 activeProviderId）
+    if (settings.apiUrl && isAliyunLike('', settings.apiUrl)) {
+      return true;
+    }
+
+    // 再次：扫描所有 provider，找到名称或 URL 命中的，并且该 provider 当前被标记为激活
+    const anyActiveAliyun = settings.providers.some(p => {
+      const hit = isAliyunLike(p.name || p.displayName, p.apiUrl);
+      return hit && (p.id === settings.activeProviderId || p.isActive === true);
+    });
+    if (anyActiveAliyun) {
+      return true;
+    }
+
+    return false;
   }
 
   // 判断是否应该生成标题
@@ -1501,16 +1603,26 @@ struct Chat {
             if (metadataChanged) {
               const persistedMessage = this.messages[streamingMessageIndex];
               if (persistedMessage?.id !== undefined) {
-                this.databaseManager.updateChatMessageMetadata(persistedMessage.id, {
+                const update: ChatMessageMetadataUpdate = {
                   timestamp: persistedMessage.timestamp,
                   providerMessageId: persistedMessage.providerMessageId ?? null,
                   providerCreatedAt: persistedMessage.providerCreatedAt ?? null,
                   systemFingerprint: persistedMessage.systemFingerprint ?? null,
                   modelName: persistedMessage.modelName ?? null,
                   providerName: persistedMessage.providerName ?? null
-                }).catch((metadataError: Error) => {
-                  hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
-                });
+                };
+                if (meta && meta.citations) {
+                  update.citations = meta.citations as Citation[];
+                  this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+                    if (update.citations) {
+                      message.citations = update.citations as Citation[];
+                    }
+                  });
+                }
+                this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
+                  .catch((metadataError: Error) => {
+                    hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
+                  });
               }
             }
           },
@@ -1584,7 +1696,8 @@ struct Chat {
             });
           }
         },
-        this.currentAbortController // 传入AbortController
+        this.currentAbortController, // 传入AbortController
+        { enableWebSearch: this.isAliyunActive && this.enableWebSearch }
       );
 
     } catch (error) {
@@ -1904,7 +2017,8 @@ struct Chat {
             this.showToast('重新生成失败');
           }
         },
-        this.currentAbortController
+        this.currentAbortController,
+        { enableWebSearch: this.isAliyunActive && this.enableWebSearch }
       );
 
     } catch (error) {

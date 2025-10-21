@@ -23,7 +23,7 @@
 
 import { relationalStore } from '@kit.ArkData';
 import { Constants } from '../components/Constants';
-import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel } from '../services/DataModels';
+import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel, Citation } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseError } from '../components/Errors';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -113,7 +113,8 @@ export class DatabaseManager {
         provider_name TEXT,
         provider_message_id TEXT,
         provider_created_at INTEGER,
-        system_fingerprint TEXT
+        system_fingerprint TEXT,
+        citations_json TEXT
       )
     `;
 
@@ -138,7 +139,8 @@ export class DatabaseManager {
         model_name TEXT NOT NULL,
         providers_data TEXT,
         active_provider_id TEXT,
-        active_model_id TEXT
+        active_model_id TEXT,
+        enable_web_search INTEGER DEFAULT 0
       )
     `;
 
@@ -158,6 +160,21 @@ export class DatabaseManager {
       await this.rdbStore.executeSql(createChatTable);
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
+
+      // 兼容旧版本表结构：补充 messages.citations_json 列
+      try {
+        await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN citations_json TEXT`);
+      } catch (e) {
+        // 若已存在则忽略
+        hilog.info(DOMAIN, TAG, 'citations_json column already exists or migration skipped');
+      }
+
+      // 兼容旧版本设置表结构：补充 settings.enable_web_search 列
+      try {
+        await this.rdbStore.executeSql(`ALTER TABLE ${Constants.SETTINGS_TABLE} ADD COLUMN enable_web_search INTEGER DEFAULT 0`);
+      } catch (e2) {
+        hilog.info(DOMAIN, TAG, 'enable_web_search column already exists or migration skipped');
+      }
 
       // 创建索引
       for (const indexSql of createChatIndexes) {
@@ -191,7 +208,8 @@ export class DatabaseManager {
       'provider_name': message.providerName || null,
       'provider_message_id': message.providerMessageId || null,
       'provider_created_at': message.providerCreatedAt !== undefined ? message.providerCreatedAt : null,
-      'system_fingerprint': message.systemFingerprint || null
+      'system_fingerprint': message.systemFingerprint || null,
+      'citations_json': message.citations && message.citations.length > 0 ? JSON.stringify(message.citations) : null
     };
 
     try {
@@ -239,7 +257,7 @@ export class DatabaseManager {
       throw new DatabaseError('Database not initialized');
     }
 
-    const valueBucket: relationalStore.ValuesBucket = {};
+  const valueBucket: relationalStore.ValuesBucket = {};
 
     if (metadata.timestamp !== undefined) {
       valueBucket['timestamp'] = metadata.timestamp;
@@ -258,6 +276,9 @@ export class DatabaseManager {
     }
     if (metadata.providerName !== undefined) {
       valueBucket['provider_name'] = metadata.providerName;
+    }
+    if (metadata.citations !== undefined) {
+      valueBucket['citations_json'] = metadata.citations ? JSON.stringify(metadata.citations) : null;
     }
 
     if (Object.keys(valueBucket).length === 0) {
@@ -307,6 +328,7 @@ export class DatabaseManager {
         const providerCreatedAtIndex = resultSet.getColumnIndex('provider_created_at');
         const systemFingerprintIndex = resultSet.getColumnIndex('system_fingerprint');
         const timestampIndex = resultSet.getColumnIndex('timestamp');
+        const citationsIndex = resultSet.getColumnIndex('citations_json');
         const idIndex = resultSet.getColumnIndex('id');
 
         do {
@@ -320,6 +342,17 @@ export class DatabaseManager {
           const systemFingerprint = resultSet.isColumnNull(systemFingerprintIndex) ? undefined : resultSet.getString(systemFingerprintIndex);
           const timestampValue = resultSet.getLong(timestampIndex);
 
+          let citations: Citation[] | undefined = undefined;
+          if (citationsIndex >= 0 && !resultSet.isColumnNull(citationsIndex)) {
+            const json = resultSet.getString(citationsIndex);
+            try {
+              const parsed = JSON.parse(json) as Citation[];
+              if (Array.isArray(parsed)) {
+                citations = parsed;
+              }
+            } catch {}
+          }
+
           const message = new ChatMessage(content, role, {
             conversationId,
             modelName,
@@ -327,7 +360,8 @@ export class DatabaseManager {
             timestamp: timestampValue,
             providerMessageId,
             providerCreatedAt,
-            systemFingerprint
+            systemFingerprint,
+            citations
           });
           message.id = resultSet.getLong(idIndex);
           messages.push(message);
@@ -465,7 +499,8 @@ export class DatabaseManager {
       'model_name': settings.modelName,
       'providers_data': JSON.stringify(settings.providers ?? []),
       'active_provider_id': settings.activeProviderId ?? '',
-      'active_model_id': settings.activeModelId ?? ''
+      'active_model_id': settings.activeModelId ?? '',
+      'enable_web_search': settings.enableWebSearch ? 1 : 0
     };
 
     try {
@@ -509,6 +544,7 @@ export class DatabaseManager {
         const providersDataIndex = resultSet.getColumnIndex('providers_data');
         const activeProviderIdIndex = resultSet.getColumnIndex('active_provider_id');
         const activeModelIdIndex = resultSet.getColumnIndex('active_model_id');
+        const enableWebSearchIndex = resultSet.getColumnIndex('enable_web_search');
 
         if (providersDataIndex < 0) {
           hilog.warn(DOMAIN, TAG, 'Settings record missing providers_data column; using legacy configuration');
@@ -543,7 +579,7 @@ export class DatabaseManager {
 
         const activeProvider = resolvedSettings.providers.find(provider => provider.id === resolvedSettings.activeProviderId)
           ?? resolvedSettings.providers[0];
-        resolvedSettings.activeProviderId = activeProvider.id;
+          resolvedSettings.activeProviderId = activeProvider.id;
 
         let activeModel: AIModel | undefined;
         if (activeProvider.models.length > 0) {
@@ -567,6 +603,14 @@ export class DatabaseManager {
           activeProviderId: resolvedSettings.activeProviderId,
           activeModelId: resolvedSettings.activeModelId
         }));
+
+        // 读取 enable_web_search（若缺失则默认为 false）
+        if (enableWebSearchIndex >= 0 && !resultSet.isColumnNull(enableWebSearchIndex)) {
+          const flag = resultSet.getLong(enableWebSearchIndex);
+          resolvedSettings.enableWebSearch = flag === 1;
+        } else {
+          resolvedSettings.enableWebSearch = false;
+        }
 
         settings = resolvedSettings;
       } else {
