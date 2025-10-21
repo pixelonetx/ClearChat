@@ -9,7 +9,9 @@ import {
   StreamResponse,
   RequestMessage,
   ChatRequestBody,
-  ReasoningContentItem
+  ReasoningContentItem,
+  WebSearchTool,
+  Citation
 } from '../services/DataModels';
 import { AbortController } from '../interfaces/AbortController';
 import { NetworkError } from '../components/Errors';
@@ -131,7 +133,7 @@ export class NetworkManager {
    * 发送流式聊天请求到AI服务
    */
   async sendStreamChatRequest(apiUrl: string, apiKey: string, model: string, messages: ChatMessage[],
-    callbacks: StreamCallbacks, abortController?: AbortController): Promise<void> {
+    callbacks: StreamCallbacks, abortController?: AbortController, options?: import('../services/DataModels').StreamRequestOptions): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const sanitizedApiUrl = (apiUrl || '').trim();
       const sanitizedModel = this.sanitizeIdentifier(model || '');
@@ -161,8 +163,13 @@ export class NetworkManager {
         messages: requestMessages,
         stream: true,
         max_tokens: 2000,
-        temperature: 0.7
+        temperature: 0.7,
+        enable_search: options?.enableWebSearch === true ? true : undefined
       };
+
+      // OpenAI 兼容模式：仅使用顶层 enable_search
+      // 注意：传递 tools 会触发服务端按 OpenAI function-tools 校验（需要 { type: 'function', function: {...} }），
+      // 会导致 “function is a required property, expected an object tools.0” 报错，因此不要附带 tools。
 
       const httpRequest = http.createHttp();
 
@@ -232,7 +239,7 @@ export class NetworkManager {
       let rawErrorBody: string = '';
 
       // 订阅HTTP流式响应数据接收事件
-      httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+  httpRequest.on('dataReceive', (data: ArrayBuffer) => {
         // 将 ArrayBuffer 转换为字符串 - 使用 UTF-8 解码
         const uint8Array = new Uint8Array(data);
         let chunk = this.utf8ArrayToString(uint8Array);
@@ -488,6 +495,11 @@ export class NetworkManager {
     const trimmed = (dataStr || '').trim();
     if (trimmed === '[DONE]') {
       hilog.info(DOMAIN, TAG, 'SSE stream completed with [DONE]');
+      // 如果 reasoning_content 仍处于开启状态，先补充闭合标签，避免未闭合导致渲染异常
+      if (state.reasoningStarted) {
+        callbacks.onData('</reasoning_content>');
+        state.reasoningStarted = false;
+      }
       if (!state.completed) {
         state.completed = true;
         callbacks.onComplete();
@@ -503,7 +515,7 @@ export class NetworkManager {
 
   private dispatchSSEPayload(dataStr: string, callbacks: StreamCallbacks, state: StreamParseState): void {
     try {
-      const jsonData = JSON.parse(dataStr) as StreamResponse;
+      const jsonData = JSON.parse(dataStr) as import('../services/DataModels').ExtendedStreamResponse;
       if (!state.metadataDispatched) {
         callbacks.onMetadata?.({
           id: jsonData.id,
@@ -511,12 +523,13 @@ export class NetworkManager {
           model: jsonData.model,
           systemFingerprint: jsonData.system_fingerprint,
           choiceIndex: jsonData.choices && jsonData.choices.length > 0 ? jsonData.choices[0].index : undefined,
-          finishReason: jsonData.choices && jsonData.choices.length > 0 ? jsonData.choices[0].finish_reason : undefined
+          finishReason: jsonData.choices && jsonData.choices.length > 0 ? jsonData.choices[0].finish_reason : undefined,
+          citations: jsonData.citations || jsonData.references || undefined
         });
         state.metadataDispatched = true;
       }
       if (jsonData.choices && jsonData.choices.length > 0) {
-        const delta = jsonData.choices[0].delta;
+        const delta = jsonData.choices[0].delta as import('../services/DataModels').ExtendedStreamDelta;
 
         // 检查并处理 reasoning_content
         if (delta.reasoning_content && typeof delta.reasoning_content === 'string' &&
@@ -537,6 +550,11 @@ export class NetworkManager {
             state.reasoningStarted = false; // 确保只闭合一次
           }
           callbacks.onData(delta.content);
+        }
+
+        // 一些供应商可能把引用数据作为增量字段返回（如 delta.citations），尝试透传到 metadata
+        if (delta && (delta.citations || delta.references)) {
+          callbacks.onMetadata?.({ citations: (delta.citations || delta.references) as Citation[] });
         }
       }
     } catch (parseError) {

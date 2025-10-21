@@ -30,10 +30,13 @@ interface ContentPart {
 export struct MarkdownRenderer {
   @Prop content: string;
   @Prop maxWidth: string = '100%'; // 新增宽度约束属性
+  // 是否默认展开“思考过程”卡片
+  @Prop defaultThinkingExpanded: boolean = true;
 
   private parser: MarkdownParser = new MarkdownParser();
   private context = getContext(this) as common.UIAbilityContext;
   @State private expandedSections: Set<number> = new Set<number>(); // 显式声明泛型类型
+  @State private seenThinkingIds: Set<number> = new Set<number>(); // 记录已出现过的思考块，避免反复自动展开
   
   // 缓存解析结果以提升性能
   @State private parsedContent: ContentPart[] = [];
@@ -43,10 +46,46 @@ export struct MarkdownRenderer {
     this.updateParsedContent();
   }
 
+  // 在每次渲染前根据最新 content 执行增量解析，避免在 build() 顶部产生非 UI 语句
+  aboutToRender() {
+    this.updateParsedContent();
+  }
+
   private updateParsedContent() {
     if (this.content !== this.lastContent) {
       this.parsedContent = this.parseThinkingContent(this.content || '');
       this.lastContent = this.content;
+      // 解析更新后尝试自动展开新出现的思考块
+      this.maybeAutoExpandThinkingSections();
+    }
+  }
+
+  // 首次出现的思考块默认展开（可配置），用户手动折叠后不再强制展开
+  private maybeAutoExpandThinkingSections() {
+    // 收集当前内容中的所有思考块 id
+    const thinkingIds: number[] = [];
+    for (let i = 0; i < this.parsedContent.length; i++) {
+      const part = this.parsedContent[i];
+      if (part.type === 'thinking' && part.id !== undefined) {
+        thinkingIds.push(part.id);
+      }
+    }
+
+    let changed = false;
+    for (const id of thinkingIds) {
+      if (!this.seenThinkingIds.has(id)) {
+        this.seenThinkingIds.add(id);
+        // 仅在配置允许时，自动展开首次出现的思考块
+        if (this.defaultThinkingExpanded && !this.expandedSections.has(id)) {
+          this.expandedSections.add(id);
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      // 触发界面更新
+      this.expandedSections = new Set(this.expandedSections);
     }
   }
 
@@ -57,40 +96,50 @@ export struct MarkdownRenderer {
    */
   private parseThinkingContent(content: string): ContentPart[] {
     const parts: ContentPart[] = [];
-    let currentIndex = 0;
+    let cursor = 0;
     let thinkingId = 0;
 
-    const thinkRegex = /<reasoning_content>([\s\S]*?)<\/reasoning_content>/g;
-    let match: RegExpExecArray | null;
+    const OPEN = '<reasoning_content>';
+    const CLOSE = '</reasoning_content>';
 
-    while ((match = thinkRegex.exec(content)) !== null) {
-      // 添加思考标签前的普通内容
-      if (match.index > currentIndex) {
-        const normalContent: string = content.substring(currentIndex, match.index);
+    // 流式友好解析：允许只有起始标签尚未闭合时也作为思考块渲染
+    // 避免在闭合标签到来前把思考内容当做普通文本展示
+    while (cursor < content.length) {
+      const openIdx = content.indexOf(OPEN, cursor);
+      if (openIdx === -1) {
+        // 没有更多起始标签，余下为普通内容
+        const tail = content.substring(cursor);
+        if (tail.trim()) {
+          parts.push({ type: 'normal', content: tail });
+        }
+        break;
+      }
+
+      // 起始标签前的普通内容
+      if (openIdx > cursor) {
+        const normalContent: string = content.substring(cursor, openIdx);
         if (normalContent.trim()) {
           parts.push({ type: 'normal', content: normalContent });
         }
       }
 
-      // 添加思考内容
-      parts.push({
-        type: 'thinking',
-        content: match[1],
-        id: thinkingId++
-      });
-
-      currentIndex = match.index + match[0].length;
-    }
-
-    // 添加剩余的普通内容
-    if (currentIndex < content.length) {
-      const remainingContent: string = content.substring(currentIndex);
-      if (remainingContent.trim()) {
-        parts.push({ type: 'normal', content: remainingContent });
+      const start = openIdx + OPEN.length;
+      const closeIdx = content.indexOf(CLOSE, start);
+      if (closeIdx === -1) {
+        // 尚未闭合：将后续所有内容都作为思考块（流式场景）
+        const thinkingContent = content.substring(start);
+        parts.push({ type: 'thinking', content: thinkingContent, id: thinkingId++ });
+        // 结束循环，等待下一次内容更新再继续解析
+        break;
+      } else {
+        // 正常的完整思考块
+        const thinkingContent = content.substring(start, closeIdx);
+        parts.push({ type: 'thinking', content: thinkingContent, id: thinkingId++ });
+        cursor = closeIdx + CLOSE.length;
       }
     }
 
-    // 如果没有思考标签，返回整个内容作为普通内容
+    // 如果没有任何解析结果，返回整个内容作为普通内容
     if (parts.length === 0) {
       parts.push({ type: 'normal', content: content });
     }
@@ -388,6 +437,7 @@ export struct MarkdownRenderer {
                   .wordBreak(WordBreak.BREAK_WORD)
                 }
                 .constraintSize({ minWidth: this.getTableCellWidth(block, cellIndex), maxWidth: this.getTableCellWidth(block, cellIndex) })
+                .alignSelf(ItemAlign.Stretch)
 
                 .border({
                   width: 1,
