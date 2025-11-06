@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { MarkdownParser, MarkdownBlock, MarkdownBlockType, TextSegment, TableColumn, TableAlignment } from '../components/MarkdownParser';
 import { CodeBlock } from './CodeBlock';
 import { LinkActionHelper } from './LinkActionSheet';
+import { WebBrowserParam } from './WebViewBrowser';
 
 /**
  * 表格渲染信息接口
@@ -32,6 +33,12 @@ export struct MarkdownRenderer {
   @Prop maxWidth: string = '100%'; // 新增宽度约束属性
   // 是否默认展开“思考过程”卡片
   @Prop defaultThinkingExpanded: boolean = true;
+
+  // 优先使用内置浏览器打开链接
+  @Prop preferInternalBrowser: boolean = true;
+
+  // 获取导航栈以便内部路由
+  @Consume('NavPathStack') private pathStack?: NavPathStack;
 
   private parser: MarkdownParser = new MarkdownParser();
   private context = getContext(this) as common.UIAbilityContext;
@@ -339,7 +346,7 @@ export struct MarkdownRenderer {
           // 行内代码需要特殊处理，暂时显示为普通文本
           Span(segment.text)
             .fontSize(14)
-            .fontColor('#D63384')
+            .fontColor('#007AFF') // '#D63384'
             .fontFamily('monospace')
         } else if (segment.isLink) {
           // 渲染链接
@@ -441,7 +448,7 @@ export struct MarkdownRenderer {
 
                 .border({
                   width: 1,
-                  color: '#E0E0E0'
+                  color: $r('app.color.text_secondary')
                 })
                 .alignItems(this.getTableCellAlignment(block, cellIndex))
                 .justifyContent(FlexAlign.Start)
@@ -452,7 +459,7 @@ export struct MarkdownRenderer {
         .margin({ top: 8, bottom: 8 })
         .border({
           width: 1,
-          color: '#E0E0E0',
+          color: $r('app.color.text_secondary'), // '#E0E0E0'
           radius: 4
         })
         .clip(true)
@@ -577,11 +584,22 @@ export struct MarkdownRenderer {
     }
   }
 
-  // 显示链接操作弹窗
+  // 处理链接点击：优先内置浏览器，其次弹出操作菜单
   private showLinkActionSheet(url: string | undefined) {
     if (!url) return;
 
-    // 使用原生 ActionSheet 替代自定义弹窗
+    // 优先内置浏览器：通过 NavPathStack 跳转到内置 WebView 页面
+    if (this.preferInternalBrowser && this.pathStack) {
+      try {
+        const param: WebBrowserParam = { url: url, title: url };
+        this.pathStack.pushPathByName('WebBrowser', param);
+        return;
+      } catch (e) {
+        // 回退到操作菜单
+      }
+    }
+
+    // 回退：展示菜单，支持系统浏览器与复制
     LinkActionHelper.showLinkActionSheet(url, this.context);
   }
 

@@ -1,6 +1,5 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -34,11 +33,11 @@ export class LinkActionHelper {
       buttons: [
         {
           text: '使用浏览器打开',
-          color: '#007AFF'
+          color: $r('app.color.text_color')
         },
         {
           text: '复制链接',
-          color: '#007AFF'
+          color: $r('app.color.text_color')
         }
       ]
     }).then((result: promptAction.ActionMenuSuccessResponse) => {

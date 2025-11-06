@@ -2,7 +2,7 @@
   "app": {
     "bundleName": "xyz.zkytx.clearchat",
     "vendor": "example",
-    "versionCode": 10247,
+    "versionCode": 10249,
     "versionName": "0.2.4",
     "icon": "$media:layered_image",
     "label": "$string:app_name"

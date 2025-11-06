@@ -9,13 +9,14 @@
  */
 
 import { ChatMessage, Citation } from '../services/DataModels';
-import { common } from '@kit.AbilityKit';
-import { BrowserHelper } from '../services/BrowserHelper';
-import { Constants } from '../components/Constants';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { WebBrowserParam } from '../components/WebViewBrowser';
 
 @Component
 export struct MessageItem {
+  // 导航栈：用于在消息中点击链接时跳转到内置浏览器
+  @Consume('NavPathStack') pathStack: NavPathStack;
+
   @Prop message: ChatMessage;
 
   // 回调函数 - 消息操作事件
@@ -321,8 +322,9 @@ export struct MessageItem {
                   .margin({ top: 2 })
                   .onClick(() => {
                     try {
-                      const ctx = getContext(this) as common.UIAbilityContext;
-                      BrowserHelper.openUrl(ctx, c.url);
+                      const title = c.title ?? '';
+                      const param: WebBrowserParam = { url: c.url, title: title };
+                      this.pathStack.pushPathByName('WebBrowser', param);
                     } catch (_) {}
                   })
               }

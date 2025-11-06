@@ -1,11 +1,11 @@
 import { promptAction } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
 import { DatabaseManager } from '../services/DatabaseManager';
-import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { WebBrowserParam } from '../components/WebViewBrowser';
 const DOMAIN = 0x0000;
 const TAG = 'Settings';
 
@@ -25,9 +25,9 @@ struct Settings {
   @StorageProp('topRectHeight')
   topRectHeight: number = 0;
 
-  private databaseManager: DatabaseManager = DatabaseManager.getInstance();
   @State appSettings: AppSettings | null = null;
   @State qqGroupNumber: string = '428701303'; // 后续填写QQ群号
+  private uiContent: common.UIAbilityContext = getContext(this) as common.UIAbilityContext
 
   build() {
     NavDestination() {
@@ -61,7 +61,7 @@ struct Settings {
               {
                 title: '隐私政策',
                 onClick: () => {
-                  this.openUrl('https://docs.qq.com/doc/p/28bffd5a157cb22b5fb753798d91c0224dee5745?nlc=1');
+                  this.openUrl('https://clearchatlegal.rth1.xyz/');
                 }
               }
             ]);
@@ -77,7 +77,8 @@ struct Settings {
               {
                 title: 'QQ交流群',
                 onClick: () => {
-                this.copyToClipboard(this.qqGroupNumber);
+                  this.copyToClipboard(this.qqGroupNumber);
+                  startQQGroupAbility(this.uiContent, Number(this.qqGroupNumber));
                 }
               },
               {
@@ -227,6 +228,21 @@ struct Settings {
   private openUrl(url: string) {
     const useUrl = url;
 
+    // 使用内置浏览器打开（使用显式类型参数，避免未声明对象字面量）
+    try {
+      const param: WebBrowserParam = { url: useUrl };
+      this.pathStack.pushPathByName('WebBrowser', param);
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'Open internal browser failed: %{public}s', String(err));
+      // 兜底：尝试系统浏览器
+      this.openUrlInBrowser(useUrl);
+    }
+  }
+
+  // 专用于不适配内置 WebView 的站点：弹窗提醒并用系统浏览器打开
+  private openUrlExternalWithConfirm(url: string) {
+    const useUrl = url;
+
     AlertDialog.show({
       title: '打开外部链接',
       message: `即将在系统浏览器中打开${useUrl}，是否继续？`,
@@ -297,4 +313,15 @@ interface SettingItem {
   title: string;
   onClick?: () => void;
   isDestructive?: boolean;
+}
+
+export function startQQGroupAbility(context: common.UIAbilityContext, groupNum: number) {
+  let openLinkOptions: OpenLinkOptions = {
+    appLinkingOnly: false,
+  };
+  try {
+    context.openLink('mqqapi://card/show_pslcard?src_type=internal&version=1&uin=' + groupNum +
+      '&card_type=group&source=qrcode', openLinkOptions)
+  } catch (paramError) {
+  }
 }

@@ -54,19 +54,15 @@ export class TitleGenerationService {
         .map((msg: ChatMessage): string => `${msg.role === 'user' ? '用户' : 'AI'}: ${msg.content}`)
         .join('\n');
 
-      const titlePrompt: string = `请根据以下对话内容，生成一个简洁的标题（不超过15个字）：
-
-${conversationText}
-
-要求：
-1. 重点关注用户的核心问题和AI的回复内容
-2. 标题要准确概括对话主题，不超过15个字
-3. 不要包含引号或特殊符号
-4. 避免使用"你好"、"问候"等简单词汇
-5. 如果用户问题简短但AI回复详细，以问题的核心内容为主
-6. 直接返回标题，不要其他文字
-
-标题：`;
+      const titlePrompt: string = `请根据以下对话内容，生成一个简洁的标题（不超过15个字）：${conversationText}
+      要求：
+      1. 重点关注用户的核心问题和AI的回复内容
+      2. 标题要准确概括对话主题，不超过15个字
+      3. 不要包含引号或特殊符号
+      4. 避免使用"你好"、"问候"等简单词汇
+      5. 如果用户问题简短但AI回复详细，以问题的核心内容为主
+      6. 直接返回标题，不要其他文字
+      标题：`;
 
       const requestMessages: ChatMessage[] = [
         new ChatMessage(titlePrompt, 'user', {

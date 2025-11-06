@@ -35,7 +35,7 @@ struct ModelSettings {
   topRectHeight: number = 0;
   @State isLoading: boolean = false;
   @State isTesting: boolean = false;
-  // 新版本多服务商状态
+  // 多服务商状态
   @State providers: AIProvider[] = [];
   @State currentProviderIndex: number = 0;
   @State activeProviderId: string = '';
@@ -689,7 +689,7 @@ struct ModelSettings {
       }
       .width('100%')
       .padding(16)
-      .backgroundColor($r('app.color.bg_secondary'))
+      // .backgroundColor($r('app.color.bg_secondary'))
       .borderRadius(12)
 
       Column() {
