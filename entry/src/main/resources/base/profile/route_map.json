@@ -25,11 +25,11 @@
       }
     },
     {
-      "name": "About",
-      "pageSourceFile": "src/main/ets/pages/About.ets",
-      "buildFunction": "AboutBuilder",
+      "name": "WebBrowser",
+      "pageSourceFile": "src/main/ets/components/WebViewBrowser.ets",
+      "buildFunction": "WebViewBrowserBuilder",
       "data": {
-        "description" : "this is About"
+        "description" : "internal webview browser"
       }
     },
     {

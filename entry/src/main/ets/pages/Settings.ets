@@ -1,11 +1,12 @@
 import { promptAction } from '@kit.ArkUI';
 import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
-import { DatabaseManager } from '../services/DatabaseManager';
 import { BrowserHelper } from '../services/BrowserHelper';
-import { pasteboard } from '@kit.BasicServicesKit';
+import { ClipboardManager } from '../components/ClipboardManager';
+import { AboutSheetBuilder } from '../components/AboutSheet';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { WebBrowserParam } from '../components/WebViewBrowser';
+import { ThemeMode, AppPreferences } from '../services/AppPreferences';
 const DOMAIN = 0x0000;
 const TAG = 'Settings';
 
@@ -26,8 +27,34 @@ struct Settings {
   topRectHeight: number = 0;
 
   @State appSettings: AppSettings | null = null;
-  @State qqGroupNumber: string = '428701303'; // 后续填写QQ群号
-  private uiContent: common.UIAbilityContext = getContext(this) as common.UIAbilityContext
+  @State qqGroupNumber: string = '428701303';
+  @State showAboutSheet: boolean = false;
+  @State showThemeModeMenu: boolean = false;
+  
+  // 主题模式
+  @StorageLink('themeMode') currentThemeMode: number = ThemeMode.AUTO;
+  
+  private uiContent: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+
+  aboutToAppear(): void {
+    // 不需要额外初始化，AppStorage 已在 EntryAbility 中设置
+  }
+
+  /**
+   * 处理主题模式选择
+   */
+  private handleThemeModeSelected(mode: ThemeMode): void {
+    AppPreferences.setTheme(this.uiContent, mode);
+    
+    try {
+      promptAction.showToast({
+        message: `已切换到${AppPreferences.getDisplayName(mode)}`,
+        duration: 2000
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(err));
+    }
+  }
 
   build() {
     NavDestination() {
@@ -35,6 +62,16 @@ struct Settings {
         // 设置列表
         Scroll() {
           Column() {
+            // 通用设置
+            this.SettingGroup('通用设置', [
+              {
+                title: '主题模式',
+                onClick: () => {
+                  // 使用 bindMenu，点击事件留空
+                }
+              }
+            ]);
+
             // 模型设置
             this.SettingGroup('模型设置', [
               {
@@ -71,7 +108,7 @@ struct Settings {
               {
                 title: '关于',
                 onClick: () => {
-                  this.pathStack.pushPathByName("About", null);
+                  this.showAboutSheet = true;
                 }
               },
               {
@@ -110,6 +147,14 @@ struct Settings {
       top: this.getUIContext().px2vp(this.topRectHeight),
     })
     .title('设置')
+    .bindSheet(
+      $$this.showAboutSheet,
+      AboutSheetBuilder,
+      {
+        detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+        preferType: SheetType.CENTER
+      }
+    )
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
     });
@@ -167,15 +212,60 @@ struct Settings {
           .fontColor($r('sys.color.ohos_id_color_text_primary'))
           .width('100%')
           .textAlign(TextAlign.Start);
+        
+        // 显示副标题（如果有）
+        if (item.subtitle) {
+          Text(item.subtitle)
+            .fontSize(14)
+            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+            .width('100%')
+            .textAlign(TextAlign.Start)
+            .margin({ top: 4 });
+        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       .justifyContent(FlexAlign.Center)
       .padding({ right: 12 })
 
-      SymbolGlyph($r('sys.symbol.chevron_right'))
-        .fontSize(20)
-        .margin({ right: 12 })
+      // 右侧区域：主题模式特殊处理
+      if (item.title === '主题模式') {
+        Row({ space: 8 }) {
+          Text(AppPreferences.getDisplayName(this.currentThemeMode))
+            .fontSize(14)
+            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+          
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(20)
+        }
+        .padding(12)
+        .margin({ top: -10, bottom: -10 })
+        .bindMenu([
+          {
+            value: AppPreferences.getDisplayName(ThemeMode.AUTO),
+            action: () => {
+              this.handleThemeModeSelected(ThemeMode.AUTO);
+            }
+          },
+          {
+            value: AppPreferences.getDisplayName(ThemeMode.LIGHT),
+            action: () => {
+              this.handleThemeModeSelected(ThemeMode.LIGHT);
+            }
+          },
+          {
+            value: AppPreferences.getDisplayName(ThemeMode.DARK),
+            action: () => {
+              this.handleThemeModeSelected(ThemeMode.DARK);
+            }
+          }
+        ])
+        .hitTestBehavior(HitTestMode.Default)
+      } else {
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(20)
+          .margin({ right: 12 })
+      }
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
@@ -189,7 +279,10 @@ struct Settings {
       bottomRight: (index === (total - 1)) ? 12 : 0
     })
     .onClick(() => {
-      item.onClick?.();
+      // 主题模式项不执行 onClick，由 bindMenu 处理
+      if (item.title !== '主题模式') {
+        item.onClick?.();
+      }
     })
   }
 
@@ -290,27 +383,34 @@ struct Settings {
       });
   }
 
-  private copyToClipboard(text: string) {
+  private async copyToClipboard(text: string) {
     try {
-      const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
-      const systemPasteboard = pasteboard.getSystemPasteboard();
-      systemPasteboard.setData(pasteData);
-
-      promptAction.showToast({
-        message: 'QQ群号已复制到剪贴板',
-        duration: 2000
-      });
+      const success = await ClipboardManager.getInstance().copyText(text);
+      try {
+        promptAction.showToast({
+          message: success ? 'QQ群号已复制到剪贴板' : '复制失败',
+          duration: 2000
+        });
+      } catch (toastErr) {
+        hilog.warn(DOMAIN, TAG, 'Toast display failed: %{public}s', String(toastErr));
+      }
     } catch (error) {
-      promptAction.showToast({
-        message: '复制失败',
-        duration: 2000
-      });
+      hilog.error(DOMAIN, TAG, 'Failed to copy to clipboard: %{public}s', String(error));
+      try {
+        promptAction.showToast({
+          message: '复制失败',
+          duration: 2000
+        });
+      } catch (toastErr) {
+        hilog.warn(DOMAIN, TAG, 'Toast display failed: %{public}s', String(toastErr));
+      }
     }
   }
 }
 
 interface SettingItem {
   title: string;
+  subtitle?: string;
   onClick?: () => void;
   isDestructive?: boolean;
 }

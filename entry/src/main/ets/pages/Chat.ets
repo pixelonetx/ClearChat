@@ -89,6 +89,7 @@ struct Chat {
   @State ctrlFlag: boolean = false;
   @State enableWebSearch: boolean = false; // 阿里云通义千问 联网搜索开关
   @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
+  @State currentModelSupportsWebSearchFlag: boolean = false; // 当前模型是否支持联网搜索的UI驱动标志
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManager.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -243,12 +244,12 @@ struct Chat {
               // 标题栏
               Row() {
                 Button() {
-                  Image($r('app.media.close_sidebar'))
+                  Image($r('app.media.text_alignleft'))
                     .size({ width: 24, height: 24 })
                     .fillColor($r('sys.color.ohos_id_color_text_primary'))
                 }
                 .type(ButtonType.Circle)
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
                 .size({ width: 40, height: 40 })
                 .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
                 .onClick(() => {
@@ -277,7 +278,7 @@ struct Chat {
                 }
                 .type(ButtonType.Circle)
                 .size({ width: 40, height: 40 })
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
                 .onClick(() => {
                   this.createNewConversation();
                 })
@@ -290,7 +291,7 @@ struct Chat {
                 }
                 .type(ButtonType.Circle)
                 .size({ width: 40, height: 40 })
-                .backgroundColor($r('sys.color.button_background_color_transparent'))
+                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
                 .onClick(() => {
                   this.customPopup = !this.customPopup;
                 })
@@ -435,12 +436,13 @@ struct Chat {
                   })
 
                 Row() {
-                  // 若当前提供商为阿里云，显示联网搜索开关（使用 @State isAliyunActive 以确保响应式更新）
-                  if (this.isAliyunActive) {
+                  // 根据当前模型是否支持内置联网搜索来显示/隐藏联网搜索开关
+                  // 使用 @State 标志替代方法调用，确保 UI 能正确响应状态变化
+                  if (this.currentModelSupportsWebSearchFlag) {
                     Toggle({ type: ToggleType.Button, isOn: this.enableWebSearch }) {
                       Image($r('app.media.worldclock'))
                         .size({ width: 24, height: 24 })
-                        .fillColor(this.isAliyunActive ? Color.Gray : Color.Blue)
+                        .fillColor(this.enableWebSearch ? Color.Blue : Color.Gray)
                     }
                     .size({ width: 40, height: 40 })
                     .backgroundColor(Color.Transparent)
@@ -738,6 +740,8 @@ struct Chat {
         this.enableWebSearch = !!settings.enableWebSearch;
         // 联动识别阿里云开关
         this.isAliyunActive = this.isAliyunProviderActive();
+        // 同步当前模型是否支持搜索的标志
+        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
         hilog.error(DOMAIN, TAG, 'Active provider resolved', {
           providerId: activeProvider.id,
           providerName: activeProvider.displayName,
@@ -792,8 +796,9 @@ struct Chat {
           await this.loadChatHistory();
         }
 
-        // 每次设置刷新后，同步更新阿里云识别状态，驱动 UI 即时变化
+        // 每次设置刷新后，同步更新阿里云识别状态和当前模型搜索能力，驱动 UI 即时变化
         this.isAliyunActive = this.isAliyunProviderActive();
+        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
 
         this.previousSettingsVersion = targetVersion;
         this.logSettingsVersionState('Chat: reloadChatState completed');
@@ -1130,8 +1135,9 @@ struct Chat {
         // 保存到数据库
         await this.databaseManager.saveSettings(this.currentSettings);
 
-        // 切换模型后，立即刷新是否为阿里云状态，驱动 UI
+        // 切换模型后，立即刷新是否为阿里云状态和当前模型搜索能力，驱动 UI
         this.isAliyunActive = this.isAliyunProviderActive();
+        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
 
         this.showToast(`已切换到${provider.displayName}的${model.displayName}`, 2000);
       }
@@ -1244,6 +1250,29 @@ struct Chat {
     }
 
     return false;
+  }
+
+  // 判断当前活跃模型是否支持内置联网搜索
+  private isCurrentModelSupportsWebSearch(): boolean {
+    const settings = this.currentSettings;
+    if (!settings || !settings.activeProviderId || !settings.activeModelId) {
+      return false;
+    }
+
+    // 查找当前活跃的提供商
+    const activeProvider = settings.providers.find(p => p.id === settings.activeProviderId);
+    if (!activeProvider) {
+      return false;
+    }
+
+    // 查找当前活跃的模型
+    const activeModel = activeProvider.models.find(m => m.id === settings.activeModelId);
+    if (!activeModel) {
+      return false;
+    }
+
+    // 返回模型是否支持联网搜索
+    return !!activeModel.supportsWebSearch;
   }
 
   // 判断是否应该生成标题
@@ -1600,43 +1629,52 @@ struct Chat {
           onComplete: async () => {
             hilog.error(DOMAIN, TAG, 'Stream completed');
 
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                const streamingMessage = this.messages[streamingMessageIndex];
-
-                // 流式消息应该已经有ID（在开始时创建），更新数据库中的内容
-                if (streamingMessage.id !== undefined) {
-                  hilog.error(DOMAIN, TAG, 'Updating AI response in DB, id=%{public}s', String(streamingMessage.id));
-                  await this.databaseManager.updateChatMessage(streamingMessage.id, streamingMessage.content);
-                  hilog.error(DOMAIN, TAG, 'AI response updated in database');
-                } else {
-                  hilog.warn(DOMAIN, TAG, 'Streaming message has no ID, this should not happen');
-                  // 兜底方案：如果没有ID，保存到数据库
-                  const savedId = await this.databaseManager.insertChatMessage(streamingMessage);
-                  this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-                    message.id = savedId;
-                  });
-                  hilog.error(DOMAIN, TAG, 'AI response saved with ID: %{public}s', String(savedId));
-                }
-              }
-
-              // 生成对话标题（用户主动停止则跳过）
-              if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
-                await this.generateConversationTitle();
-              }
-
-            }
-
-            // 更新对话的消息计数
-            await this.databaseManager.updateConversationMessageCount(targetConversationId);
-
-            hilog.error(DOMAIN, TAG, 'AI response processed successfully');
-
-            // 设置加载状态为false
+            // 立即重置UI状态，不等待数据库操作
+            // 这样可以使停止按钮立即消失，提供更好的用户体验
             this.isLoading = false;
             this.isGenerating = false; // 重置生成状态
             this.currentAbortController = null; // 清理中断控制器
             this.userAbortedGeneration = false; // 清除用户停止标记
+
+            // 异步执行数据库操作，不阻塞UI状态更新
+            // 使用非阻塞的 Promise 链来处理后续操作
+            (async () => {
+              try {
+                if (this.currentConversation && this.currentConversation.id === targetConversationId) {
+                  if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
+                    const streamingMessage = this.messages[streamingMessageIndex];
+
+                    // 流式消息应该已经有ID（在开始时创建），更新数据库中的内容
+                    if (streamingMessage.id !== undefined) {
+                      hilog.error(DOMAIN, TAG, 'Updating AI response in DB, id=%{public}s', String(streamingMessage.id));
+                      await this.databaseManager.updateChatMessage(streamingMessage.id, streamingMessage.content);
+                      hilog.error(DOMAIN, TAG, 'AI response updated in database');
+                    } else {
+                      hilog.warn(DOMAIN, TAG, 'Streaming message has no ID, this should not happen');
+                      // 兜底方案：如果没有ID，保存到数据库
+                      const savedId = await this.databaseManager.insertChatMessage(streamingMessage);
+                      this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+                        message.id = savedId;
+                      });
+                      hilog.error(DOMAIN, TAG, 'AI response saved with ID: %{public}s', String(savedId));
+                    }
+                  }
+
+                  // 生成对话标题（用户主动停止则跳过）
+                  if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
+                    await this.generateConversationTitle();
+                  }
+
+                }
+
+                // 更新对话的消息计数
+                await this.databaseManager.updateConversationMessageCount(targetConversationId);
+
+                hilog.error(DOMAIN, TAG, 'AI response processed successfully');
+              } catch (dbError) {
+                hilog.error(DOMAIN, TAG, 'Error during post-completion database operations: %{public}s', String(dbError));
+              }
+            })();
           },
 
           // onError: 处理错误
@@ -1918,35 +1956,44 @@ struct Chat {
           onComplete: async () => {
             hilog.error(DOMAIN, TAG, 'Regeneration completed');
 
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                const regeneratedMessage = this.messages[streamingMessageIndex];
-
-                // 更新数据库中的消息内容（消息已在开始时创建）
-                if (regeneratedMessage.id !== undefined) {
-                  await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
-                  hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
-                    String(regeneratedMessage.id));
-                } else {
-                  // 兜底方案：如果没有ID，保存到数据库
-                  const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
-                  this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
-                    messageToPersist.id = savedId;
-                  });
-                  hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
-                }
-                // 滚动到底部
-                setTimeout(() => {
-                  if (this.scroller) {
-                    this.scroller.scrollEdge(Edge.Bottom);
-                  }
-                }, 100);
-              }
-            }
-
+            // 立即重置UI状态，不等待数据库操作
+            // 这样可以使停止按钮立即消失，提供更好的用户体验
             this.isLoading = false;
             this.isGenerating = false;
             this.currentAbortController = null;
+
+            // 异步执行数据库操作，不阻塞UI状态更新
+            (async () => {
+              try {
+                if (this.currentConversation && this.currentConversation.id === targetConversationId) {
+                  if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
+                    const regeneratedMessage = this.messages[streamingMessageIndex];
+
+                    // 更新数据库中的消息内容（消息已在开始时创建）
+                    if (regeneratedMessage.id !== undefined) {
+                      await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
+                      hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
+                        String(regeneratedMessage.id));
+                    } else {
+                      // 兜底方案：如果没有ID，保存到数据库
+                      const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
+                      this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
+                        messageToPersist.id = savedId;
+                      });
+                      hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
+                    }
+                    // 滚动到底部
+                    setTimeout(() => {
+                      if (this.scroller) {
+                        this.scroller.scrollEdge(Edge.Bottom);
+                      }
+                    }, 100);
+                  }
+                }
+              } catch (dbError) {
+                hilog.error(DOMAIN, TAG, 'Error during regeneration database operations: %{public}s', String(dbError));
+              }
+            })();
           },
 
           // 重新生成错误处理
@@ -2161,7 +2208,7 @@ struct Chat {
           }
           .type(ButtonType.Circle)
           .size({ width: 40, height: 40 })
-          .backgroundColor($r('sys.color.button_background_color_transparent'))
+          .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
           .onClick(() => {
             this.hideSidebar();
             this.showControlButton = !this.showControlButton;

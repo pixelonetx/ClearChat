@@ -1,18 +1,20 @@
-import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, ConfigurationConstant, UIAbility, Want, Configuration } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window, KeyboardAvoidMode, UIContext } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { AppPreferences } from '../services/AppPreferences';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    try {
-      this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
-    } catch (err) {
-      hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
-    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    
+    // 初始化应用偏好设置
+    AppPreferences.init(this.context);
+    
+    // 保存当前颜色模式到 AppStorage
+    AppStorage.setOrCreate('currentColorMode', this.context.config.colorMode);
   }
 
   onDestroy(): void {
@@ -61,9 +63,20 @@ export default class EntryAbility extends UIAbility {
 
       // 深色模式
       let applicationContext = this.context.getApplicationContext();
-      applicationContext.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+      // 不在这里设置颜色模式，因为已在onCreate中根据用户首选项设置
 
     });
+  }
+
+  /**
+   * 监听配置变更（包括深浅色模式变更）
+   */
+  onConfigurationUpdate(newConfig: Configuration): void {
+    hilog.info(DOMAIN, 'testTag', 'Configuration updated');
+
+    // 更新当前颜色模式到AppStorage
+    AppStorage.setOrCreate('currentColorMode', newConfig.colorMode);
+    hilog.info(DOMAIN, 'testTag', 'Color mode changed to: %{public}d', newConfig.colorMode);
   }
 
   onWindowStageDestroy(): void {
