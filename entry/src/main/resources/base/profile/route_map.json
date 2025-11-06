@@ -31,6 +31,14 @@
       "data": {
         "description" : "this is About"
       }
+    },
+    {
+      "name": "WebBrowser",
+      "pageSourceFile": "src/main/ets/components/WebViewBrowser.ets",
+      "buildFunction": "WebViewBrowserBuilder",
+      "data": {
+        "description" : "internal webview browser"
+      }
     }
   ]
 }

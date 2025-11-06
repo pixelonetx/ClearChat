@@ -4,14 +4,7 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import {
-  ChatMessage,
-  AppSettings,
-  AIProvider,
-  AIModel,
-  Citation,
-  ChatMessageMetadataUpdate
-} from '../services/DataModels';
+import { ChatMessage, AppSettings, Citation, ChatMessageMetadataUpdate } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
@@ -63,6 +56,7 @@ export function ChatBuilder() {
 @Entry()
 @Component
 struct Chat {
+  @Provide('NavPathStack')
   pathStack: NavPathStack = new NavPathStack();
   // 常量定义
   private static readonly SIDEBAR_WIDTH = 300;
@@ -259,8 +253,6 @@ struct Chat {
                 .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
                 .onClick(() => {
                   this.showControlButton = !this.showControlButton
-                  // this.showSideBar = false
-                  // 动画-关闭侧边栏
                   animateTo({
                     duration: 500,
                     curve: Curve.FastOutSlowIn
@@ -270,7 +262,7 @@ struct Chat {
                 })
 
                 Text(this.currentConversation?.title || '聊天助手')
-                  .fontSize(18) //16
+                  .fontSize(18)
                   .fontWeight(FontWeight.Bold)
                   .layoutWeight(1)
                   .textAlign(TextAlign.JUSTIFY)
@@ -362,7 +354,7 @@ struct Chat {
                         .padding({ left: 20, right: 20 })
                         .margin({ top: 16 })
                         .onClick(() => {
-                          this.pathStack.pushPathByName("Settings", null);
+                          this.pathStack.pushPathByName("ModelSettings", null);
                           this.hideKeyboard();
                         })
                     }
@@ -450,6 +442,8 @@ struct Chat {
                         .size({ width: 24, height: 24 })
                         .fillColor(this.isAliyunActive ? Color.Gray : Color.Blue)
                     }
+                    .size({ width: 40, height: 40 })
+                    .backgroundColor(Color.Transparent)
                     .onChange((on: boolean) => {
                       this.enableWebSearch = on;
                       if (this.currentSettings) {
@@ -518,50 +512,6 @@ struct Chat {
             }
             .width('100%')
             .height('100%')
-
-            // 左缘手势区域：仅手机从左向右滑动打开侧栏
-            // 作为 Stack 的一个子节点，覆盖在主内容左侧边缘，避免与消息列表垂直滚动冲突
-            // if (!this.showSideBar) {
-            //   Column()
-            //     .width(this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs' ? 24 : 18) // 仅手机需要较宽触发区
-            //     .height('100%')
-            //     .width('100%')
-            //     .backgroundColor(Color.Transparent)
-            //     .align(Alignment.TopStart)
-            //     .position({ x: 0, y: 60 })
-            //     .zIndex(9)
-            //     .visibility((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') ? Visibility.Visible :
-            //       Visibility.Hidden)
-            //     .gesture(
-            //       PanGesture({
-            //         direction: PanDirection.Horizontal,
-            //         fingers: 1,
-            //         distance: 5 // 增加最小滑动距离，避免误触
-            //       })
-            //         .onActionStart(() => {
-            //           hilog.error(DOMAIN, TAG, '[GESTURE error] Open gesture started');
-            //         })
-            //         .onActionUpdate((event: PanUpdateEvent) => {
-            //           // 向右滑超过阈值，打开侧栏（仅手机）
-            //           if ((this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs') && !this.showSideBar) {
-            //             hilog.error(DOMAIN, TAG,
-            //               '[GESTURE error] Open gesture - offsetX=%{public}s, breakpoint=%{public}s, showSideBar=%{public}s',
-            //               String(event.offsetX), String(this.currentBreakPoint), String(this.showSideBar));
-            //             const openThreshold = 30; // 增加阈值，减少误触
-            //             if (event.offsetX > openThreshold) {
-            //               hilog.error(DOMAIN, TAG, '[GESTURE error] Opening sidebar - threshold reached');
-            //               animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
-            //                 this.showControlButton = false;
-            //                 this.showSideBar = true;
-            //               })
-            //             }
-            //           }
-            //         })
-            //         .onActionEnd(() => {
-            //           hilog.error(DOMAIN, TAG, '[GESTURE error] Open gesture ended');
-            //         })
-            //     )
-            // }
 
             // 仅在小屏（sm）渲染遮罩层；平板和桌面不显示遮罩，保留嵌入式布局
             // 遮罩层：仅在手机显示，平板和桌面不渲染
@@ -2131,29 +2081,34 @@ struct Chat {
 
   // 生成日期分组的key
   private getDateKey(date: Date): string {
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const conversationDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const yesterdayDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+    
+    // 计算时间差（天数）
+    const timeDiff = today.getTime() - conversationDate.getTime();
+    const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
 
-    if (conversationDate.getTime() === todayDate.getTime()) {
+    if (daysDiff === 0) {
       return 'today';
-    } else if (conversationDate.getTime() === yesterdayDate.getTime()) {
+    } else if (daysDiff === 1) {
       return 'yesterday';
+    } else if (daysDiff >= 2 && daysDiff <= 7) {
+      return 'this_week';
+    } else if (daysDiff >= 8 && daysDiff <= 30) {
+      return 'this_month';
     } else {
-      // 超过昨天的按月份分组
-      const currentYear = today.getFullYear();
+      // 超过30天的按年月分组
       const conversationYear = date.getFullYear();
+      const conversationMonth = date.getMonth() + 1;
+      const currentYear = now.getFullYear();
 
       if (conversationYear === currentYear) {
         // 今年的显示月份
-        return `${conversationYear}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        return `${conversationYear}-${conversationMonth.toString().padStart(2, '0')}`;
       } else {
-        // 往年的显示年份
-        return conversationYear.toString();
+        // 往年的显示年月
+        return `${conversationYear}-${conversationMonth.toString().padStart(2, '0')}`;
       }
     }
   }
@@ -2164,23 +2119,27 @@ struct Chat {
       return '今天';
     } else if (dateKey === 'yesterday') {
       return '昨天';
+    } else if (dateKey === 'this_week') {
+      return '一周内';
+    } else if (dateKey === 'this_month') {
+      return '30天内';
     } else if (dateKey.includes('-')) {
       // 月份格式 YYYY-MM
       const dateParts = dateKey.split('-');
-      const year = dateParts[0];
-      const month = dateParts[1];
+      const year = parseInt(dateParts[0]);
+      const month = parseInt(dateParts[1]);
       const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月',
         '七月', '八月', '九月', '十月', '十一月', '十二月'];
       const currentYear = new Date().getFullYear();
 
-      if (parseInt(year) === currentYear) {
-        return monthNames[parseInt(month) - 1];
+      if (year === currentYear) {
+        return monthNames[month - 1];
       } else {
-        return `${year}年${monthNames[parseInt(month) - 1]}`;
+        return `${year}年${monthNames[month - 1]}`;
       }
     } else {
-      // 年份格式
-      return `${dateKey}年`;
+      // 兜底处理
+      return dateKey;
     }
   }
 
