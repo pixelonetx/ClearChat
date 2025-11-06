@@ -103,6 +103,40 @@ export struct ModelSettingsDialog {
       .alignItems(HorizontalAlign.Start)
       .margin({ bottom: 24 })
 
+      // 支持联网搜索
+      Column() {
+        Row() {
+          Column() {
+            Text('支持内置联网搜索')
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .alignSelf(ItemAlign.Start)
+
+            Text('如启用，该模型在聊天时支持联网搜索功能')
+              .fontSize(12)
+              .fontColor('#888888')
+              .alignSelf(ItemAlign.Start)
+              .margin({ top: 4 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Toggle({ type: ToggleType.Switch, isOn: this.editableModel.supportsWebSearch })
+            .onChange((isOn: boolean) => {
+              this.editableModel.supportsWebSearch = isOn;
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding(12)
+      .backgroundColor('#f5f5f5')
+      .borderRadius(8)
+      .margin({ bottom: 24 })
+
       // 按钮区域
       Row() {
         Button('确定')
@@ -142,7 +176,7 @@ export struct ModelSettingsDialog {
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
   }
 
   private showToast(message: string) {

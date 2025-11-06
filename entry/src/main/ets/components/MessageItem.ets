@@ -223,7 +223,7 @@ export struct MessageItem {
         Row() {
           Column() {
             Text(this.messageContent)
-              .fontSize(14)
+              .fontSize($r('app.float.message_text_font_size')) //14
               .fontColor($r('app.color.text_color'))
               .maxLines(999)
               .textOverflow({ overflow: TextOverflow.None })
@@ -269,10 +269,16 @@ export struct MessageItem {
       Row() {
         Row() {
           Column() {
-            MarkdownRenderer({
-              content: this.message.content,
-              maxWidth: 'auto' // 自动继承父容器宽度限制
-            })
+            if (this.messageContent === '') {
+              LoadingProgress()
+                .width(24)
+                .height(24)
+            } else {
+              MarkdownRenderer({
+                content: this.message.content,
+                maxWidth: 'auto' // 自动继承父容器宽度限制
+              })
+            }
           }
           // .padding(16)
           .borderRadius(16)
@@ -346,43 +352,10 @@ export struct MessageItem {
     .alignItems(HorizontalAlign.Start)
   }
 
-  @Builder
-  LoadingMessage() {
-    Row() {
-      Column() {
-        Row({ space: 8 }) {
-          ForEach([1, 2, 3], (item: number) => {
-            Circle({ width: 8, height: 8 })
-              .animation({
-                duration: 600,
-                curve: Curve.EaseInOut,
-                iterations: -1,
-                playMode: PlayMode.Alternate,
-                delay: item * 200
-              })
-          })
-        }
-        .padding(16)
-      }
-      .borderRadius(16)
-      .constraintSize({
-        minWidth: 40,  // 减小最小宽度，适合短消息
-        minHeight: 36  // 保持最小高度，防止变成小圆形
-      })
-
-      Blank()
-    }
-    .width('100%')
-    .margin({ bottom: 10 })
-  }
-
   build() {
     Column() {
       if (this.isUserMessage) {
         this.UserMessage()
-      } else if (this.messageContent === '...') {
-        // 显示加载动画
-        this.LoadingMessage()
       } else {
         this.AssistantMessage()
       }

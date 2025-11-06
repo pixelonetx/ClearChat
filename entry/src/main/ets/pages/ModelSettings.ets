@@ -151,7 +151,7 @@ struct ModelSettings {
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
   }
 
   private cloneProvider(provider: AIProvider): AIProvider {

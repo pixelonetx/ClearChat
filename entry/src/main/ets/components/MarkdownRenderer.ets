@@ -365,7 +365,7 @@ export struct MarkdownRenderer {
             })
         } else {
           Span(segment.text)
-            .fontSize(14)
+            .fontSize($r('app.float.message_text_font_size')) //14
             .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
             .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
             .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
@@ -407,12 +407,12 @@ export struct MarkdownRenderer {
                     ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
                       if (segment.code) {
                         Span(segment.text)
-                          .fontSize(12)
+                          .fontSize(14) //12
                           .fontColor('#D63384')
                           .fontFamily('monospace')
                       } else if (segment.isLink) {
                         Span(segment.text)
-                          .fontSize(12)
+                          .fontSize(14) //12
                           .fontColor('#007AFF')
                           .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
                           .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
@@ -425,7 +425,7 @@ export struct MarkdownRenderer {
                           })
                       } else {
                         Span(segment.text)
-                          .fontSize(12)
+                          .fontSize(14) //12
 
                           .fontWeight(segment.bold ? FontWeight.Bold : (rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal))
                           .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)

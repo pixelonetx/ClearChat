@@ -131,13 +131,16 @@ export class AIModel {
   displayName: string;
   maxTokens: number;
   temperature: number;
+  /** 该模型是否支持内置联网搜索功能（如阿里云通义千问） */
+  supportsWebSearch: boolean;
 
-  constructor(id: string, name: string, displayName: string, maxTokens: number = 4096, temperature: number = 0.7) {
+  constructor(id: string, name: string, displayName: string, maxTokens: number = 4096, temperature: number = 0.7, supportsWebSearch: boolean = false) {
     this.id = id;
     this.name = name;
     this.displayName = displayName;
     this.maxTokens = maxTokens;
     this.temperature = temperature;
+    this.supportsWebSearch = supportsWebSearch;
   }
 }
 

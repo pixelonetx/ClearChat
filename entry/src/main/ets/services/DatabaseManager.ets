@@ -36,6 +36,7 @@ interface ProviderModelRecord {
   displayName?: string;
   maxTokens?: number;
   temperature?: number;
+  supportsWebSearch?: boolean;
 }
 
 interface ProviderRecord {
@@ -831,6 +832,7 @@ export class DatabaseManager {
     const displayNameSource = raw.displayName;
     const maxTokensSource = raw.maxTokens;
     const temperatureSource = raw.temperature;
+    const supportsWebSearchSource = raw.supportsWebSearch;
 
     const id = typeof idSource === 'string' && idSource.trim().length > 0
       ? idSource
@@ -851,7 +853,9 @@ export class DatabaseManager {
     const temperatureNumber = Number(temperatureSource);
     const temperature = Number.isFinite(temperatureNumber) ? temperatureNumber : 0.7;
 
-    return new AIModel(id, name, displayName, maxTokens, temperature);
+    const supportsWebSearch = Boolean(supportsWebSearchSource);
+
+    return new AIModel(id, name, displayName, maxTokens, temperature, supportsWebSearch);
   }
 
   private hydrateProvider(raw: ProviderRecord | null | undefined): AIProvider | null {

@@ -3,7 +3,6 @@
     "pages/Index",
     "pages/Chat",
     "pages/Settings",
-    "pages/ModelSettings",
-    "pages/About"
+    "pages/ModelSettings"
   ]
 }

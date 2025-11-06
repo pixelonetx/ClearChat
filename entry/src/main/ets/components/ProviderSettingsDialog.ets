@@ -12,18 +12,18 @@ export struct ProviderSettingsDialog {
   @State private editableProvider: AIProvider = new AIProvider('', '', '');
 
   // 预定义的模型列表
-  // model.id, model.name, model.displayName, model.maxTokens, model.temperature
+  // model.id, model.name, model.displayName, model.maxTokens, model.temperature, supportsWebSearch
   private getPredefinedModels(providerType: string): AIModel[] {
     if (providerType === 'deepseek') {
       return [
-        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek V3.1', 4000, 0.7),
-        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek R1', 32000, 0.7)
+        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek V3.1', 4000, 0.7, false),
+        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek R1', 32000, 0.7, false)
       ];
     } else if (providerType === 'aliyun') {
       return [
-          new AIModel('qwen3-max', 'qwen3-max', 'Qwen3-Max', 258048, 0.7),
-        new AIModel('qwen-plus', 'qwen-plus', 'Qwen-Plus', 997952, 0.7),
-        new AIModel('qwen-flash', 'qwen-flash', 'Qwen-Flash', 997952, 0.7),
+        new AIModel('qwen3-max', 'qwen3-max', 'Qwen3-Max', 258048, 0.7, true),
+        new AIModel('qwen-plus', 'qwen-plus', 'Qwen-Plus', 997952, 0.7, true),
+        new AIModel('qwen-flash', 'qwen-flash', 'Qwen-Flash', 997952, 0.7, true),
       ];
     } else {
       return [];
@@ -227,7 +227,7 @@ export struct ProviderSettingsDialog {
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature);
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
   }
 
   private showToast(message: string) {
