@@ -1,5 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { Prompt } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -20,7 +21,7 @@ export class LinkActionHelper {
    */
   static showLinkActionSheet(url: string, context: common.UIAbilityContext): void {
     if (!url) {
-      promptAction.showToast({
+      Prompt.showToast({
         message: '无效的链接地址',
         duration: 2000
       });
@@ -67,7 +68,7 @@ export class LinkActionHelper {
 
     BrowserHelper.openUrl(context, normalizedUrl).then((success: boolean) => {
       if (!success) {
-        promptAction.showToast({
+        Prompt.showToast({
           message: '无法打开浏览器',
           duration: 2000
         });
@@ -75,7 +76,7 @@ export class LinkActionHelper {
     }).catch(() => {
       // 简化错误处理
       hilog.error(DOMAIN, TAG, 'Failed to open browser');
-      promptAction.showToast({
+      Prompt.showToast({
         message: '打开浏览器失败',
         duration: 2000
       });
@@ -93,14 +94,14 @@ export class LinkActionHelper {
       const systemPasteboard = pasteboard.getSystemPasteboard();
 
       await systemPasteboard.setData(pasteData);
-      promptAction.showToast({
+      Prompt.showToast({
         message: '链接已复制到剪贴板',
         duration: 2000
       });
     } catch (error) {
       // 简化错误处理
       hilog.error(DOMAIN, TAG, 'Copy link exception: %{public}s', JSON.stringify(error));
-      promptAction.showToast({
+      Prompt.showToast({
         message: '复制链接失败',
         duration: 2000
       });

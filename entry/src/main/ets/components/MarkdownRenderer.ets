@@ -3,6 +3,7 @@ import { MarkdownParser, MarkdownBlock, MarkdownBlockType, TextSegment, TableCol
 import { CodeBlock } from './CodeBlock';
 import { LinkActionHelper } from './LinkActionSheet';
 import { WebBrowserParam } from './WebViewBrowser';
+import { MarkdownStyle } from './MarkdownStyle';
 
 /**
  * 表格渲染信息接口
@@ -155,6 +156,51 @@ export struct MarkdownRenderer {
   }
 
   /**
+   * 渲染表格单元格的文本段落（支持表头加粗）
+   * @param segment 文本段落对象
+   * @param fontSize 字体大小
+   * @param isHeader 是否为表头
+   */
+  @Builder
+  renderTableCellSegmentSpan(
+    segment: TextSegment,
+    fontSize: number = MarkdownStyle.TABLE_CELL_FONT_SIZE,
+    isHeader: boolean = false
+  ) {
+    if (segment.code) {
+      // 代码段落：固定宽度字体，特殊颜色
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontColor(MarkdownStyle.CODE_COLOR)
+        .fontFamily(MarkdownStyle.FONT_FAMILY_MONOSPACE)
+        .fontWeight(isHeader || segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+    } else if (segment.isLink) {
+      // 链接段落：蓝色、下划线、可点击
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontColor(MarkdownStyle.LINK_COLOR)
+        .fontWeight(isHeader || segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration({
+          type: TextDecorationType.Underline,
+          color: MarkdownStyle.LINK_UNDERLINE_COLOR
+        })
+        .onClick(() => {
+          this.showLinkActionSheet(segment.url);
+        })
+    } else {
+      // 普通文本段落
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontWeight(isHeader || segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+    }
+  }
+
+  /**
    * 渲染Markdown块
    * @param block 要渲染的Markdown块
    */
@@ -178,41 +224,66 @@ export struct MarkdownRenderer {
   }
 
   /**
-   * 渲染标题
-   * @param block 要渲染的标题块
+   * 提取通用的文本段落渲染方法
+   * 将复杂的条件判断和样式应用集中在此方法，减少代码重复
+   * @param segment 文本段落对象
+   * @param fontSize 字体大小（可选，不传则使用默认值）
+   */
+  @Builder
+  renderTextSegmentSpan(
+    segment: TextSegment,
+    fontSize: number = MarkdownStyle.TEXT_FONT_SIZE
+  ) {
+    if (segment.code) {
+      // 代码段落：显示为固定宽度字体，特殊颜色
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontColor(MarkdownStyle.CODE_COLOR)
+        .fontFamily(MarkdownStyle.FONT_FAMILY_MONOSPACE)
+        .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+    } else if (segment.isLink) {
+      // 链接段落：蓝色、下划线、可点击
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontColor(MarkdownStyle.LINK_COLOR)
+        .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration({
+          type: TextDecorationType.Underline,
+          color: MarkdownStyle.LINK_UNDERLINE_COLOR
+        })
+        .onClick(() => {
+          this.showLinkActionSheet(segment.url);
+        })
+    } else {
+      // 普通文本段落
+      Span(segment.text)
+        .fontSize(fontSize)
+        .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+        .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
+    }
+  }
+
+  /**
+   * 渲染Markdown块
+   * @param block 要渲染的Markdown块
    */
   @Builder
   renderHeading(block: MarkdownBlock) {
     Text() {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
-        if (segment.isLink) {
-          // 渲染链接
-          Span(segment.text)
-            .fontSize(this.getHeadingSize(block.level || 1))
-            .fontColor('#007AFF')
-            .fontWeight(FontWeight.Bold) // 标题默认加粗
-            .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-            .decoration({
-              type: TextDecorationType.Underline,
-              color: '#007AFF'
-            })
-            .onClick(() => {
-              // 显示链接操作弹窗
-              this.showLinkActionSheet(segment.url);
-            })
-        } else {
-          Span(segment.text)
-            .fontSize(this.getHeadingSize(block.level || 1))
-            .fontWeight(FontWeight.Bold) // 标题默认加粗
-            .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-            .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
-        }
+        // ✅ 简化的标题渲染：集中使用 renderTextSegmentSpan
+        this.renderTextSegmentSpan(segment, MarkdownStyle.getHeadingSize(block.level || 1))
       })
     }
-    .margin({ top: 16, bottom: 8 })
-    .maxLines(999)
+    .margin({ top: MarkdownStyle.HEADING_MARGIN_TOP, bottom: MarkdownStyle.HEADING_MARGIN_BOTTOM })
+    .maxLines(MarkdownStyle.MAX_LINES)
     .textOverflow({ overflow: TextOverflow.None })
-    .wordBreak(WordBreak.BREAK_ALL)
+    .wordBreak(MarkdownStyle.WORD_BREAK)
+    .fontWeight(FontWeight.Bold) // 标题默认加粗
   }
 
   /**
@@ -229,7 +300,7 @@ export struct MarkdownRenderer {
         language: block.language || 'text'
       })
     }
-    .margin({ top: 8, bottom: 8 }) // 为代码块添加垂直间距
+    .margin({ top: MarkdownStyle.CODE_BLOCK_MARGIN_TOP, bottom: MarkdownStyle.CODE_BLOCK_MARGIN_BOTTOM })
   }
 
   /**
@@ -239,52 +310,24 @@ export struct MarkdownRenderer {
   @Builder
   renderQuote(block: MarkdownBlock) {
     Row() {
-      // Divider()
-      //   .vertical(true)
-      //   .width(4)
-      //   .color('#007AFF')
-
-      Column({ space: 4 }) {
+      Column({ space: MarkdownStyle.QUOTE_PARAGRAPH_SPACING }) {
+        // ✅ 简化的引用渲染：集中使用 renderTextSegmentSpan，嵌套 ForEach 已优化
         ForEach(this.getQuoteParagraphs(block.content), (paragraph: string, paraIndex: number) => {
           Text() {
             ForEach(this.parser.parseTextFormatting(paragraph), (segment: TextSegment, index: number) => {
-              if (segment.code) {
-                Span(segment.text)
-                  .fontSize(14)
-                  .fontColor('#D63384')
-                  .fontFamily('monospace')
-                  .fontStyle(FontStyle.Italic)
-              } else if (segment.isLink) {
-                Span(segment.text)
-                  .fontSize(14)
-                  .fontColor('#007AFF')
-                  .fontStyle(FontStyle.Italic)
-                  .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-                  .decoration({
-                    type: TextDecorationType.Underline,
-                    color: '#007AFF'
-                  })
-                  .onClick(() => {
-                    this.showLinkActionSheet(segment.url);
-                  })
-              } else {
-                Span(segment.text)
-                  .fontSize(14)
-                  .fontStyle(FontStyle.Italic)
-                  .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-                  .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
-              }
+              this.renderTextSegmentSpan(segment, MarkdownStyle.TEXT_FONT_SIZE)
             })
           }
-          .maxLines(999)
+          .maxLines(MarkdownStyle.MAX_LINES)
           .textOverflow({ overflow: TextOverflow.None })
-          .wordBreak(WordBreak.BREAK_ALL)
+          .wordBreak(MarkdownStyle.WORD_BREAK)
+          .fontStyle(FontStyle.Italic) // 引用块整体斜体
         })
       }
-      .padding({ left: 12 })
+      .padding({ left: MarkdownStyle.QUOTE_PADDING_LEFT })
       .alignItems(HorizontalAlign.Start)
     }
-    .margin({ top: 8, bottom: 8 })
+    .margin({ top: MarkdownStyle.QUOTE_MARGIN_TOP, bottom: MarkdownStyle.QUOTE_MARGIN_BOTTOM })
     .alignItems(VerticalAlign.Top)
   }
 
@@ -299,7 +342,7 @@ export struct MarkdownRenderer {
         ForEach(block.items ?? [], (item: string, index: number) => {
           Row() {
             Text(block.ordered ? `${(block.startNumber ?? 1) + index}.` : '•')
-              .fontSize(14)
+              .fontSize(MarkdownStyle.TEXT_FONT_SIZE)
               .width(block.ordered ? 28 : 16)
               .textAlign(TextAlign.End)
               .margin({ right: 8 })
@@ -313,11 +356,11 @@ export struct MarkdownRenderer {
             .alignItems(HorizontalAlign.Start)
           }
           .alignItems(VerticalAlign.Top)
-          .margin({ bottom: 4 })
+          .margin({ bottom: MarkdownStyle.LIST_ITEM_MARGIN_BOTTOM })
         })
       }
     }
-    .margin({ top: 8, bottom: 8 })
+    .margin({ top: MarkdownStyle.LIST_MARGIN_TOP, bottom: MarkdownStyle.LIST_MARGIN_BOTTOM })
     .alignItems(HorizontalAlign.Start)
   }
 
@@ -342,39 +385,13 @@ export struct MarkdownRenderer {
   renderText(block: MarkdownBlock) {
     Text() {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
-        if (segment.code) {
-          // 行内代码需要特殊处理，暂时显示为普通文本
-          Span(segment.text)
-            .fontSize(14)
-            .fontColor('#007AFF') // '#D63384'
-            .fontFamily('monospace')
-        } else if (segment.isLink) {
-          // 渲染链接
-          Span(segment.text)
-            .fontSize(14)
-            .fontColor('#007AFF')
-            .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-            .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-            .decoration({
-              type: TextDecorationType.Underline,
-              color: '#007AFF'
-            })
-            .onClick(() => {
-              // 显示链接操作弹窗
-              this.showLinkActionSheet(segment.url);
-            })
-        } else {
-          Span(segment.text)
-            .fontSize($r('app.float.message_text_font_size')) //14
-            .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-            .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-            .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
-        }
+        // ✅ 简化的文本渲染：集中使用 renderTextSegmentSpan，条件判断逻辑已提取
+        this.renderTextSegmentSpan(segment, MarkdownStyle.TEXT_FONT_SIZE)
       })
     }
-    .maxLines(999)
+    .maxLines(MarkdownStyle.MAX_LINES)
     .textOverflow({ overflow: TextOverflow.None })
-    .wordBreak(WordBreak.BREAK_ALL)
+    .wordBreak(MarkdownStyle.WORD_BREAK)
     .copyOption(CopyOptions.InApp)
     .constraintSize({ maxWidth: '100%' })
   }
@@ -385,9 +402,12 @@ export struct MarkdownRenderer {
   @Builder
   renderHorizontalRule() {
     Divider()
-      .height(2)
+      .height(MarkdownStyle.HORIZONTAL_RULE_HEIGHT)
       .color($r('app.color.text_secondary'))
-      .margin({ top: 16, bottom: 16 })
+      .margin({
+        top: MarkdownStyle.HORIZONTAL_RULE_MARGIN_TOP,
+        bottom: MarkdownStyle.HORIZONTAL_RULE_MARGIN_BOTTOM
+      })
   }
 
   /**
@@ -404,33 +424,9 @@ export struct MarkdownRenderer {
               ForEach(row, (cell: string, cellIndex: number) => {
                 Column() {
                   Text() {
+                    // ✅ 表格单元格使用专用的 renderTableCellSegmentSpan，支持表头加粗
                     ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
-                      if (segment.code) {
-                        Span(segment.text)
-                          .fontSize(14) //12
-                          .fontColor('#D63384')
-                          .fontFamily('monospace')
-                      } else if (segment.isLink) {
-                        Span(segment.text)
-                          .fontSize(14) //12
-                          .fontColor('#007AFF')
-                          .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
-                          .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-                          .decoration({
-                            type: TextDecorationType.Underline,
-                            color: '#007AFF'
-                          })
-                          .onClick(() => {
-                            this.showLinkActionSheet(segment.url);
-                          })
-                      } else {
-                        Span(segment.text)
-                          .fontSize(14) //12
-
-                          .fontWeight(segment.bold ? FontWeight.Bold : (rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal))
-                          .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
-                          .decoration(segment.strikethrough ? { type: TextDecorationType.LineThrough } : { type: TextDecorationType.None })
-                      }
+                      this.renderTableCellSegmentSpan(segment, MarkdownStyle.TABLE_CELL_FONT_SIZE, rowIndex === 0)
                     })
 
                     // 空内容占位，保证空白单元格有最小高度
@@ -439,13 +435,17 @@ export struct MarkdownRenderer {
                         .fontSize(12)
                     }
                   }
-                  .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+                  .padding({
+                    left: MarkdownStyle.TABLE_CELL_PADDING_LEFT,
+                    right: MarkdownStyle.TABLE_CELL_PADDING_RIGHT,
+                    top: MarkdownStyle.TABLE_CELL_PADDING_TOP,
+                    bottom: MarkdownStyle.TABLE_CELL_PADDING_BOTTOM
+                  })
                   .textAlign(this.getTableCellTextAlign(block, cellIndex))
                   .wordBreak(WordBreak.BREAK_WORD)
                 }
                 .constraintSize({ minWidth: this.getTableCellWidth(block, cellIndex), maxWidth: this.getTableCellWidth(block, cellIndex) })
                 .alignSelf(ItemAlign.Stretch)
-
                 .border({
                   width: 1,
                   color: $r('app.color.text_secondary')
@@ -456,10 +456,10 @@ export struct MarkdownRenderer {
             }
           })
         }
-        .margin({ top: 8, bottom: 8 })
+        .margin({ top: MarkdownStyle.TABLE_MARGIN_TOP, bottom: MarkdownStyle.TABLE_MARGIN_BOTTOM })
         .border({
           width: 1,
-          color: $r('app.color.text_secondary'), // '#E0E0E0'
+          color: $r('app.color.text_secondary'),
           radius: 4
         })
         .clip(true)
@@ -561,28 +561,33 @@ export struct MarkdownRenderer {
    */
   private getTableCellWidth(block: MarkdownBlock, columnIndex: number): number {
     const tableColumns: TableColumn[] = block.tableColumns || [];
-    const totalWidth: number = Math.max(tableColumns.length, 1) * 160;
-    const minColumnWidth: number = 120;
+    if (tableColumns.length === 0) {
+      return 120; // 默认最小宽度
+    }
+
+    // 根据列数动态调整总宽度和最小列宽
+    const columnCount = tableColumns.length;
+    let totalWidth: number;
+    let minColumnWidth: number;
+
+    if (columnCount <= 2) {
+      // 少列：每列可以更宽
+      totalWidth = columnCount * 200;
+      minColumnWidth = 150;
+    } else if (columnCount <= 4) {
+      // 中等列数：适中宽度
+      totalWidth = columnCount * 160;
+      minColumnWidth = 120;
+    } else {
+      // 多列：较窄但保证可读性
+      totalWidth = columnCount * 140;
+      minColumnWidth = 100;
+    }
+
     const columnWidths: number[] = this.parser.getTableColumnWidths(tableColumns, totalWidth, minColumnWidth);
     return columnWidths[columnIndex] || minColumnWidth;
   }
 
-  /**
-   * 获取标题字体大小
-   * @param level 标题级别
-   * @returns 字体大小
-   */
-  private getHeadingSize(level: number): number {
-    switch (level) {
-      case 1: return 24;
-      case 2: return 20;
-      case 3: return 18;
-      case 4: return 16;
-      case 5: return 14;
-      case 6: return 12;
-      default: return 16;
-    }
-  }
 
   // 处理链接点击：优先内置浏览器，其次弹出操作菜单
   private showLinkActionSheet(url: string | undefined) {

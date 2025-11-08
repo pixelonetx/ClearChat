@@ -171,19 +171,19 @@ export class MarkdownParser {
         continue;
       }
 
+      // 解析表格（放在列表之前，因为表格有更明确的特征）
+      if (this.isTableStart(lines, i)) {
+        const tableBlock = this.parseTable(lines, i);
+        blocks.push(tableBlock.block);
+        i = tableBlock.nextIndex;
+        continue;
+      }
+
       // 解析列表
       if (this.isListLine(line)) {
         const listBlock = this.parseList(lines, i);
         blocks.push(listBlock.block);
         i = listBlock.nextIndex;
-        continue;
-      }
-
-      // 解析表格
-      if (this.isTableStart(lines, i)) {
-        const tableBlock = this.parseTable(lines, i);
-        blocks.push(tableBlock.block);
-        i = tableBlock.nextIndex;
         continue;
       }
 

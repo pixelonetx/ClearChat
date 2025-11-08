@@ -1,4 +1,4 @@
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { AIModel } from '../services/DataModels';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -181,7 +181,7 @@ export struct ModelSettingsDialog {
 
   private showToast(message: string) {
     try {
-      promptAction.showToast({ message });
+      Prompt.showToast({ message });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(error));
     }

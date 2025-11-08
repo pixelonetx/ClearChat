@@ -1,5 +1,5 @@
 import { pasteboard } from '@kit.BasicServicesKit';
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN = 0x0000;
@@ -16,10 +16,10 @@ export struct CodeBlock {
       const pasteboardData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.content);
       const systemPasteboard = pasteboard.getSystemPasteboard();
       await systemPasteboard.setData(pasteboardData);
-      promptAction.showToast({ message: '代码已复制到剪贴板' });
+      Prompt.showToast({ message: '代码已复制到剪贴板' });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to copy to clipboard: %{public}s', String(error));
-      promptAction.showToast({ message: '复制失败' });
+      Prompt.showToast({ message: '复制失败' });
     }
   }
 
