@@ -1,6 +1,6 @@
 import webview from '@ohos.web.webview';
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BrowserHelper } from '../services/BrowserHelper';
 
@@ -99,12 +99,12 @@ export struct WebViewBrowser {
       const ctx = getContext(this) as common.UIAbilityContext;
       const success = await BrowserHelper.openUrl(ctx, this.currentUrl);
       if (!success) {
-        promptAction.showToast({ message: '无法打开系统浏览器', duration: 2000 });
+        Prompt.showToast({ message: '无法打开系统浏览器', duration: 2000 });
       }
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'openInSystemBrowser error: %{public}s', String(err));
       try {
-        promptAction.showToast({ message: '打开失败', duration: 2000 });
+        Prompt.showToast({ message: '打开失败', duration: 2000 });
       } catch (toastErr) {
         hilog.error(DOMAIN, TAG, 'showToast error: %{public}s', String(toastErr));
       }

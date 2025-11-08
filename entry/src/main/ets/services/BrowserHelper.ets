@@ -1,6 +1,6 @@
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 const DOMAIN = 0x0000;
 const TAG = 'BrowserHelper';
@@ -24,7 +24,7 @@ export class BrowserHelper {
       // 验证URL格式
       if (!normalizedUrl || !BrowserHelper.isValidUrl(normalizedUrl)) {
         try {
-          promptAction.showToast({
+          Prompt.showToast({
             message: '无效的网址格式',
             duration: 2000
           });
@@ -48,7 +48,7 @@ export class BrowserHelper {
       hilog.info(DOMAIN, TAG, 'Successfully started browser with URL: %{public}s', normalizedUrl);
 
       try {
-        promptAction.showToast({
+        Prompt.showToast({
           message: '正在启动浏览器...',
           duration: 1500
         });
@@ -63,7 +63,7 @@ export class BrowserHelper {
       hilog.error(DOMAIN, TAG, 'Failed to start browser. Code: %{public}d, message: %{public}s', error.code, error.message);
 
       try {
-        promptAction.showToast({
+        Prompt.showToast({
           message: '无法打开浏览器',
           duration: 2000
         });

@@ -1,14 +1,15 @@
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ChatMessage, AppSettings, Citation, ChatMessageMetadataUpdate } from '../services/DataModels';
+import { ChatMessage, AppSettings, Citation, ChatMessageMetadataUpdate, StreamMetadata } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
-import { NetworkManager } from '../services/NetworkManager';
+import { NetworkManagerV2 } from '../services/NetworkManagerV2';
+import { StreamEventEmitter, StreamEventType, EventPayload } from '../services/StreamEventEmitter';
 import { TitleGenerationService } from '../services/TitleGenerationService';
 import { ClipboardManager } from '../components/ClipboardManager';
 import { BrowserHelper } from '../services/BrowserHelper';
@@ -25,6 +26,12 @@ const TAG = 'Chat';
 interface ModelInfo {
   modelName: string;
   providerName: string;
+}
+
+// 定义流式消息初始化结果接口
+interface StreamingMessageResult {
+  index: number;
+  id: number;
 }
 
 interface MaybeStringifiable {
@@ -78,9 +85,14 @@ struct Chat {
   @State customPopup: boolean = false;
   // 数据状态
   @State messages: ChatMessage[] = [];
-  @State conversations: Conversation[] = [];
+  @State
+  @Watch('updateGroupedConversations')
+  conversations: Conversation[] = [];
   @State currentConversation: Conversation | null = null;
   @State inputText: string = '';
+  // 缓存已分组的对话数据，避免重复计算
+  @State private cachedGroupedConversations: Record<string, Conversation[]> | null = null;
+  @State private cachedGroupedKeys: string[] = [];
   // 应用状态
   @State isLoading: boolean = false;
   @State isGenerating: boolean = false; // 新增：跟踪是否正在生成内容
@@ -91,7 +103,7 @@ struct Chat {
   @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
   @State currentModelSupportsWebSearchFlag: boolean = false; // 当前模型是否支持联网搜索的UI驱动标志
   private databaseManager = DatabaseManager.getInstance();
-  private networkManager = NetworkManager.getInstance();
+  private networkManager = NetworkManagerV2.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
   private scroller: Scroller = new Scroller();
   private currentSettings: AppSettings | null = null;
@@ -610,7 +622,7 @@ struct Chat {
     const options = new ToastOptions(message, duration);
 
     try {
-      promptAction.showToast(options);
+      Prompt.showToast(options);
     } catch (toastError) {
       hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(toastError));
     }
@@ -1334,366 +1346,515 @@ struct Chat {
     return (totalUserChars + totalAiChars) >= 25;
   }
 
-  async sendMessage() {
-    const trimmedInput = this.inputText.trim();
-    if (!trimmedInput || this.isLoading || this.isGenerating) {
-      return;
+  // ✅ 分离职责 - 消息验证和初始化
+  /**
+   * 验证和准备消息
+   * @param text 原始输入文本
+   * @returns 准备好的消息对象，或null表示验证失败
+   */
+  private validateAndPrepareMessage(text: string): ChatMessage | null {
+    const trimmedInput = text.trim();
+    if (!trimmedInput) {
+      return null;
     }
 
     // 输入验证
     if (trimmedInput.length > 10000) {
       this.showToast('消息内容不能超过10000个字符');
-      return;
+      return null;
     }
 
     // 检查是否包含潜在的恶意内容
     if (this.containsSuspiciousContent(trimmedInput)) {
       this.showToast('消息内容包含不当内容，请修改后重试');
-      return;
+      return null;
     }
 
-    await this.waitForLatestSettings('sendMessage');
-
-    // 发送消息后自动收起键盘
-    this.hideKeyboard();
-    this.scrollToBottom();
-
+    // 检查设置
     if (!this.hasSettings) {
       this.showToast('请先配置API设置');
       this.pathStack.pushPathByName("Settings", null, false);
-      this.hideKeyboard();
-      return;
+      return null;
     }
 
     if (!this.currentSettings) {
       this.showToast('设置加载失败，请重新配置');
-      return;
+      return null;
     }
 
-    // 如果没有当前对话，创建一个新对话
-    if (!this.currentConversation) {
-      hilog.error(DOMAIN, TAG, 'No current conversation found, creating new one...');
-      try {
-        const newConversation = await this.databaseManager.createConversation('新对话');
-        this.currentConversation = newConversation;
-        await this.loadConversations();
-        hilog.error(DOMAIN, TAG, 'Auto-created conversation ID=%{public}s', String(newConversation.id));
+    return new ChatMessage(trimmedInput, 'user', {
+      conversationId: this.currentConversation?.id || 'default'
+    });
+  }
 
-        // 等待一小段时间确保对话创建完全完成
-        await new Promise<void>(resolve => setTimeout(resolve, 100));
-      } catch (error) {
-        hilog.error(DOMAIN, TAG, 'Failed to create conversation for message: %{public}s', String(error));
-        this.showToast('创建对话失败');
-        return;
-      }
-    }
-
-    // 验证当前对话是否有效
-    if (!this.currentConversation || !this.currentConversation.id) {
-      hilog.error(DOMAIN, TAG, 'Invalid current conversation: %{public}s', String(this.currentConversation));
-      this.showToast('对话状态异常，请重新创建对话');
-      return;
-    }
-
-    hilog.error(DOMAIN, TAG, 'Sending message in conversation ID=%{public}s', String(this.currentConversation.id));
-
-    // 锁定当前对话ID，防止在等待AI回复期间切换对话导致回复错乱
-    const targetConversationId = this.currentConversation.id;
-    this.inputText = trimmedInput;
-    const userMessage = new ChatMessage(trimmedInput, 'user', {
-      conversationId: targetConversationId
+  // ✅ 分离职责 - 初始化流式消息
+  /**
+   * 初始化流式AI消息并保存到数据库
+   * @param userMessage 用户消息
+   * @param conversationId 对话ID
+   * @returns 流式消息索引和数据库ID
+   */
+  private async initializeStreamingMessage(
+    userMessage: ChatMessage,
+    conversationId: string
+  ): Promise<StreamingMessageResult> {
+    const modelInfo = this.getCurrentModelInfo();
+    const streamingMessage = new ChatMessage('', 'assistant', {
+      conversationId: conversationId,
+      modelName: modelInfo.modelName,
+      providerName: modelInfo.providerName
     });
 
-    let userMessageIndex: number = -1;
-    let userMessageId: number | undefined;
-    let streamingMessageIndex: number = -1;
-    let streamingMessageId: number | undefined;
+    const index = this.appendMessage(streamingMessage);
+    const id = await this.databaseManager.insertChatMessage(streamingMessage);
 
-    let failureHandled = false;
-    const handleFailure = async (errorParam: Error): Promise<void> => {
-      if (failureHandled) {
+    this.replaceMessageAt(index, (msg) => {
+      msg.id = id;
+    });
+
+    const result: StreamingMessageResult = { index: index, id: id };
+    return result;
+  }
+
+  // ✅ 分离职责 - 追加数据块
+  /**
+   * 将流式数据块追加到消息中
+   * @param messageIndex 消息索引
+   * @param chunk 数据块
+   * @param conversationId 对话ID
+   */
+  private appendChunkToMessage(
+    messageIndex: number,
+    chunk: string,
+    conversationId: string
+  ): void {
+    if (this.currentConversation?.id !== conversationId) {
+      return;
+    }
+
+    if (messageIndex < this.messages.length) {
+      this.replaceMessageAt(messageIndex, (msg) => {
+        msg.content += chunk;
+      });
+    }
+  }
+
+  // ✅ 分离职责 - 处理流式完成
+  /**
+   * 处理流式请求完成，重置UI状态
+   */
+  private handleStreamComplete(): void {
+    this.isLoading = false;
+    this.isGenerating = false;
+    this.currentAbortController = null;
+    this.userAbortedGeneration = false;
+  }
+
+  // ✅ 分离职责 - 持久化消息
+  /**
+   * 异步持久化流式消息到数据库
+   * @param messageIndex 消息索引
+   * @param conversationId 对话ID
+   */
+  private async persistStreamedMessage(
+    messageIndex: number,
+    conversationId: string
+  ): Promise<void> {
+    if (messageIndex >= this.messages.length) {
+      return;
+    }
+
+    const message = this.messages[messageIndex];
+    if (!message.id) {
+      return;
+    }
+
+    try {
+      await this.databaseManager.updateChatMessage(message.id, message.content);
+
+      if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
+        await this.generateConversationTitle();
+      }
+
+      await this.databaseManager.updateConversationMessageCount(conversationId);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Error persisting message: %{public}s', String(error));
+    }
+  }
+
+  // ✅ 事件驱动处理 - 设置流式事件处理
+  /**
+   * 为流式请求设置事件处理（替代回调地狱）
+   * @param emitter 事件发射器
+   * @param streamingMessageIndex 流式消息索引
+   * @param conversationId 对话ID
+   */
+  private setupStreamEventHandlers(
+    emitter: StreamEventEmitter,
+    streamingMessageIndex: number,
+    conversationId: string
+  ): void {
+    // 监听数据事件
+    emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
+      const chunk = payload as string;
+      this.appendChunkToMessage(streamingMessageIndex, chunk, conversationId);
+    });
+
+    // 监听元数据事件
+    emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
+      const meta = payload as StreamMetadata;
+      this.updateStreamingMessageMetadata(streamingMessageIndex, meta, conversationId);
+    });
+
+    // 监听完成事件
+    emitter.once(StreamEventType.COMPLETE, () => {
+      this.handleStreamComplete();
+      // 异步持久化，不阻塞UI状态更新
+      this.persistStreamedMessage(streamingMessageIndex, conversationId)
+        .catch((err: Error) => {
+          hilog.error(DOMAIN, TAG, 'Failed to persist message: %{public}s', String(err));
+        });
+    });
+
+    // 监听错误事件
+    emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
+      const error = payload as Error;
+      this.handleStreamError(streamingMessageIndex, error);
+    });
+
+    // 监听警告事件（可选）
+    emitter.on(StreamEventType.WARNING, (payload: EventPayload) => {
+      const warning = payload as string;
+      hilog.warn(DOMAIN, TAG, 'Stream warning: %{public}s', warning);
+    });
+  }
+
+  // ✅ 事件驱动处理 - 设置重新生成事件处理
+  /**
+   * 为重新生成流式请求设置事件处理
+   * @param emitter 事件发射器
+   * @param streamingMessageIndex 重新生成消息的索引
+   * @param conversationId 对话ID
+   */
+  private setupRegenrationStreamEventHandlers(
+    emitter: StreamEventEmitter,
+    streamingMessageIndex: number,
+    conversationId: string
+  ): void {
+    // 监听数据事件 - 更新重新生成的消息内容
+    emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
+      const chunk = payload as string;
+      if (!this.currentConversation || this.currentConversation.id !== conversationId) {
         return;
       }
-      failureHandled = true;
+      if (streamingMessageIndex >= this.messages.length || !this.messages[streamingMessageIndex]) {
+        return;
+      }
 
-      const toastMessage = this.getFriendlySendErrorMessage(errorParam);
-      const assistantErrorContent = toastMessage.startsWith('发送失败') ? toastMessage : `发送失败：${toastMessage}`;
+      this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+        regeneratedMessage.content += chunk;
+      });
 
-      hilog.error(DOMAIN, TAG, 'Message send failed: %{public}s', String(errorParam));
+      hilog.error(DOMAIN, TAG, 'Regenerated content length=%{public}d',
+        this.messages[streamingMessageIndex].content.length);
+    });
 
-      if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-        let effectiveIndex = streamingMessageIndex;
-        if (effectiveIndex < 0 || effectiveIndex >= this.messages.length) {
-          const fallbackMessage = new ChatMessage('', 'assistant', {
-            conversationId: targetConversationId
-          });
-          effectiveIndex = this.appendMessage(fallbackMessage);
-          streamingMessageIndex = effectiveIndex;
+    // 监听元数据事件 - 更新重新生成消息的元数据
+    emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
+      const meta = payload as StreamMetadata;
+      if (!this.currentConversation || this.currentConversation.id !== conversationId) {
+        return;
+      }
+      if (streamingMessageIndex >= this.messages.length || !this.messages[streamingMessageIndex]) {
+        return;
+      }
+
+      let metadataChanged = false;
+      this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+        if (meta.id && regeneratedMessage.providerMessageId !== meta.id) {
+          regeneratedMessage.providerMessageId = meta.id;
+          metadataChanged = true;
         }
+        if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
+          regeneratedMessage.systemFingerprint = meta.systemFingerprint;
+          metadataChanged = true;
+        }
+        if (meta.created !== undefined) {
+          const createdTimestamp = meta.created * 1000;
+          if (regeneratedMessage.timestamp < createdTimestamp) {
+            regeneratedMessage.timestamp = createdTimestamp;
+            regeneratedMessage.providerCreatedAt = meta.created;
+            metadataChanged = true;
+          } else if (regeneratedMessage.providerCreatedAt !== meta.created) {
+            regeneratedMessage.providerCreatedAt = meta.created;
+            metadataChanged = true;
+          }
+        }
+      });
 
-        if (effectiveIndex >= 0 && effectiveIndex < this.messages.length) {
-          this.replaceMessageAt(effectiveIndex, (message: ChatMessage) => {
-            message.content = assistantErrorContent;
-            message.modelName = undefined;
-            message.providerName = undefined;
-            message.providerMessageId = undefined;
-            message.providerCreatedAt = undefined;
-            message.systemFingerprint = undefined;
-            message.timestamp = Date.now();
+      if (metadataChanged) {
+        const regeneratedMessage = this.messages[streamingMessageIndex];
+        if (regeneratedMessage?.id !== undefined) {
+          this.databaseManager.updateChatMessageMetadata(regeneratedMessage.id, {
+            timestamp: regeneratedMessage.timestamp,
+            providerMessageId: regeneratedMessage.providerMessageId ?? null,
+            providerCreatedAt: regeneratedMessage.providerCreatedAt ?? null,
+            systemFingerprint: regeneratedMessage.systemFingerprint ?? null,
+            modelName: regeneratedMessage.modelName ?? null,
+            providerName: regeneratedMessage.providerName ?? null
+          }).catch((metadataError: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist regenerated metadata: %{public}s', String(metadataError));
           });
+        }
+      }
+    });
 
-          const failedMessage = this.messages[effectiveIndex];
-          if (failedMessage?.id !== undefined) {
-            try {
-              await this.databaseManager.updateChatMessage(failedMessage.id, failedMessage.content);
-              await this.databaseManager.updateChatMessageMetadata(failedMessage.id, {
-                timestamp: failedMessage.timestamp,
-                providerMessageId: null,
-                providerCreatedAt: null,
-                systemFingerprint: null,
-                modelName: null,
-                providerName: null
-              });
-            } catch (persistError) {
-              hilog.error(DOMAIN, TAG, 'Failed to persist failed streaming message: %{public}s', String(persistError));
-            }
-          } else if (streamingMessageId !== undefined) {
-            try {
-              await this.databaseManager.deleteMessage(streamingMessageId);
-            } catch (deleteError) {
-              hilog.error(DOMAIN, TAG, 'Failed to delete pending AI message after failure: %{public}s',
-                String(deleteError));
+    // 监听完成事件 - 处理重新生成完成
+    emitter.once(StreamEventType.COMPLETE, () => {
+      hilog.error(DOMAIN, TAG, 'Regeneration completed');
+
+      // 立即重置UI状态，不等待数据库操作
+      this.isLoading = false;
+      this.isGenerating = false;
+      this.currentAbortController = null;
+
+      // 异步执行数据库操作，不阻塞UI状态更新
+      (async () => {
+        try {
+          if (this.currentConversation && this.currentConversation.id === conversationId) {
+            if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
+              const regeneratedMessage = this.messages[streamingMessageIndex];
+
+              // 更新数据库中的消息内容
+              if (regeneratedMessage.id !== undefined) {
+                await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
+                hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
+                  String(regeneratedMessage.id));
+              } else {
+                // 兜底方案：如果没有ID，保存到数据库
+                const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
+                this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
+                  messageToPersist.id = savedId;
+                });
+                hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
+              }
+              // 滚动到底部
+              setTimeout(() => {
+                if (this.scroller) {
+                  this.scroller.scrollEdge(Edge.Bottom);
+                }
+              }, 100);
             }
           }
-
+        } catch (dbError) {
+          hilog.error(DOMAIN, TAG, 'Error during regeneration database operations: %{public}s', String(dbError));
         }
-      }
+      })();
+    });
 
-      if (this.inputText.trim().length === 0) {
-        this.inputText = userMessage.content;
-      }
+    // 监听错误事件 - 处理重新生成失败
+    emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
+      const error = payload as Error;
+      hilog.error(DOMAIN, TAG, 'Regeneration failed: %{public}s', String(error));
 
-      try {
-        await this.databaseManager.updateConversationMessageCount(targetConversationId);
-      } catch (countError) {
-        hilog.error(DOMAIN, TAG, 'Failed to update conversation message count after failure: %{public}s',
-          String(countError));
+      if (this.currentConversation && this.currentConversation.id === conversationId) {
+        if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
+          this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
+            regeneratedMessage.content = `重新生成失败: ${error.message || error}`;
+          });
+        }
       }
 
       this.isLoading = false;
-      this.isGenerating = false; // 重置生成状态
-      this.currentAbortController = null; // 清理中断控制器
-      this.showToast(toastMessage);
-    };
+      this.isGenerating = false;
+      this.currentAbortController = null;
+      this.showToast('重新生成失败');
+    });
+  }
 
+  // ✅ 分离职责 - 处理流式错误
+  /**
+   * 处理流式请求错误
+   * @param messageIndex 消息索引
+   * @param error 错误对象
+   */
+  private handleStreamError(messageIndex: number, error: Error): void {
+    const friendlyError = this.getFriendlySendErrorMessage(error);
+
+    if (messageIndex < this.messages.length) {
+      this.replaceMessageAt(messageIndex, (msg) => {
+        msg.content = `[错误] ${friendlyError}`;
+      });
+    }
+
+    this.isLoading = false;
+    this.isGenerating = false;
+    this.currentAbortController = null;
+    this.userAbortedGeneration = false;
+    this.showToast(friendlyError);
+  }
+
+  // ✅ 分离职责 - 更新元数据
+  /**
+   * 更新流式消息的元数据
+   * @param streamingMessageIndex 流式消息索引
+   * @param meta 元数据
+   * @param conversationId 对话ID
+   */
+  private updateStreamingMessageMetadata(
+    streamingMessageIndex: number,
+    meta: StreamMetadata,
+    conversationId: string
+  ): void {
+    if (!this.currentConversation || this.currentConversation.id !== conversationId) {
+      return;
+    }
+    if (streamingMessageIndex >= this.messages.length) {
+      return;
+    }
+
+    let metadataChanged = false;
+    this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+      if (meta.id && message.providerMessageId !== meta.id) {
+        message.providerMessageId = meta.id;
+        metadataChanged = true;
+      }
+      if (meta.systemFingerprint && message.systemFingerprint !== meta.systemFingerprint) {
+        message.systemFingerprint = meta.systemFingerprint;
+        metadataChanged = true;
+      }
+      if (meta.created !== undefined) {
+        const createdTimestamp = meta.created * 1000;
+        if (message.timestamp < createdTimestamp) {
+          message.timestamp = createdTimestamp;
+          message.providerCreatedAt = meta.created;
+          metadataChanged = true;
+        } else if (message.providerCreatedAt !== meta.created) {
+          message.providerCreatedAt = meta.created;
+          metadataChanged = true;
+        }
+      }
+    });
+
+    if (metadataChanged) {
+      const persistedMessage = this.messages[streamingMessageIndex];
+      if (persistedMessage?.id !== undefined) {
+        const update: ChatMessageMetadataUpdate = {
+          timestamp: persistedMessage.timestamp,
+          providerMessageId: persistedMessage.providerMessageId ?? null,
+          providerCreatedAt: persistedMessage.providerCreatedAt ?? null,
+          systemFingerprint: persistedMessage.systemFingerprint ?? null,
+          modelName: persistedMessage.modelName ?? null,
+          providerName: persistedMessage.providerName ?? null
+        };
+        if (meta && meta.citations) {
+          update.citations = meta.citations as Citation[];
+          this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
+            if (update.citations) {
+              message.citations = update.citations as Citation[];
+            }
+          });
+        }
+        this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
+          .catch((metadataError: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
+          });
+      }
+    }
+  }
+
+  // ✅ 简化的主函数 - 仅负责流程控制
+  async sendMessage() {
     try {
-      this.isLoading = true;
-      this.isGenerating = true; // 设置生成状态
-      this.currentAbortController = createAbortController(); // 创建简单的中断控制器
-      hilog.error(DOMAIN, TAG, 'Started sending message, isLoading set to true');
+      // 1️⃣ 验证和准备消息
+      const userMessage = this.validateAndPrepareMessage(this.inputText);
+      if (!userMessage) return;
 
-      // 添加用户消息到界面和数据库
-      userMessageIndex = this.appendMessage(userMessage);
-      hilog.error(DOMAIN, TAG, 'Added user message to UI, total=%{public}d', this.messages.length);
-      userMessageId = await this.databaseManager.insertChatMessage(userMessage);
-      this.replaceMessageAt(userMessageIndex, (message: ChatMessage) => {
-        message.id = userMessageId!;
-      });
+      // 2️⃣ 前置检查和准备
+      await this.waitForLatestSettings('sendMessage');
+      this.hideKeyboard();
+      this.scrollToBottom();
 
-      // 清空输入框
-      this.inputText = '';
-
-      // 立即创建一个空的AI消息用于实时更新，并包含模型信息
-      const modelInfo = this.getCurrentModelInfo();
-      const streamingAiMessage = new ChatMessage('', 'assistant', {
-        conversationId: targetConversationId,
-        modelName: modelInfo.modelName,
-        providerName: modelInfo.providerName
-      });
-
-      // 将流式消息添加到界面，后续会实时更新内容
-      streamingMessageIndex = this.appendMessage(streamingAiMessage);
-      hilog.error(DOMAIN, TAG, 'Added streaming AI message index=%{public}d total=%{public}d', streamingMessageIndex,
-        this.messages.length);
-
-      // 立即保存空的AI消息到数据库，获取ID
-      streamingMessageId = await this.databaseManager.insertChatMessage(streamingAiMessage);
-      this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-        message.id = streamingMessageId!;
-      });
-      hilog.error(DOMAIN, TAG, 'Created streaming AI message in DB with ID: %{public}s', String(streamingMessageId));
-
-      // 准备发送给AI的消息列表（不包括刚创建的空AI消息，取最近10条）
-      const endIndex = this.messages.length - 1;
-      const startIndex = Math.max(0, endIndex - 10);
-      const messagesForAI = this.messages.slice(startIndex, endIndex);
-      if (messagesForAI.length === 0) {
-        messagesForAI.push(this.cloneChatMessage(userMessage));
+      // 3️⃣ 确保对话存在
+      if (!this.currentConversation) {
+        await this.createNewConversationForMessage();
       }
 
-      hilog.error(DOMAIN, TAG, 'Sending message to AI...');
-      hilog.error(DOMAIN, TAG, 'API URL: %{public}s', String(this.currentSettings.apiUrl));
-      hilog.error(DOMAIN, TAG, 'Model: %{public}s', String(this.currentSettings.modelName));
-      hilog.error(DOMAIN, TAG, 'Messages count for AI=%{public}d', messagesForAI.length);
-      hilog.error(DOMAIN, TAG, 'Target conversation ID: %{public}s', String(targetConversationId));
-
-      // 发送流式请求，立即更新UI
-      if (!this.currentSettings || !this.currentSettings.apiUrl || !this.currentSettings.apiKey ||
-        !this.currentSettings.modelName) {
-        hilog.error(DOMAIN, TAG, 'Current settings are incomplete or null');
+      if (!this.currentConversation || !this.currentConversation.id) {
+        this.showToast('对话状态异常，请重新创建对话');
         return;
       }
-      await this.networkManager.sendStreamChatRequest(
-        this.currentSettings.apiUrl,
-        this.currentSettings.apiKey,
-        this.currentSettings.modelName,
+
+      const targetConversationId = this.currentConversation.id;
+
+      // 4️⃣ 准备状态和消息
+      this.isLoading = true;
+      this.isGenerating = true;
+      this.currentAbortController = createAbortController();
+      this.inputText = '';
+
+      // 5️⃣ 保存用户消息
+      const userMessageIndex = this.appendMessage(userMessage);
+      const userMessageId = await this.databaseManager.insertChatMessage(userMessage);
+      this.replaceMessageAt(userMessageIndex, (msg) => {
+        msg.id = userMessageId;
+      });
+
+      // 6️⃣ 初始化流式消息
+      const streamingResult: StreamingMessageResult = await this.initializeStreamingMessage(userMessage, targetConversationId);
+      const streamingIndex: number = streamingResult.index;
+
+      // 7️⃣ 准备AI消息列表
+      const messagesForAI = this.prepareMessagesForAPI(userMessage);
+
+      // 8️⃣ 发送流式请求（使用新的事件驱动架构）
+      const emitter = await this.networkManager.sendStreamChatRequestV2(
+        this.currentSettings!.apiUrl,
+        this.currentSettings!.apiKey,
+        this.currentSettings!.modelName,
         messagesForAI,
         {
-          onMetadata: (meta) => {
-            if (!this.currentConversation || this.currentConversation.id !== targetConversationId) {
-              return;
-            }
-            if (streamingMessageIndex >= this.messages.length) {
-              return;
-            }
-            let metadataChanged = false;
-            this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-              if (meta.id && message.providerMessageId !== meta.id) {
-                message.providerMessageId = meta.id;
-                metadataChanged = true;
-              }
-              if (meta.systemFingerprint && message.systemFingerprint !== meta.systemFingerprint) {
-                message.systemFingerprint = meta.systemFingerprint;
-                metadataChanged = true;
-              }
-              if (meta.created !== undefined) {
-                const createdTimestamp = meta.created * 1000;
-                if (message.timestamp < createdTimestamp) {
-                  message.timestamp = createdTimestamp;
-                  message.providerCreatedAt = meta.created;
-                  metadataChanged = true;
-                } else if (message.providerCreatedAt !== meta.created) {
-                  message.providerCreatedAt = meta.created;
-                  metadataChanged = true;
-                }
-              }
-            });
-
-            if (metadataChanged) {
-              const persistedMessage = this.messages[streamingMessageIndex];
-              if (persistedMessage?.id !== undefined) {
-                const update: ChatMessageMetadataUpdate = {
-                  timestamp: persistedMessage.timestamp,
-                  providerMessageId: persistedMessage.providerMessageId ?? null,
-                  providerCreatedAt: persistedMessage.providerCreatedAt ?? null,
-                  systemFingerprint: persistedMessage.systemFingerprint ?? null,
-                  modelName: persistedMessage.modelName ?? null,
-                  providerName: persistedMessage.providerName ?? null
-                };
-                if (meta && meta.citations) {
-                  update.citations = meta.citations as Citation[];
-                  this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-                    if (update.citations) {
-                      message.citations = update.citations as Citation[];
-                    }
-                  });
-                }
-                this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
-                  .catch((metadataError: Error) => {
-                    hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
-                  });
-              }
-            }
-          },
-          // onData: 立即显示接收到的数据，无延迟
-          onData: (chunk: string) => {
-            hilog.error(DOMAIN, TAG, 'Received chunk immediately: %{public}s', String(chunk));
-            hilog.error(DOMAIN, TAG, 'Current conversation ID: %{public}s', String(this.currentConversation?.id));
-            hilog.error(DOMAIN, TAG, 'Target conversation ID: %{public}s', String(targetConversationId));
-            hilog.error(DOMAIN, TAG, 'Streaming message index: %{public}d', streamingMessageIndex);
-            hilog.error(DOMAIN, TAG, 'Total messages: %{public}d', this.messages.length);
-
-            // 检查当前显示的对话是否还是发送消息时的对话
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-                  message.content += chunk;
-                });
-                hilog.error(DOMAIN, TAG, 'Updated message length: %{public}d',
-                  this.messages[streamingMessageIndex].content.length);
-              }
-            }
-          },
-
-          // onComplete: 流式请求完成
-          onComplete: async () => {
-            hilog.error(DOMAIN, TAG, 'Stream completed');
-
-            // 立即重置UI状态，不等待数据库操作
-            // 这样可以使停止按钮立即消失，提供更好的用户体验
-            this.isLoading = false;
-            this.isGenerating = false; // 重置生成状态
-            this.currentAbortController = null; // 清理中断控制器
-            this.userAbortedGeneration = false; // 清除用户停止标记
-
-            // 异步执行数据库操作，不阻塞UI状态更新
-            // 使用非阻塞的 Promise 链来处理后续操作
-            (async () => {
-              try {
-                if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-                  if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                    const streamingMessage = this.messages[streamingMessageIndex];
-
-                    // 流式消息应该已经有ID（在开始时创建），更新数据库中的内容
-                    if (streamingMessage.id !== undefined) {
-                      hilog.error(DOMAIN, TAG, 'Updating AI response in DB, id=%{public}s', String(streamingMessage.id));
-                      await this.databaseManager.updateChatMessage(streamingMessage.id, streamingMessage.content);
-                      hilog.error(DOMAIN, TAG, 'AI response updated in database');
-                    } else {
-                      hilog.warn(DOMAIN, TAG, 'Streaming message has no ID, this should not happen');
-                      // 兜底方案：如果没有ID，保存到数据库
-                      const savedId = await this.databaseManager.insertChatMessage(streamingMessage);
-                      this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-                        message.id = savedId;
-                      });
-                      hilog.error(DOMAIN, TAG, 'AI response saved with ID: %{public}s', String(savedId));
-                    }
-                  }
-
-                  // 生成对话标题（用户主动停止则跳过）
-                  if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
-                    await this.generateConversationTitle();
-                  }
-
-                }
-
-                // 更新对话的消息计数
-                await this.databaseManager.updateConversationMessageCount(targetConversationId);
-
-                hilog.error(DOMAIN, TAG, 'AI response processed successfully');
-              } catch (dbError) {
-                hilog.error(DOMAIN, TAG, 'Error during post-completion database operations: %{public}s', String(dbError));
-              }
-            })();
-          },
-
-          // onError: 处理错误
-          onError: (error: Error) => {
-            handleFailure(error).catch((failureError: Error) => {
-              hilog.error(DOMAIN, TAG, 'Failed to handle streaming error: %{public}s', String(failureError));
-            });
-          }
-        },
-        this.currentAbortController, // 传入AbortController
-        { enableWebSearch: this.isAliyunActive && this.enableWebSearch }
+          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
+          abortController: this.currentAbortController,
+          requestTimeout: 30000
+        }
       );
 
+      // 9️⃣ 设置事件处理（替代回调地狱）
+      this.setupStreamEventHandlers(emitter, streamingIndex, targetConversationId);
+
     } catch (error) {
-      await handleFailure(error instanceof Error ? error : new Error(String(error)));
-    } finally {
-      // 不在这里设置isLoading = false，因为流式请求的回调是异步的
-      hilog.error(DOMAIN, TAG, 'Message sending request initiated');
+      this.isLoading = false;
+      this.isGenerating = false;
+      this.currentAbortController = null;
+      const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
+      this.showToast(friendlyError);
     }
+  }
+
+  // ✅ 辅助方法 - 创建新对话
+  private async createNewConversationForMessage(): Promise<void> {
+    try {
+      const newConversation = await this.databaseManager.createConversation('新对话');
+      this.currentConversation = newConversation;
+      await this.loadConversations();
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to create conversation for message: %{public}s', String(error));
+      const err = error instanceof Error ? error : new Error(String(error));
+      throw err;
+    }
+  }
+
+  // ✅ 辅助方法 - 准备API消息列表
+  private prepareMessagesForAPI(userMessage: ChatMessage): ChatMessage[] {
+    const endIndex = this.messages.length - 1;
+    const startIndex = Math.max(0, endIndex - 10);
+    const messagesForAI = this.messages.slice(startIndex, endIndex);
+    if (messagesForAI.length === 0) {
+      messagesForAI.push(this.cloneChatMessage(userMessage));
+    }
+    return messagesForAI;
   }
 
   /**
@@ -1880,143 +2041,21 @@ struct Chat {
 
       hilog.error(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 发送流式请求重新生成
-      await this.networkManager.sendStreamChatRequest(
+      // 发送流式请求重新生成（使用新的事件驱动架构）
+      const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings?.apiUrl || '',
         this.currentSettings?.apiKey || '',
         this.currentSettings?.modelName || '',
         messagesForAI,
         {
-          onMetadata: (meta) => {
-            if (!this.currentConversation || this.currentConversation.id !== targetConversationId) {
-              return;
-            }
-            if (streamingMessageIndex >= this.messages.length) {
-              return;
-            }
-            if (!this.messages[streamingMessageIndex]) {
-              return;
-            }
-
-            let metadataChanged = false;
-            this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-              if (meta.id && regeneratedMessage.providerMessageId !== meta.id) {
-                regeneratedMessage.providerMessageId = meta.id;
-                metadataChanged = true;
-              }
-              if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
-                regeneratedMessage.systemFingerprint = meta.systemFingerprint;
-                metadataChanged = true;
-              }
-              if (meta.created !== undefined) {
-                const createdTimestamp = meta.created * 1000;
-                if (regeneratedMessage.timestamp < createdTimestamp) {
-                  regeneratedMessage.timestamp = createdTimestamp;
-                  regeneratedMessage.providerCreatedAt = meta.created;
-                  metadataChanged = true;
-                } else if (regeneratedMessage.providerCreatedAt !== meta.created) {
-                  regeneratedMessage.providerCreatedAt = meta.created;
-                  metadataChanged = true;
-                }
-              }
-            });
-
-            if (metadataChanged) {
-              const regeneratedMessage = this.messages[streamingMessageIndex];
-              if (regeneratedMessage?.id !== undefined) {
-                this.databaseManager.updateChatMessageMetadata(regeneratedMessage.id, {
-                  timestamp: regeneratedMessage.timestamp,
-                  providerMessageId: regeneratedMessage.providerMessageId ?? null,
-                  providerCreatedAt: regeneratedMessage.providerCreatedAt ?? null,
-                  systemFingerprint: regeneratedMessage.systemFingerprint ?? null,
-                  modelName: regeneratedMessage.modelName ?? null,
-                  providerName: regeneratedMessage.providerName ?? null
-                }).catch((metadataError: Error) => {
-                  hilog.error(DOMAIN, TAG, 'Failed to persist regenerated metadata: %{public}s', String(metadataError));
-                });
-              }
-            }
-          },
-          // 实时更新重新生成的消息
-          onData: (chunk: string) => {
-            hilog.error(DOMAIN, TAG, 'Received regenerated chunk len=%{public}d', chunk?.length ?? 0);
-
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-                  regeneratedMessage.content += chunk;
-                });
-                hilog.error(DOMAIN, TAG, 'Regenerated content length=%{public}d',
-                  this.messages[streamingMessageIndex].content.length);
-              }
-            }
-          },
-
-          // 重新生成完成
-          onComplete: async () => {
-            hilog.error(DOMAIN, TAG, 'Regeneration completed');
-
-            // 立即重置UI状态，不等待数据库操作
-            // 这样可以使停止按钮立即消失，提供更好的用户体验
-            this.isLoading = false;
-            this.isGenerating = false;
-            this.currentAbortController = null;
-
-            // 异步执行数据库操作，不阻塞UI状态更新
-            (async () => {
-              try {
-                if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-                  if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                    const regeneratedMessage = this.messages[streamingMessageIndex];
-
-                    // 更新数据库中的消息内容（消息已在开始时创建）
-                    if (regeneratedMessage.id !== undefined) {
-                      await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
-                      hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
-                        String(regeneratedMessage.id));
-                    } else {
-                      // 兜底方案：如果没有ID，保存到数据库
-                      const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
-                      this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
-                        messageToPersist.id = savedId;
-                      });
-                      hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
-                    }
-                    // 滚动到底部
-                    setTimeout(() => {
-                      if (this.scroller) {
-                        this.scroller.scrollEdge(Edge.Bottom);
-                      }
-                    }, 100);
-                  }
-                }
-              } catch (dbError) {
-                hilog.error(DOMAIN, TAG, 'Error during regeneration database operations: %{public}s', String(dbError));
-              }
-            })();
-          },
-
-          // 重新生成错误处理
-          onError: async (error: Error) => {
-            hilog.error(DOMAIN, TAG, 'Regeneration failed: %{public}s', String(error));
-
-            if (this.currentConversation && this.currentConversation.id === targetConversationId) {
-              if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-                this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-                  regeneratedMessage.content = `重新生成失败: ${error.message || error}`;
-                });
-              }
-            }
-
-            this.isLoading = false;
-            this.isGenerating = false;
-            this.currentAbortController = null;
-            this.showToast('重新生成失败');
-          }
-        },
-        this.currentAbortController,
-        { enableWebSearch: this.isAliyunActive && this.enableWebSearch }
+          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
+          abortController: this.currentAbortController,
+          requestTimeout: 30000
+        }
       );
+
+      // 设置重新生成的事件处理
+      this.setupRegenrationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
 
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to regenerate message: %{public}s', String(error));
@@ -2064,9 +2103,18 @@ struct Chat {
     }
   }
 
+  /**
+   * 监听 conversations 变化，更新缓存的分组数据
+   * 仅在数据真正变化时重新计算，避免每次渲染都重新计算
+   */
+  private updateGroupedConversations() {
+    this.cachedGroupedConversations = this.groupConversationsByDate();
+    this.cachedGroupedKeys = Object.keys(this.cachedGroupedConversations);
+  }
+
   @Builder
   buildGroupedConversations() {
-    ForEach(this.getGroupedConversationKeys(), (dateKey: string) => {
+    ForEach(this.cachedGroupedKeys, (dateKey: string) => {
       // 日期分组标题
       Text(this.formatDateGroup(dateKey))
         .fontSize(14)
@@ -2077,7 +2125,7 @@ struct Chat {
 
       // 该日期下的对话列表
       List({ space: 2 }) {
-        ForEach(this.getConversationsForDate(dateKey), (conversation: Conversation, index: number) => {
+        ForEach((this.cachedGroupedConversations?.[dateKey]) || [], (conversation: Conversation, index: number) => {
           ListItem() {
             this.ConversationItem(conversation)
           }
@@ -2092,16 +2140,14 @@ struct Chat {
     })
   }
 
-  // 获取分组对话的日期键数组
+  // 获取分组对话的日期键数组（直接使用缓存数据，避免重复计算）
   private getGroupedConversationKeys(): string[] {
-    const groupedConversations = this.groupConversationsByDate();
-    return Object.keys(groupedConversations);
+    return this.cachedGroupedKeys;
   }
 
-  // 获取指定日期的对话列表
+  // 获取指定日期的对话列表（直接使用缓存数据，避免重复计算）
   private getConversationsForDate(dateKey: string): Conversation[] {
-    const groupedConversations = this.groupConversationsByDate();
-    return groupedConversations[dateKey] || [];
+    return (this.cachedGroupedConversations?.[dateKey]) || [];
   }
 
   // 按日期分组对话的工具方法

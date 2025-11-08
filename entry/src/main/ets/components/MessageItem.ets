@@ -361,5 +361,6 @@ export struct MessageItem {
       }
     }
     .width('100%')
+    .margin({ bottom: 12 })
   }
 }

@@ -1,4 +1,4 @@
-import { promptAction } from '@kit.ArkUI';
+import { Prompt } from '@kit.ArkUI';
 import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
 import { BrowserHelper } from '../services/BrowserHelper';
@@ -47,7 +47,7 @@ struct Settings {
     AppPreferences.setTheme(this.uiContent, mode);
     
     try {
-      promptAction.showToast({
+      Prompt.showToast({
         message: `已切换到${AppPreferences.getDisplayName(mode)}`,
         duration: 2000
       });
@@ -361,7 +361,7 @@ struct Settings {
       .then((success: boolean) => {
         if (!success) {
           try {
-            promptAction.showToast({
+            Prompt.showToast({
               message: '无法打开浏览器',
               duration: 2000
             });
@@ -373,7 +373,7 @@ struct Settings {
       .catch((error: Error) => {
         hilog.error(DOMAIN, TAG, 'Failed to open URL: %{public}s', String(error));
         try {
-          promptAction.showToast({
+          Prompt.showToast({
             message: '打开链接失败',
             duration: 2000
           });
@@ -387,7 +387,7 @@ struct Settings {
     try {
       const success = await ClipboardManager.getInstance().copyText(text);
       try {
-        promptAction.showToast({
+        Prompt.showToast({
           message: success ? 'QQ群号已复制到剪贴板' : '复制失败',
           duration: 2000
         });
@@ -397,7 +397,7 @@ struct Settings {
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to copy to clipboard: %{public}s', String(error));
       try {
-        promptAction.showToast({
+        Prompt.showToast({
           message: '复制失败',
           duration: 2000
         });
