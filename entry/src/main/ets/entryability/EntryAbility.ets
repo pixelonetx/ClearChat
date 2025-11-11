@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window, KeyboardAvoidMode, UIContext } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AppPreferences } from '../services/AppPreferences';
+import { SearchConfigManager } from '../services/search/SearchConfigManager';
 
 const DOMAIN = 0x0000;
 
@@ -12,6 +13,20 @@ export default class EntryAbility extends UIAbility {
     
     // 初始化应用偏好设置
     AppPreferences.init(this.context);
+    
+    // 初始化搜索配置管理器
+    try {
+      const searchConfigManager = SearchConfigManager.getInstance();
+      searchConfigManager.init(this.context).then(() => {
+        hilog.info(DOMAIN, 'testTag', 'Search config manager initialized');
+      }).catch((error: Object) => {
+        const err = error instanceof Error ? error : new Error(String(error));
+        hilog.warn(DOMAIN, 'testTag', 'Failed to initialize search config: %{public}s', err.message);
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      hilog.warn(DOMAIN, 'testTag', 'Search config initialization error: %{public}s', err.message);
+    }
     
     // 保存当前颜色模式到 AppStorage
     AppStorage.setOrCreate('currentColorMode', this.context.config.colorMode);

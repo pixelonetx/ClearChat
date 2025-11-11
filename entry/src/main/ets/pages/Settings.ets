@@ -79,6 +79,12 @@ struct Settings {
                 onClick: () => {
                   this.pathStack.pushPathByName("ModelSettings", null);
                 }
+              },
+              {
+                title: '搜索服务',
+                onClick: () => {
+                  this.pathStack.pushPathByName("SearchServices", null);
+                }
               }
             ]);
 
@@ -157,7 +163,7 @@ struct Settings {
     )
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
-    });
+    })
   }
 
   @Builder

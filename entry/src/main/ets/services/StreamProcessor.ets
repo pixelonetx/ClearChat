@@ -219,6 +219,14 @@ export class StreamProcessor {
         this.emitter.emit(StreamEventType.DATA, delta.reasoning_content);
       }
 
+      // 处理工具调用
+      if (delta.tool_calls && delta.tool_calls.length > 0) {
+        for (const toolCall of delta.tool_calls) {
+          const index = toolCall.index ?? 0;
+          this.state.accumulateToolCall(index, toolCall);
+        }
+      }
+
       // 处理常规内容
       if (delta.content) {
         // 从推理内容过渡到常规内容时，闭合推理标签
@@ -234,6 +242,16 @@ export class StreamProcessor {
         this.emitter.emit(StreamEventType.METADATA, {
           citations: (delta.citations || delta.references) as Citation[]
         });
+      }
+
+      // 当 finish_reason 表示工具调用时，发送 TOOL_CALL 事件
+      if (response.choices[0].finish_reason === 'tool_calls') {
+        const toolCalls = this.state.getToolCalls();
+        if (toolCalls.length > 0) {
+          const payload = toolCalls as import('./StreamEventEmitter').ToolCallData[];
+          this.emitter.emit(StreamEventType.TOOL_CALL, payload);
+          this.state.clearToolCalls();
+        }
       }
     }
   }

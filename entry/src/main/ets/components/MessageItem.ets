@@ -1,6 +1,6 @@
 /**
  * MessageItem 组件 - 聊天消息项
- * 
+ *
  * 功能说明：
  * - 渲染用户和AI助手的消息内容
  * - 提供消息操作功能（复制、删除、重新生成等）
@@ -11,27 +11,29 @@
 import { ChatMessage, Citation } from '../services/DataModels';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { WebBrowserParam } from '../components/WebViewBrowser';
+import { SearchReferencesDialog, SearchReference } from './SearchReferencesDialog';
 
 @Component
 export struct MessageItem {
   // 导航栈：用于在消息中点击链接时跳转到内置浏览器
   @Consume('NavPathStack') pathStack: NavPathStack;
-
   @Prop message: ChatMessage;
-
   // 回调函数 - 消息操作事件
   onCopy?: (message: ChatMessage) => void | Promise<void>;
   onEdit?: (message: ChatMessage) => void | Promise<void>;
   onDelete?: (message: ChatMessage) => void | Promise<void>;
   onRegenerate?: (message: ChatMessage) => void | Promise<void>;
-
   // 下拉菜单显示状态
   @State showUserMenu: boolean = false;
   @State showAssistantMenu: boolean = false;
-
   // 缓存计算结果以提升性能，避免重复计算
   @State private isUserMessage: boolean = false;
   @State private messageContent: string = '';
+  // 搜索引用对话框
+  @State showSearchReferencesDialog: boolean = false;
+  @State searchReferences: SearchReference[] = [];
+  @State searchQuery: string = '';
+  searchReferencesDialogController?: CustomDialogController;
 
   /**
    * 组件初始化时缓存常用计算结果
@@ -39,6 +41,14 @@ export struct MessageItem {
   aboutToAppear() {
     this.isUserMessage = this.message.role === 'user';
     this.messageContent = this.message.content;
+  }
+
+  /**
+   * 判断消息是否应该显示
+   * tool 类型的消息（搜索结果）不直接显示，而是作为前一条消息的引用
+   */
+  shouldShowMessage(): boolean {
+    return this.message.role !== 'tool';
   }
 
   @Builder
@@ -53,7 +63,12 @@ export struct MessageItem {
             .fontSize(12)
         }
       }
-      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .padding({
+        left: 12,
+        right: 12,
+        top: 8,
+        bottom: 8
+      })
       .backgroundColor($r('sys.color.background_primary'))
       .onClick(() => {
         if (this.onDelete) {
@@ -77,7 +92,12 @@ export struct MessageItem {
         }
       }
       .backgroundColor($r('sys.color.background_primary'))
-      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .padding({
+        left: 12,
+        right: 12,
+        top: 8,
+        bottom: 8
+      })
       .onClick(() => {
         if (this.onDelete) {
           this.onDelete(this.message);
@@ -233,6 +253,7 @@ export struct MessageItem {
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
           .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
+
           // .constraintSize({
           //   minWidth: 40,  // 减小最小宽度，适合短消息
           //   minHeight: 36  // 保持最小高度，防止变成小圆形
@@ -266,6 +287,55 @@ export struct MessageItem {
         .justifyContent(FlexAlign.Start)
       }
 
+      // 搜索引用胶囊 - 只显示1个，代表所有搜索结果
+      if (this.message.citations && this.message.citations.length > 0) {
+        Button() {
+          Row({ space: 4 }) {
+            Text('🔍')
+              .fontSize(12)
+            Text(`${this.message.citations.length} 个搜索结果`)
+              .fontSize(12)
+          }
+          .padding({
+            left: 12,
+            right: 12,
+            top: 6,
+            bottom: 6
+          })
+        }
+        .type(ButtonType.Capsule)
+        .backgroundColor($r('app.color.input_area_color'))
+        .fontColor($r('app.color.text_color'))
+        .height(32)
+        .margin({ bottom: 8 })
+        .onClick(() => {
+          // 点击胶囊，显示搜索引用对话框
+          const references: SearchReference[] = [];
+          for (let i = 0; i < this.message.citations!.length; i++) {
+            const citation = this.message.citations![i];
+            references.push({
+              title: citation.title ?? '搜索结果',
+              url: citation.url ?? '',
+              snippet: citation.snippet,
+              index: i + 1
+            });
+          }
+          this.searchReferences = references;
+          this.searchQuery = '搜索结果';
+          this.showSearchReferencesDialog = true;
+          this.searchReferencesDialogController = new CustomDialogController({
+            builder: SearchReferencesDialog({
+              references: references,
+              query: this.searchQuery
+            }),
+            autoCancel: true,
+            alignment: DialogAlignment.Bottom,
+            customStyle: true
+          });
+          this.searchReferencesDialogController?.open();
+        })
+      }
+
       Row() {
         Row() {
           Column() {
@@ -283,6 +353,7 @@ export struct MessageItem {
           // .padding(16)
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
+
           // .backgroundColor('#F3F4F6')
           // .constraintSize({
           //   minWidth: 40,  // 减小最小宽度，适合短消息
@@ -298,51 +369,8 @@ export struct MessageItem {
       .alignItems(VerticalAlign.Top)
       .justifyContent(FlexAlign.Start) // 靠左对齐，不居中
 
-      // 引用资料展示（如果有）
-      if (this.message.citations && this.message.citations.length > 0) {
-        Column() {
-          ForEach(this.message.citations, (c: Citation, idx: number) => {
-            Column() {
-              // 标题 + 链接
-              if (c.title || c.url) {
-                Row() {
-                  Text(c.title ?? c.url)
-                    .fontSize(12)
-                    .fontColor($r('app.color.text_secondary'))
-                    .maxLines(2)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                }
-              }
-              // 摘要
-              if (c.snippet) {
-                Text(c.snippet)
-                  .fontSize(12)
-                  .fontColor($r('app.color.text_secondary'))
-                  .margin({ top: 2 })
-              }
-              // URL
-              if (c.url) {
-                Text(c.url)
-                  .fontSize(11)
-                  .fontColor(Color.Blue)
-                  .margin({ top: 2 })
-                  .onClick(() => {
-                    try {
-                      const title = c.title ?? '';
-                      const param: WebBrowserParam = { url: c.url, title: title };
-                      this.pathStack.pushPathByName('WebBrowser', param);
-                    } catch (_) {}
-                  })
-              }
-            }
-            .padding({ top: 6, bottom: 6 })
-            .borderWidth({ bottom: idx < (this.message.citations!.length - 1) ? 1 : 0 })
-            .borderColor($r('app.color.text_secondary'))
-          })
-        }
-        .width('100%')
-        .padding({ top: 8 })
-      }
+      // 注释：原有的详细citations展示已由上面的胶囊容器替代
+      // 如需显示详细信息，请点击胶囊打开对话框
 
       // 添加操作按钮
       this.AssistantActionButtons()
@@ -354,10 +382,12 @@ export struct MessageItem {
 
   build() {
     Column() {
-      if (this.isUserMessage) {
-        this.UserMessage()
-      } else {
-        this.AssistantMessage()
+      if (this.shouldShowMessage()) {
+        if (this.isUserMessage) {
+          this.UserMessage()
+        } else {
+          this.AssistantMessage()
+        }
       }
     }
     .width('100%')

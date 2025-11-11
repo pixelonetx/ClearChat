@@ -52,8 +52,8 @@ export class ChatMessage {
   id?: number;
   /** 消息内容 */
   content: string;
-  /** 消息角色：user(用户) | assistant(AI助手) */
-  role: 'user' | 'assistant';
+  /** 消息角色：user(用户) | assistant(AI助手) | tool(工具结果) */
+  role: 'user' | 'assistant' | 'tool';
   /** 消息时间戳 */
   timestamp: number;
   /** 所属对话ID */
@@ -70,6 +70,8 @@ export class ChatMessage {
   systemFingerprint?: string;
   /** 引用资料列表（用于展示与持久化） */
   citations?: Citation[];
+  /** 元数据（用于存储工具调用等额外信息） */
+  metadata?: string;
 
   /**
    * 构造函数
@@ -77,7 +79,7 @@ export class ChatMessage {
    * @param role 消息角色
    * @param init 可选的初始化参数
    */
-  constructor(content: string, role: 'user' | 'assistant', init?: ChatMessageInit) {
+  constructor(content: string, role: 'user' | 'assistant' | 'tool', init?: ChatMessageInit) {
     this.content = content;
     this.role = role;
     this.timestamp = init?.timestamp ?? Date.now();
@@ -220,7 +222,8 @@ export interface ChatRequestBody {
   temperature: number;
   // 供应商特定扩展字段（例如阿里云通义千问的联网搜索）
   enable_search?: boolean;
-  tools?: WebSearchTool[];
+  // OpenAI 格式的工具定义（支持 function calling）
+  tools?: object[];
 }
 
 /**
@@ -281,10 +284,29 @@ export interface ReasoningContentItem {
 
 export type ReasoningContent = string | Array<ReasoningContentItem | string>;
 
+/**
+ * 工具函数定义接口
+ */
+export interface ToolFunction {
+  name?: string;
+  arguments?: string;  // JSON string
+}
+
+/**
+ * 工具调用接口（OpenAI Tool Calling 格式）
+ */
+export interface ToolCall {
+  id?: string;
+  type?: string;  // 通常是 'function'
+  function?: ToolFunction;
+  index?: number;  // 流式响应中的增量索引
+}
+
 export interface StreamDelta {
   content?: string;
   role?: string;
   reasoning_content?: ReasoningContent;  // 支持推理内容
+  tool_calls?: ToolCall[];  // 支持工具调用
 }
 
 /**

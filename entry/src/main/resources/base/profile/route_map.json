@@ -33,9 +33,9 @@
       }
     },
     {
-      "name": "WebBrowser",
-      "pageSourceFile": "src/main/ets/components/WebViewBrowser.ets",
-      "buildFunction": "WebViewBrowserBuilder",
+      "name": "SearchServices",
+      "pageSourceFile": "src/main/ets/pages/SearchServices.ets",
+      "buildFunction": "SearchServicesBuilder",
       "data": {
         "description" : "internal webview browser"
       }

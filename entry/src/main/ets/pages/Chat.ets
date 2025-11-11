@@ -18,6 +18,8 @@ import { MessageItem } from '../components/MessageItem';
 import { RenameConversationDialog } from '../components/RenameConversationDialog';
 import { ModelSelectorSheet } from '../components/ModelSelectorDialog';
 import { AbortController, createAbortController } from '../interfaces/AbortController';
+import { SearchToolService } from '../services/search/SearchToolService';
+import { SearchConfigManager } from '../services/search/SearchConfigManager';
 
 const DOMAIN = 0x0000;
 const TAG = 'Chat';
@@ -32,6 +34,12 @@ interface ModelInfo {
 interface StreamingMessageResult {
   index: number;
   id: number;
+}
+
+// 定义搜索工具参数接口
+interface SearchToolArgs {
+  query: string;
+  resultSize?: number;
 }
 
 interface MaybeStringifiable {
@@ -102,9 +110,14 @@ struct Chat {
   @State enableWebSearch: boolean = false; // 阿里云通义千问 联网搜索开关
   @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
   @State currentModelSupportsWebSearchFlag: boolean = false; // 当前模型是否支持联网搜索的UI驱动标志
+  @State isSearching: boolean = false; // 是否正在执行搜索
+  @State searchQuery: string = ''; // 当前搜索查询
+  @State searchResults: string = ''; // 搜索结果摘要
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManagerV2.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
+  private searchToolService = SearchToolService.getInstance();
+  private searchConfigManager = SearchConfigManager.getInstance();
   private scroller: Scroller = new Scroller();
   private currentSettings: AppSettings | null = null;
   private previousSettingsVersion: number = 0;
@@ -471,7 +484,7 @@ struct Chat {
                         });
                       }
                     })
-                    .margin({left:12})
+                    .margin({ left: 12 })
                   }
 
                   Blank()
@@ -685,6 +698,15 @@ struct Chat {
       // 初始化数据库
       const context = getContext(this) as common.UIAbilityContext;
       await this.databaseManager.initDatabase(context);
+
+      // 初始化搜索配置管理器
+      try {
+        await this.searchConfigManager.init(context);
+        hilog.info(DOMAIN, TAG, 'SearchConfigManager initialized successfully');
+      } catch (searchConfigError) {
+        hilog.warn(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{public}s', String(searchConfigError));
+        // 不阻塞应用启动,searchConfigManager 会使用默认配置
+      }
 
       // 补充 AppStorage 默认值
       const storedReloadVersion: number | undefined =
@@ -1527,6 +1549,16 @@ struct Chat {
       const warning = payload as string;
       hilog.warn(DOMAIN, TAG, 'Stream warning: %{public}s', warning);
     });
+
+    // 监听工具调用事件
+    emitter.once(StreamEventType.TOOL_CALL, (payload: EventPayload) => {
+      const toolCalls = payload as import('../services/StreamEventEmitter').ToolCallData[];
+      this.handleToolCalls(toolCalls, streamingMessageIndex, conversationId)
+        .catch((err: Error) => {
+          hilog.error(DOMAIN, TAG, 'Failed to handle tool calls: %{public}s', String(err));
+          this.handleStreamError(streamingMessageIndex, err);
+        });
+    });
   }
 
   // ✅ 事件驱动处理 - 设置重新生成事件处理
@@ -1768,7 +1800,9 @@ struct Chat {
     try {
       // 1️⃣ 验证和准备消息
       const userMessage = this.validateAndPrepareMessage(this.inputText);
-      if (!userMessage) return;
+      if (!userMessage) {
+        return;
+      }
 
       // 2️⃣ 前置检查和准备
       await this.waitForLatestSettings('sendMessage');
@@ -1801,13 +1835,27 @@ struct Chat {
       });
 
       // 6️⃣ 初始化流式消息
-      const streamingResult: StreamingMessageResult = await this.initializeStreamingMessage(userMessage, targetConversationId);
+      const streamingResult: StreamingMessageResult =
+        await this.initializeStreamingMessage(userMessage, targetConversationId);
       const streamingIndex: number = streamingResult.index;
 
       // 7️⃣ 准备AI消息列表
       const messagesForAI = this.prepareMessagesForAPI(userMessage);
 
-      // 8️⃣ 发送流式请求（使用新的事件驱动架构）
+      // 8️⃣ 检查是否启用联网搜索并构建工具数组
+      let tools: object[] = [];
+      try {
+        const searchConfig = this.searchConfigManager.getConfig();
+        if (searchConfig && searchConfig.enableWebSearch) {
+          const toolDef = this.searchToolService.getToolDefinition();
+          tools = [toolDef as object];
+        }
+      } catch (configError) {
+        hilog.warn(DOMAIN, TAG, 'Failed to get search config, using default: %{public}s', String(configError));
+        // 降级到不使用工具调用
+      }
+
+      // 9️⃣ 发送流式请求（使用新的事件驱动架构）
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings!.apiUrl,
         this.currentSettings!.apiKey,
@@ -1815,12 +1863,13 @@ struct Chat {
         messagesForAI,
         {
           enableWebSearch: this.isAliyunActive && this.enableWebSearch,
+          tools: tools.length > 0 ? tools : undefined, // OpenAI 工具调用
           abortController: this.currentAbortController,
           requestTimeout: 30000
         }
       );
 
-      // 9️⃣ 设置事件处理（替代回调地狱）
+      // 🔟 设置事件处理（替代回调地狱）
       this.setupStreamEventHandlers(emitter, streamingIndex, targetConversationId);
 
     } catch (error) {
@@ -1855,6 +1904,174 @@ struct Chat {
       messagesForAI.push(this.cloneChatMessage(userMessage));
     }
     return messagesForAI;
+  }
+
+  // ✅ 工具调用处理 - 执行搜索并继续对话
+  // ✅ 工具调用处理 - 执行搜索并继续对话
+  private async handleToolCalls(
+    toolCalls: import('../services/StreamEventEmitter').ToolCallData[],
+    assistantMessageIndex: number,
+    conversationId: string
+  ): Promise<void> {
+    hilog.info(DOMAIN, TAG, 'Handling %{public}d tool calls', toolCalls.length);
+
+    // 停止当前流
+    this.handleStreamComplete();
+
+    // 执行每个工具调用
+    for (const toolCall of toolCalls) {
+      if (toolCall.name === 'search_web' && toolCall.arguments) {
+        try {
+          // 解析参数
+          const args = JSON.parse(toolCall.arguments) as SearchToolArgs;
+          const query = args.query;
+
+          hilog.info(DOMAIN, TAG, 'Executing search for query: %{public}s', query);
+
+          // 执行搜索
+          const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
+
+          // 将搜索结果转换为Citation数组，保存到AI消息中
+          let citations: Citation[] = [];
+          if (assistantMessageIndex < this.messages.length) {
+            const assistantMessage = this.messages[assistantMessageIndex];
+            // 创建Citation数组（仅用于UI显示）
+            citations = searchResult.items.map((item): Citation => ({
+              title: item.title,
+              url: item.url,
+              snippet: item.text
+            }));
+
+            // 只更新citations到assistant消息（用于UI显示一个胶囊）
+            this.replaceMessageAt(assistantMessageIndex, (msg) => {
+              msg.citations = citations;
+            });
+
+            // 持久化assistant消息的citations更新
+            if (assistantMessage.id) {
+              const update: ChatMessageMetadataUpdate = {
+                timestamp: assistantMessage.timestamp,
+                providerMessageId: assistantMessage.providerMessageId ?? null,
+                providerCreatedAt: assistantMessage.providerCreatedAt ?? null,
+                systemFingerprint: assistantMessage.systemFingerprint ?? null,
+                modelName: assistantMessage.modelName ?? null,
+                providerName: assistantMessage.providerName ?? null,
+                citations: citations
+              };
+              await this.databaseManager.updateChatMessageMetadata(assistantMessage.id, update);
+            }
+          }
+
+          // 继续对话 - 基于搜索结果生成回复
+          await this.continueConversationWithToolResult(conversationId, searchResult, toolCall.id, toolCall.name);
+
+        } catch (error) {
+          hilog.error(DOMAIN, TAG, 'Tool execution failed: %{public}s', String(error));
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.showToast(`搜索失败: ${err.message}`);
+          throw err;
+        }
+      }
+    }
+  }
+
+  // ✅ 继续对话 - 在工具执行后
+  private async continueConversationWithToolResult(
+    conversationId: string,
+    searchResult?: import('../services/search/SearchModels').SearchResult,
+    toolCallId?: string,
+    toolName?: string
+  ): Promise<void> {
+    if (!this.currentConversation || this.currentConversation.id !== conversationId) {
+      hilog.warn(DOMAIN, TAG, 'Conversation changed, skipping tool result continuation');
+      return;
+    }
+
+    // 重置状态
+    this.isLoading = true;
+    this.isGenerating = true;
+    this.currentAbortController = createAbortController();
+
+    try {
+      // 构建工具结果消息 - 这是API格式所需的标准tool_result
+      let toolContent = '';
+      if (searchResult) {
+        // 构建搜索结果文本供API使用
+        if (searchResult.answer) {
+          toolContent = `搜索摘要: ${searchResult.answer}\n\n`;
+        }
+        toolContent += '详细搜索结果:\n';
+        for (const item of searchResult.items) {
+          toolContent += `[${item.index || 0}] 标题: ${item.title}\n内容: ${item.text}\nURL: ${item.url}\n\n`;
+        }
+
+        // 添加工具结果消息到对话历史 - 这个消息包含搜索结果，大模型会据此生成回答
+        const toolResultMessage = new ChatMessage(
+          toolContent,
+          'tool',
+          { conversationId: conversationId, timestamp: Date.now() }
+        );
+
+        const toolIndex = this.appendMessage(toolResultMessage);
+        const toolId = await this.databaseManager.insertChatMessage(toolResultMessage);
+        this.replaceMessageAt(toolIndex, (msg) => {
+          msg.id = toolId;
+        });
+
+        hilog.info(DOMAIN, TAG, 'Added tool result message with %{public}d search items', searchResult.items.length);
+      }
+
+      // 初始化新的流式消息（AI的继续回答）
+      const dummyMessage = new ChatMessage(
+        '',
+        'user',
+        { conversationId: conversationId, timestamp: Date.now() }
+      );
+      const streamingResult = await this.initializeStreamingMessage(dummyMessage, conversationId);
+      const streamingIndex = streamingResult.index;
+
+      // 准备消息列表 - 包含：user → assistant(with tool_call) → tool_result → 新assistant(stream)
+      const messagesForAI = this.messages.slice(Math.max(0, this.messages.length - 20));
+
+      hilog.info(DOMAIN, TAG, 'Continuing with %{public}d messages in context', messagesForAI.length);
+
+      // 检查搜索配置并构建工具数组
+      let tools: object[] = [];
+      try {
+        const searchConfig = this.searchConfigManager.getConfig();
+        if (searchConfig && searchConfig.enableWebSearch) {
+          const toolDef = this.searchToolService.getToolDefinition();
+          tools = [toolDef as object];
+        }
+      } catch (configError) {
+        hilog.warn(DOMAIN, TAG, 'Failed to get search config in continueConversation: %{public}s', String(configError));
+      }
+
+      // 发送流式请求
+      const emitter = await this.networkManager.sendStreamChatRequestV2(
+        this.currentSettings!.apiUrl,
+        this.currentSettings!.apiKey,
+        this.currentSettings!.modelName,
+        messagesForAI,
+        {
+          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
+          tools: tools.length > 0 ? tools : undefined,
+          abortController: this.currentAbortController,
+          requestTimeout: 30000
+        }
+      );
+
+      // 设置事件处理
+      this.setupStreamEventHandlers(emitter, streamingIndex, conversationId);
+
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to continue conversation with tool result: %{public}s', String(error));
+      this.isLoading = false;
+      this.isGenerating = false;
+      this.currentAbortController = null;
+      const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
+      this.showToast(friendlyError);
+    }
   }
 
   /**
@@ -2177,7 +2394,7 @@ struct Chat {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const conversationDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
+
     // 计算时间差（天数）
     const timeDiff = today.getTime() - conversationDate.getTime();
     const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
@@ -2468,6 +2685,7 @@ struct Chat {
     }
   }
 
+  @Builder
   @Builder
   ModelSelectorSheetBuilder() {
     ModelSelectorSheet({
