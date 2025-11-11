@@ -1,8 +1,8 @@
 /**
  * StreamEventEmitter.ets
- * 
+ *
  * ✅ 事件驱动架构 - 替代回调地狱
- * 
+ *
  * 优势：
  * 1. 事件驱动 - 解耦事件发送者和监听者
  * 2. 类型安全 - TypeScript 类型支持
@@ -13,24 +13,27 @@
 export enum StreamEventType {
   // 数据事件
   DATA = 'data',
-  
+
   // 元数据事件
   METADATA = 'metadata',
-  
+
   // 完成事件
   COMPLETE = 'complete',
-  
+
   // 错误事件
   ERROR = 'error',
-  
+
   // 警告事件（非致命错误）
   WARNING = 'warning',
-  
+
   // 状态变化事件
   STATE_CHANGED = 'stateChanged',
-  
+
   // 进度事件
-  PROGRESS = 'progress'
+  PROGRESS = 'progress',
+
+  // 工具调用事件（用于联网搜索等）
+  TOOL_CALL = 'toolCall'
 }
 
 // 进度数据接口
@@ -48,8 +51,23 @@ export interface StreamStateSnapshot {
   bufferedDataSize: number;
 }
 
+// 工具调用数据接口
+export interface ToolCallData {
+  id?: string;
+  type?: string;
+  name?: string;
+  arguments?: string;
+}
+
+// 搜索参数接口
+export interface SearchArguments {
+  query?: string;
+  resultSize?: number;
+}
+
 // 统一的事件载荷类型
-export type EventPayload = string | import('../services/DataModels').StreamMetadata | Error | StreamStateSnapshot | ProgressData | void;
+export type EventPayload = string | import('../services/DataModels').StreamMetadata | Error | StreamStateSnapshot
+  | ProgressData | ToolCallData[] | void;
 
 export type StreamEventListener = (payload: EventPayload) => void;
 
@@ -91,7 +109,7 @@ export class StreamEventEmitter {
     if (listeners) {
       listeners.delete(listener);
     }
-    
+
     const onceListeners = this.once_listeners.get(key);
     if (onceListeners) {
       onceListeners.delete(listener);
@@ -103,7 +121,7 @@ export class StreamEventEmitter {
    */
   emit(eventType: StreamEventType, payload: EventPayload): void {
     const key = eventType as string;
-    
+
     // 发送常规监听器的事件
     const listeners = this.listeners.get(key);
     if (listeners) {
@@ -124,7 +142,7 @@ export class StreamEventEmitter {
       onceListeners.forEach(listener => {
         listenersArray.push(listener);
       });
-      
+
       listenersArray.forEach(listener => {
         try {
           listener(payload);
@@ -170,7 +188,7 @@ export class StreamEventEmitter {
 
 /**
  * Promise 包装器 - 将事件转化为 Promise
- * 
+ *
  * 使用场景：需要 async/await 风格处理
  */
 export class StreamEventPromise {

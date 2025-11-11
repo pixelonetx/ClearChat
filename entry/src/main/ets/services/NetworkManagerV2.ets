@@ -75,6 +75,9 @@ export interface StreamRequestConfig {
   
   // 是否启用网络搜索
   enableWebSearch?: boolean;
+  
+  // OpenAI 格式的工具定义数组
+  tools?: object[];
 }
 
 /**
@@ -231,7 +234,7 @@ export class NetworkManagerV2 {
       const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
       const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
         return {
-          role: msg.role as 'user' | 'assistant' | 'system',
+          role: msg.role,
           content: msg.content
         };
       });
@@ -242,7 +245,8 @@ export class NetworkManagerV2 {
         stream: true,
         max_tokens: 2000,
         temperature: 0.7,
-        enable_search: config.enableWebSearch === true ? true : undefined
+        enable_search: config.enableWebSearch === true ? true : undefined,
+        tools: config.tools // OpenAI 工具调用
       };
 
       // 3️⃣ 创建 HTTP 请求

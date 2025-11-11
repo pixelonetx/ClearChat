@@ -13,6 +13,16 @@
 import { StreamEventEmitter, StreamEventType, StreamStateSnapshot } from './StreamEventEmitter';
 
 /**
+ * 累积的工具调用数据接口
+ */
+export interface AccumulatedToolCall {
+  id?: string;
+  type?: string;
+  name?: string;
+  arguments?: string;
+}
+
+/**
  * 流式请求的完整状态
  */
 export interface StreamStateData {
@@ -24,6 +34,9 @@ export interface StreamStateData {
 
   // 推理内容状态
   reasoningStarted: boolean;
+
+  // 工具调用累积状态
+  pendingToolCalls: Map<number, AccumulatedToolCall>;
 
   // 缓冲区状态
   bufferPending: string;
@@ -48,6 +61,7 @@ function createInitialState(): StreamStateData {
     errorDispatched: false,
     userAborted: false,
     reasoningStarted: false,
+    pendingToolCalls: new Map(),
     bufferPending: '',
     eventDataLines: [],
     totalDataSize: 0,
@@ -105,6 +119,7 @@ export class StreamState {
       errorDispatched: this.data.errorDispatched,
       userAborted: this.data.userAborted,
       reasoningStarted: this.data.reasoningStarted,
+      pendingToolCalls: new Map(this.data.pendingToolCalls),
       bufferPending: this.data.bufferPending,
       eventDataLines: this.data.eventDataLines.slice(),
       totalDataSize: this.data.totalDataSize,
@@ -280,6 +295,54 @@ export class StreamState {
    */
   getError(): Error | undefined {
     return this.data.lastError;
+  }
+
+  /**
+   * 累积工具调用数据（用于流式响应）
+   */
+  accumulateToolCall(
+    index: number,
+    toolCallDelta: import('./DataModels').ToolCall
+  ): void {
+    let current = this.data.pendingToolCalls.get(index);
+    if (!current) {
+      current = { arguments: '' };
+    }
+    
+    if (toolCallDelta.id) {
+      current.id = toolCallDelta.id;
+    }
+    if (toolCallDelta.type) {
+      current.type = toolCallDelta.type;
+    }
+    if (toolCallDelta.function?.name) {
+      current.name = toolCallDelta.function.name;
+    }
+    if (toolCallDelta.function?.arguments) {
+      current.arguments = (current.arguments || '') + toolCallDelta.function.arguments;
+    }
+    
+    this.data.pendingToolCalls.set(index, current);
+  }
+
+  /**
+   * 获取完整的工具调用列表
+   */
+  getToolCalls(): AccumulatedToolCall[] {
+    const result: AccumulatedToolCall[] = [];
+    
+    this.data.pendingToolCalls.forEach((value) => {
+      result.push(value);
+    });
+    
+    return result;
+  }
+
+  /**
+   * 清空工具调用累积数据
+   */
+  clearToolCalls(): void {
+    this.data.pendingToolCalls.clear();
   }
 
   /**

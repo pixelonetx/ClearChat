@@ -115,7 +115,8 @@ export class DatabaseManager {
         provider_message_id TEXT,
         provider_created_at INTEGER,
         system_fingerprint TEXT,
-        citations_json TEXT
+        citations_json TEXT,
+        metadata TEXT
       )
     `;
 
@@ -170,6 +171,14 @@ export class DatabaseManager {
         hilog.info(DOMAIN, TAG, 'citations_json column already exists or migration skipped');
       }
 
+      // 兼容旧版本表结构：补充 messages.metadata 列（用于工具调用）
+      try {
+        await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN metadata TEXT`);
+      } catch (e3) {
+        // 若已存在则忽略
+        hilog.info(DOMAIN, TAG, 'metadata column already exists or migration skipped');
+      }
+
       // 兼容旧版本设置表结构：补充 settings.enable_web_search 列
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.SETTINGS_TABLE} ADD COLUMN enable_web_search INTEGER DEFAULT 0`);
@@ -210,7 +219,8 @@ export class DatabaseManager {
       'provider_message_id': message.providerMessageId || null,
       'provider_created_at': message.providerCreatedAt !== undefined ? message.providerCreatedAt : null,
       'system_fingerprint': message.systemFingerprint || null,
-      'citations_json': message.citations && message.citations.length > 0 ? JSON.stringify(message.citations) : null
+      'citations_json': message.citations && message.citations.length > 0 ? JSON.stringify(message.citations) : null,
+      'metadata': message.metadata || null
     };
 
     try {
@@ -330,11 +340,12 @@ export class DatabaseManager {
         const systemFingerprintIndex = resultSet.getColumnIndex('system_fingerprint');
         const timestampIndex = resultSet.getColumnIndex('timestamp');
         const citationsIndex = resultSet.getColumnIndex('citations_json');
+        const metadataIndex = resultSet.getColumnIndex('metadata');
         const idIndex = resultSet.getColumnIndex('id');
 
         do {
           const content = resultSet.getString(contentIndex);
-          const role = resultSet.getString(roleIndex) as 'user' | 'assistant';
+          const role = resultSet.getString(roleIndex) as 'user' | 'assistant' | 'tool';
           const conversationId = resultSet.getString(conversationIdIndex);
           const modelName = resultSet.isColumnNull(modelNameIndex) ? undefined : resultSet.getString(modelNameIndex);
           const providerName = resultSet.isColumnNull(providerNameIndex) ? undefined : resultSet.getString(providerNameIndex);
@@ -342,6 +353,7 @@ export class DatabaseManager {
           const providerCreatedAt = resultSet.isColumnNull(providerCreatedAtIndex) ? undefined : resultSet.getLong(providerCreatedAtIndex);
           const systemFingerprint = resultSet.isColumnNull(systemFingerprintIndex) ? undefined : resultSet.getString(systemFingerprintIndex);
           const timestampValue = resultSet.getLong(timestampIndex);
+          const metadata = (metadataIndex >= 0 && !resultSet.isColumnNull(metadataIndex)) ? resultSet.getString(metadataIndex) : undefined;
 
           let citations: Citation[] | undefined = undefined;
           if (citationsIndex >= 0 && !resultSet.isColumnNull(citationsIndex)) {
@@ -365,6 +377,9 @@ export class DatabaseManager {
             citations
           });
           message.id = resultSet.getLong(idIndex);
+          if (metadata) {
+            message.metadata = metadata;
+          }
           messages.push(message);
         } while (resultSet.goToNextRow());
       }
