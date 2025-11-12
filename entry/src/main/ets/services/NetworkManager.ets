@@ -150,11 +150,14 @@ export class NetworkManager {
       // 如果API URL已经包含完整路径，直接使用；否则拼接 /chat/completions
       const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
 
-      const requestMessages: RequestMessage[] = messages.map(msg => {
+      const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
         const requestMsg: RequestMessage = {
           role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content
         };
+        if (msg.role === 'tool' && msg.toolCallId) {
+          requestMsg.tool_call_id = msg.toolCallId;
+        }
         return requestMsg;
       });
 

@@ -233,10 +233,27 @@ export class NetworkManagerV2 {
       // 2️⃣ 准备请求
       const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
       const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
-        return {
+        const requestMsg: RequestMessage = {
           role: msg.role,
           content: msg.content
         };
+        
+        // 工具消息必须包含 tool_call_id
+        if (msg.role === 'tool') {
+          if (!msg.toolCallId) {
+            hilog.error(DOMAIN, TAG, 'Tool message missing toolCallId, this will cause API error');
+            throw new Error('工具调用消息缺少必需的 tool_call_id 字段');
+          }
+          requestMsg.tool_call_id = msg.toolCallId;
+        }
+        
+        // assistant 消息可能包含 tool_calls
+        if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+          requestMsg.tool_calls = msg.toolCalls;
+          hilog.info(DOMAIN, TAG, 'Including %{public}d tool_calls in assistant message', msg.toolCalls.length);
+        }
+        
+        return requestMsg;
       });
 
       const requestBody: ChatRequestBody = {
@@ -248,6 +265,17 @@ export class NetworkManagerV2 {
         enable_search: config.enableWebSearch === true ? true : undefined,
         tools: config.tools // OpenAI 工具调用
       };
+      
+      // 🔍 调试日志：打印请求体概要
+      hilog.info(DOMAIN, TAG, 'Request body: model=%{public}s, messages=%{public}d, tools=%{public}s, enable_search=%{public}s', 
+        sanitizedModel, requestMessages.length, String(!!config.tools), String(!!config.enableWebSearch));
+      
+      // 打印每个消息的摘要
+      for (let i = 0; i < requestMessages.length; i++) {
+        const reqMsg = requestMessages[i];
+        hilog.info(DOMAIN, TAG, 'Message[%{public}d]: role=%{public}s, contentLen=%{public}d, hasToolCalls=%{public}s, hasToolCallId=%{public}s',
+          i, reqMsg.role, reqMsg.content.length, String(!!(reqMsg.tool_calls)), String(!!reqMsg.tool_call_id));
+      }
 
       // 3️⃣ 创建 HTTP 请求
       const httpRequest = http.createHttp();
