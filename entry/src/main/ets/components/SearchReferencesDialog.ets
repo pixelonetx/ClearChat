@@ -1,7 +1,7 @@
 /**
  * SearchReferencesDialog.ets
  * 
- * 搜索引用对话框
+ * 搜索引用对话框 - 原生半模态样式
  * 在大模型消息中点击搜索引用时显示
  */
 
@@ -14,6 +14,132 @@ export interface SearchReference {
   index?: number;
 }
 
+@Builder
+export function SearchReferencesSheet(references: SearchReference[], query: string, pathStack: NavPathStack, onClose?: () => void) {
+  Column({ space: 0 }) {
+    // 顶部指示条
+    Row() {
+      Divider()
+        .width(36)
+        .height(4)
+        .backgroundColor($r('sys.color.ohos_id_color_list_separator'))
+        .borderRadius(2)
+    }
+    .width('100%')
+    .height(20)
+    .justifyContent(FlexAlign.Center)
+
+    // 标题栏
+    Row() {
+      Text('搜索引用')
+        .fontSize(20)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.ohos_id_color_text_primary'))
+      
+      Blank()
+      
+      if (query) {
+        Text(`"${query}"`)
+          .fontSize(14)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .constraintSize({ maxWidth: 150 })
+      }
+    }
+    .width('100%')
+    .padding({ left: 24, right: 24, top: 8, bottom: 16 })
+
+    // 来源计数
+    Text(`${references.length} 个来源`)
+      .fontSize(13)
+      .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+      .padding({ left: 24, right: 24, bottom: 12 })
+
+    Divider()
+      .color($r('sys.color.ohos_id_color_list_separator'))
+
+    // 引用列表
+    List({ space: 0 }) {
+      ForEach(references, (ref: SearchReference, idx: number) => {
+        ListItem() {
+          Column({ space: 0 }) {
+            Row({ space: 12 }) {
+              // 序号
+              Text(`${ref.index ?? idx + 1}`)
+                .fontSize(15)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('sys.color.ohos_id_color_emphasize'))
+                .width(28)
+
+              // 内容
+              Column({ space: 4 }) {
+                Text(ref.title)
+                  .fontSize(16)
+                  .fontColor($r('sys.color.ohos_id_color_text_primary'))
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                if (ref.snippet) {
+                  Text(ref.snippet)
+                    .fontSize(14)
+                    .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .margin({ top: 2 })
+                }
+
+                if (ref.url) {
+                  Text(ref.url)
+                    .fontSize(12)
+                    .fontColor($r('sys.color.ohos_id_color_emphasize'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .margin({ top: 4 })
+                }
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Image($r('sys.symbol.chevron_right'))
+                .width(20)
+                .height(20)
+                .fillColor($r('sys.color.ohos_id_color_fourth'))
+            }
+            .width('100%')
+            .padding({ left: 24, right: 24, top: 16, bottom: 16 })
+            .onClick(() => {
+              if (ref.url) {
+                const browserParam: WebBrowserParam = {
+                  url: ref.url,
+                  title: ref.title
+                };
+                pathStack.pushPathByName('WebBrowser', browserParam);
+                onClose?.();
+              }
+            })
+
+            // 分隔线放在列表项内部
+            if (idx < references.length - 1) {
+              Divider()
+                .color($r('sys.color.ohos_id_color_list_separator'))
+                .margin({ left: 64, right: 24 })
+            }
+          }
+        }
+        .backgroundColor($r('sys.color.ohos_id_color_background'))
+      })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .scrollBar(BarState.Auto)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+  .width('100%')
+  .height('100%')
+  .backgroundColor($r('sys.color.ohos_id_color_background'))
+}
+
 @CustomDialog
 export struct SearchReferencesDialog {
   @Consume('NavPathStack') pathStack: NavPathStack;
@@ -22,148 +148,14 @@ export struct SearchReferencesDialog {
   @Prop query: string;
   
   controller?: CustomDialogController;
-  @State selectedIndex: number = -1;
 
   build() {
-    Column() {
-      // 标题栏
-      Row() {
-        Text('搜索引用')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .layoutWeight(1)
-
-        Button() {
-          SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
-            .fontSize(24)
-            .fontColor([$r('sys.color.ohos_id_color_text_primary')])
-        }
-        .type(ButtonType.Circle)
-        .backgroundColor(Color.Transparent)
-        .size({ width: 40, height: 40 })
-        .onClick(() => {
-          this.controller?.close();
-        })
-      }
-      .width('100%')
-      .height(48)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
-
-      // 搜索查询显示
-      if (this.query) {
-        Text(`关键词: ${this.query}`)
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .width('100%')
-      }
-
-      // 引用列表
-      List({ space: 8 }) {
-        ForEach(this.references, (ref: SearchReference, idx: number) => {
-          ListItem() {
-            Column() {
-              // 序号 + 标题
-              Row({ space: 8 }) {
-                Text(`${ref.index ?? idx + 1}.`)
-                  .fontSize(12)
-                  .fontColor($r('app.color.text_secondary'))
-                  .width(24)
-
-                Text(ref.title)
-                  .fontSize(13)
-                  .fontWeight(FontWeight.Medium)
-                  .layoutWeight(1)
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .width('100%')
-              .alignItems(VerticalAlign.Top)
-
-              // 摘要
-              if (ref.snippet) {
-                Text(ref.snippet)
-                  .fontSize(11)
-                  .fontColor($r('app.color.text_secondary'))
-                  .margin({ top: 6, left: 32 })
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .width('100%')
-              }
-
-              // URL
-              if (ref.url) {
-                Row({ space: 4 }) {
-                  Text('🔗')
-                    .fontSize(10)
-                    .margin({ left: 32 })
-
-                  Text(ref.url)
-                    .fontSize(10)
-                    .fontColor(Color.Blue)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                }
-                .width('100%')
-                .margin({ top: 6 })
-                .alignItems(VerticalAlign.Center)
-              }
-            }
-            .width('100%')
-            .padding({ top: 12, bottom: 12, left: 12, right: 12 })
-            .borderRadius(8)
-            .backgroundColor(
-              this.selectedIndex === idx
-                ? $r('app.color.input_area_color')
-                : Color.Transparent
-            )
-            .border({
-              width: 1,
-              color: this.selectedIndex === idx
-                ? $r('app.color.text_color')
-                : $r('app.color.text_secondary')
-            })
-          }
-          .onClick(() => {
-            this.selectedIndex = idx;
-            // 点击后跳转到浏览器
-            if (ref.url) {
-              try {
-                const browserParam: WebBrowserParam = {
-                  url: ref.url,
-                  title: ref.title
-                };
-                this.pathStack.pushPathByName('WebBrowser', browserParam);
-                // 延迟关闭对话框
-                setTimeout(() => {
-                  this.controller?.close();
-                }, 300);
-              } catch (error) {
-                console.error('Failed to navigate:', error);
-              }
-            }
-          })
-        })
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-      .scrollBar(BarState.Auto)
-
-      // 底部操作
-      Button('关闭')
-        .type(ButtonType.Capsule)
-        .width('80%')
-        .height(44)
-        .margin({ bottom: 16 })
-        .onClick(() => {
-          this.controller?.close();
-        })
+    Column({ space: 0 }) {
+      SearchReferencesSheet(this.references, this.query, this.pathStack, () => {
+        this.controller?.close();
+      })
     }
     .width('100%')
-    .height('70%')
-    .backgroundColor($r('app.color.common_background'))
+    .height('75%')
   }
 }
