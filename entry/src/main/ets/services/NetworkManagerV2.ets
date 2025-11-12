@@ -58,6 +58,41 @@ const DOMAIN = 0x0000;
 const TAG = 'NetworkManagerV2';
 
 /**
+ * 消息内容接口
+ */
+interface MessageContent {
+  content: string;
+}
+
+/**
+ * 选择项接口
+ */
+interface ChatChoice {
+  message: MessageContent;
+}
+
+/**
+ * 聊天响应接口
+ */
+interface ChatResponse {
+  choices?: Array<ChatChoice>;
+}
+
+/**
+ * 错误信息接口
+ */
+interface ErrorInfo {
+  message?: string;
+}
+
+/**
+ * 错误响应接口
+ */
+interface ErrorResponse {
+  error?: ErrorInfo;
+}
+
+/**
  * 流式请求配置
  */
 export interface StreamRequestConfig {
@@ -630,5 +665,210 @@ export class NetworkManagerV2 {
     }
 
     return result;
+  }
+
+  /**
+   * ✅ 非流式聊天请求（用于标题生成、连接测试等场景）
+   * 
+   * @param apiUrl API 基础 URL
+   * @param apiKey API 密钥
+   * @param modelName 模型名称
+   * @param messages 消息列表
+   * @returns Promise<string> AI 回复内容
+   */
+  async sendChatRequest(
+    apiUrl: string,
+    apiKey: string,
+    modelName: string,
+    messages: ChatMessage[]
+  ): Promise<string> {
+    const sanitizedApiUrl = (apiUrl || '').trim();
+    const sanitizedModel = this.sanitizeIdentifier(modelName || '');
+    const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
+
+    hilog.info(DOMAIN, TAG, 'Starting non-streaming chat request');
+    hilog.info(DOMAIN, TAG, 'API URL: %{public}s', sanitizedApiUrl);
+    hilog.info(DOMAIN, TAG, 'Model: %{public}s', sanitizedModel);
+    hilog.info(DOMAIN, TAG, 'Messages count: %{public}d', messages.length);
+
+    // 验证输入
+    this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
+
+    const requestUrl = this.resolveChatCompletionsUrl(sanitizedApiUrl);
+    hilog.info(DOMAIN, TAG, 'Resolved chat endpoint: %{public}s', requestUrl);
+
+    return new Promise((resolve, reject) => {
+      const httpRequest = http.createHttp();
+
+      // 构建请求消息
+      const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
+        return {
+          role: msg.role,
+          content: msg.content
+        };
+      });
+
+      const requestBody: ChatRequestBody = {
+        model: sanitizedModel,
+        messages: requestMessages,
+        stream: false,
+        max_tokens: 2000,
+        temperature: 0.7
+      };
+
+      // 设置请求选项
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sanitizedApiKey}`,
+        'Accept': 'application/json'
+      };
+
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.POST,
+        header: requestHeaders,
+        extraData: JSON.stringify(requestBody),
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 30000,
+        readTimeout: 30000
+      };
+
+      hilog.info(DOMAIN, TAG, 'Sending non-streaming request to: %{public}s', requestUrl);
+
+      // 发送请求
+      httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
+        if (err) {
+          hilog.error(DOMAIN, TAG, 'HTTP request failed: %{public}s', String(err));
+          httpRequest.destroy();
+          const errorMessage = this.getNetworkErrorMessage(err);
+          reject(new NetworkError(errorMessage));
+          return;
+        }
+
+        try {
+          if (data.responseCode === 200) {
+            const responseData = data.result as string;
+            hilog.info(DOMAIN, TAG, 'Received response: %{public}s', responseData);
+
+            const response: ChatResponse = JSON.parse(responseData);
+
+            if (response.choices && response.choices.length > 0) {
+              const content = response.choices[0].message.content;
+              httpRequest.destroy();
+              resolve(content);
+            } else {
+              httpRequest.destroy();
+              reject(new NetworkError('AI服务返回的响应格式不正确'));
+            }
+          } else {
+            let errorMessage = `请求失败，状态码: ${data.responseCode}`;
+            
+            try {
+              hilog.error(DOMAIN, TAG, 'HTTP error response body: %{public}s', data.result as string);
+              const errorData: ErrorResponse = JSON.parse(data.result as string);
+              if (errorData.error && errorData.error.message) {
+                errorMessage = this.getApiErrorMessage(errorData.error.message, data.responseCode);
+              }
+            } catch (e) {
+              errorMessage = this.getHttpErrorMessage(data.responseCode);
+            }
+
+            hilog.error(DOMAIN, TAG, 'HTTP request failed with status: %{public}d', data.responseCode);
+            httpRequest.destroy();
+            reject(new NetworkError(errorMessage));
+          }
+        } catch (parseError) {
+          hilog.error(DOMAIN, TAG, 'Failed to parse response: %{public}s', String(parseError));
+          httpRequest.destroy();
+          reject(new NetworkError(`响应解析失败: ${parseError}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * 获取网络错误的用户友好消息
+   */
+  private getNetworkErrorMessage(error: Error): string {
+    const errorStr = error.message || String(error);
+    
+    if (errorStr.includes('timeout') || errorStr.includes('TIMEOUT')) {
+      return '请求超时，请检查网络连接或稍后重试';
+    }
+    if (errorStr.includes('ENOTFOUND') || errorStr.includes('DNS')) {
+      return '无法连接到服务器，请检查网络设置或API地址';
+    }
+    if (errorStr.includes('ECONNREFUSED')) {
+      return '服务器拒绝连接，请检查API地址是否正确';
+    }
+    if (errorStr.includes('certificate') || errorStr.includes('SSL')) {
+      return 'SSL证书验证失败，请检查网络安全设置';
+    }
+    
+    return `网络请求失败: ${errorStr}`;
+  }
+
+  /**
+   * 获取API错误的用户友好消息
+   */
+  private getApiErrorMessage(apiError: string, statusCode: number): string {
+    if (statusCode === 401) {
+      return 'API密钥无效或已过期，请检查密钥设置';
+    }
+    if (statusCode === 403) {
+      return 'API访问被拒绝，请检查权限设置';
+    }
+    if (statusCode === 429) {
+      return 'API调用频率超限，请稍后重试';
+    }
+    if (statusCode === 500) {
+      return 'AI服务内部错误，请稍后重试';
+    }
+    
+    return apiError || `API错误 (${statusCode})`;
+  }
+
+  /**
+   * 获取HTTP状态码对应的用户友好消息
+   */
+  private getHttpErrorMessage(statusCode: number): string {
+    switch (statusCode) {
+      case 400:
+        return '请求参数错误，请检查输入内容';
+      case 401:
+        return 'API密钥无效，请检查密钥设置';
+      case 403:
+        return 'API访问被拒绝，请检查权限';
+      case 404:
+        return 'API接口不存在，请检查API地址';
+      case 429:
+        return 'API调用频率超限，请稍后重试';
+      case 500:
+        return 'AI服务内部错误，请稍后重试';
+      case 502:
+        return 'AI服务网关错误，请稍后重试';
+      case 503:
+        return 'AI服务暂时不可用，请稍后重试';
+      default:
+        return `请求失败，状态码: ${statusCode}`;
+    }
+  }
+
+  /**
+   * 测试API连接
+   * 
+   * @param apiUrl API 基础 URL
+   * @param apiKey API 密钥
+   * @param modelName 模型名称
+   * @returns Promise<boolean> 连接是否成功
+   */
+  async testConnection(apiUrl: string, apiKey: string, modelName: string): Promise<boolean> {
+    try {
+      const testMessage = new ChatMessage('Hello', 'user');
+      await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage]);
+      return true;
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Connection test failed: %{public}s', String(error));
+      return false;
+    }
   }
 }
