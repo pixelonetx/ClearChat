@@ -35,6 +35,32 @@ export struct MessageItem {
   @State searchQuery: string = '';
   searchReferencesDialogController?: CustomDialogController;
 
+  private get isAssistant(): boolean {
+    return this.message.role === 'assistant';
+  }
+
+  private get hasToolCalls(): boolean {
+    return !!(this.message.toolCalls && this.message.toolCalls.length > 0);
+  }
+
+  private get hasCitations(): boolean {
+    return !!(this.message.citations && this.message.citations.length > 0);
+  }
+
+  private get isSearchError(): boolean {
+    return typeof this.message.content === 'string' && this.message.content.startsWith('[搜索失败]');
+  }
+
+  private get searchStage(): 'none' | 'searching' | 'results' | 'summarizing' | 'done' | 'error' {
+    if (!this.isAssistant) return 'none';
+    if (this.isSearchError) return 'error';
+    if (this.hasToolCalls && !this.hasCitations) return 'searching';
+    if (this.hasCitations && this.message.content.length === 0) return 'summarizing';
+    if (this.hasCitations && this.message.content.length > 0) return 'done';
+    if (this.message.content.length === 0) return 'summarizing';
+    return 'none';
+  }
+
   /**
    * 组件初始化时缓存常用计算结果
    */
@@ -287,53 +313,107 @@ export struct MessageItem {
         .justifyContent(FlexAlign.Start)
       }
 
-      // 搜索引用胶囊 - 只显示1个，代表所有搜索结果
-      if (this.message.citations && this.message.citations.length > 0) {
-        Button() {
-          Row({ space: 4 }) {
-            Text('🔍')
-              .fontSize(12)
-            Text(`${this.message.citations.length} 个搜索结果`)
-              .fontSize(12)
+      if (this.searchStage !== 'none') {
+        Row() {
+          Row() {
+            if (this.searchStage === 'searching') {
+              Row({ space: 6 }) {
+                Text('🔍').fontSize(12)
+                Text('正在联网搜索…').fontSize(12)
+              }
+            } else if (this.searchStage === 'summarizing') {
+              Row({ space: 6 }) {
+                Text('🔎').fontSize(12)
+                Text(this.hasCitations ? `已找到${this.message.citations!.length}条，生成摘要中…` : '生成中…').fontSize(12)
+              }
+            } else if (this.searchStage === 'done') {
+              Row({ space: 6 }) {
+                Text('🔎').fontSize(12)
+                Text(`已使用联网搜索（${this.message.citations!.length} 个来源）`).fontSize(12)
+              }
+            } else if (this.searchStage === 'error') {
+              Row({ space: 6 }) {
+                Text('⚠️').fontSize(12)
+                Text('搜索失败').fontSize(12)
+              }
+            }
           }
-          .padding({
-            left: 12,
-            right: 12,
-            top: 6,
-            bottom: 6
-          })
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor($r('app.color.input_area_color'))
+          .borderRadius(16)
         }
-        .type(ButtonType.Capsule)
-        .backgroundColor($r('app.color.input_area_color'))
-        .fontColor($r('app.color.text_color'))
-        .height(32)
         .margin({ bottom: 8 })
-        .onClick(() => {
-          // 点击胶囊，显示搜索引用对话框
-          const references: SearchReference[] = [];
-          for (let i = 0; i < this.message.citations!.length; i++) {
-            const citation = this.message.citations![i];
-            references.push({
-              title: citation.title ?? '搜索结果',
-              url: citation.url ?? '',
-              snippet: citation.snippet,
-              index: i + 1
-            });
+        .width('auto')
+      }
+
+      if (this.hasCitations) {
+        Column() {
+          ForEach(this.message.citations!.slice(0, Math.min(3, this.message.citations!.length)), (c: Citation, i: number) => {
+            Button() {
+              Column() {
+                Text(`${i + 1}. ${c.title ?? '来源'}`).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (c.url) {
+                  Text(c.url).fontSize(10).opacity(0.7).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
+            .type(ButtonType.Capsule)
+            .backgroundColor($r('app.color.common_background'))
+            .fontColor($r('app.color.text_color'))
+            .height(32)
+            .margin({ bottom: 6 })
+            .onClick(() => {
+              const refs: SearchReference[] = [];
+              const totalLocal = this.message.citations!.length;
+              for (let j = 0; j < totalLocal; j++) {
+                const ct = this.message.citations![j];
+                refs.push({ title: ct.title ?? '搜索结果', url: ct.url ?? '', snippet: ct.snippet, index: j + 1 });
+              }
+              this.searchReferences = refs;
+              this.searchQuery = '搜索结果';
+              this.showSearchReferencesDialog = true;
+              this.searchReferencesDialogController = new CustomDialogController({
+                builder: SearchReferencesDialog({ references: refs, query: this.searchQuery }),
+                autoCancel: true,
+                alignment: DialogAlignment.Bottom,
+                customStyle: true
+              });
+              this.searchReferencesDialogController?.open();
+            })
+          }, (c: Citation, i: number) => `${i}`)
+
+          if (this.message.citations!.length > 3) {
+            Button() {
+              Text(`查看全部 ${this.message.citations!.length} 个来源`).fontSize(12)
+            }
+            .type(ButtonType.Capsule)
+            .backgroundColor($r('app.color.input_area_color'))
+            .fontColor($r('app.color.text_color'))
+            .height(32)
+            .margin({ bottom: 8 })
+            .onClick(() => {
+              const refs: SearchReference[] = [];
+              const totalLocal = this.message.citations!.length;
+              for (let j = 0; j < totalLocal; j++) {
+                const ct = this.message.citations![j];
+                refs.push({ title: ct.title ?? '搜索结果', url: ct.url ?? '', snippet: ct.snippet, index: j + 1 });
+              }
+              this.searchReferences = refs;
+              this.searchQuery = '搜索结果';
+              this.showSearchReferencesDialog = true;
+              this.searchReferencesDialogController = new CustomDialogController({
+                builder: SearchReferencesDialog({ references: refs, query: this.searchQuery }),
+                autoCancel: true,
+                alignment: DialogAlignment.Bottom,
+                customStyle: true
+              });
+              this.searchReferencesDialogController?.open();
+            })
           }
-          this.searchReferences = references;
-          this.searchQuery = '搜索结果';
-          this.showSearchReferencesDialog = true;
-          this.searchReferencesDialogController = new CustomDialogController({
-            builder: SearchReferencesDialog({
-              references: references,
-              query: this.searchQuery
-            }),
-            autoCancel: true,
-            alignment: DialogAlignment.Bottom,
-            customStyle: true
-          });
-          this.searchReferencesDialogController?.open();
-        })
+        }
+        .margin({ bottom: 8 })
+        .width('100%')
       }
 
       Row() {
