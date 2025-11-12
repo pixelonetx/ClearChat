@@ -41,6 +41,10 @@ export interface ChatMessageInit {
   systemFingerprint?: string;
   /** 引用资料（如联网搜索返回的参考链接） */
   citations?: Citation[];
+  /** 工具调用 ID（用于 tool 消息） */
+  toolCallId?: string;
+  /** 工具调用列表（用于 assistant 消息） */
+  toolCalls?: ToolCall[];
 }
 
 /**
@@ -72,6 +76,10 @@ export class ChatMessage {
   citations?: Citation[];
   /** 元数据（用于存储工具调用等额外信息） */
   metadata?: string;
+  /** 工具调用 ID（用于 tool 消息） */
+  toolCallId?: string;
+  /** 工具调用列表（用于 assistant 消息） */
+  toolCalls?: ToolCall[];
 
   /**
    * 构造函数
@@ -90,6 +98,8 @@ export class ChatMessage {
     this.providerCreatedAt = init?.providerCreatedAt;
     this.systemFingerprint = init?.systemFingerprint;
     this.citations = init?.citations;
+    this.toolCallId = init?.toolCallId;
+    this.toolCalls = init?.toolCalls;
   }
 }
 
@@ -204,11 +214,13 @@ export interface MessageInterface {
 }
 
 /**
- * 请求消息接口
+ * 请求消息接口（发送给 API 的消息格式）
  */
 export interface RequestMessage {
   role: string;
   content: string;
+  tool_call_id?: string; // 用于 tool 消息
+  tool_calls?: ToolCall[]; // 用于 assistant 消息
 }
 
 /**

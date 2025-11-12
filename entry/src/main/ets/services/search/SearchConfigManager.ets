@@ -73,14 +73,19 @@ export class SearchConfigManager {
    */
   async init(context: Context): Promise<void> {
     this.context = context;
+    
+    // 先初始化默认配置
+    this.initializeDefaultConfig();
+    
     try {
       this.preferencesProxy = await preferences.getPreferences(context, this.PREFERENCES_NAME);
       await this.loadConfig();
-      hilog.info(DOMAIN, TAG, 'SearchConfigManager initialized');
+      hilog.info(DOMAIN, TAG, 'SearchConfigManager initialized successfully');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{public}s', err.message);
-      throw err;
+      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager preferences: %{public}s', err.message);
+      // 不抛出错误，使用默认配置继续运行
+      hilog.warn(DOMAIN, TAG, 'Using default search config');
     }
   }
 
@@ -89,7 +94,10 @@ export class SearchConfigManager {
    */
   private async loadConfig(): Promise<void> {
     try {
-      if (!this.preferencesProxy) return;
+      if (!this.preferencesProxy) {
+        hilog.warn(DOMAIN, TAG, 'Preferences proxy not initialized, keeping default config');
+        return;
+      }
 
       const selectedIndex = this.preferencesProxy.getSync(this.KEY_SELECTED_INDEX, 0) as number;
       const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
@@ -103,6 +111,7 @@ export class SearchConfigManager {
         this.config.enabledServices = servicesData.map((data: Object) => {
           return SearchServiceOptions.fromJson(data);
         });
+        hilog.info(DOMAIN, TAG, 'Loaded %{public}d search services', this.config.enabledServices.length);
       } catch (error) {
         hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services: %{public}s', String(error));
         this.config.enabledServices = [];
@@ -118,13 +127,17 @@ export class SearchConfigManager {
         this.config.commonOptions = commonOpts;
       } catch (error) {
         hilog.warn(DOMAIN, TAG, 'Failed to parse common options: %{public}s', String(error));
+        // 保持默认配置
       }
 
       this.config.enableWebSearch = webSearchEnabled;
+      
+      hilog.info(DOMAIN, TAG, 'Config loaded: enableWebSearch=%{public}s, services=%{public}d', 
+        String(this.config.enableWebSearch), this.config.enabledServices.length);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to load config: %{public}s', err.message);
-      throw err;
+      // 不抛出错误，保持默认配置
     }
   }
 
@@ -171,8 +184,23 @@ export class SearchConfigManager {
 
   /**
    * 获取当前配置
+   * 如果配置未初始化，返回默认配置
    */
   getConfig(): SearchConfig {
+    // 如果配置为空或未初始化，使用默认配置
+    if (!this.config || !this.config.commonOptions) {
+      hilog.warn(DOMAIN, TAG, 'Config not initialized, returning default config');
+      return {
+        enabledServices: [],
+        selectedServiceIndex: 0,
+        commonOptions: {
+          resultSize: 10,
+          timeout: 10000
+        },
+        enableWebSearch: false,
+        connectionStatus: {}
+      };
+    }
     return this.config;
   }
 

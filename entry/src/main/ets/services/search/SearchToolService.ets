@@ -139,15 +139,26 @@ export class SearchToolService {
   ): Promise<SearchResult> {
     try {
       const config = this.configManager.getConfig();
+      
+      // 检查是否启用网络搜索
+      if (!config.enableWebSearch) {
+        hilog.error(DOMAIN, TAG, 'Web search is not enabled in configuration');
+        const err = new Error('网络搜索未启用，请在设置中开启');
+        throw err;
+      }
+      
+      // 检查是否有可用的搜索服务
+      if (!config.enabledServices || config.enabledServices.length === 0) {
+        hilog.error(DOMAIN, TAG, 'No search services configured');
+        const err = new Error('未配置搜索服务，请先在设置中配置搜索引擎');
+        throw err;
+      }
+      
       const selectedService = this.configManager.getSelectedService();
 
       if (!selectedService) {
-        const err = new Error('未配置搜索服务');
-        throw err;
-      }
-
-      if (!config.enableWebSearch) {
-        const err = new Error('网络搜索未启用');
+        hilog.error(DOMAIN, TAG, 'No search service selected');
+        const err = new Error('未选择搜索服务，请在设置中选择一个搜索引擎');
         throw err;
       }
 
@@ -157,7 +168,7 @@ export class SearchToolService {
         timeout: config.commonOptions.timeout ?? 10000
       };
 
-      hilog.info(DOMAIN, TAG, 'Executing search with query: %{public}s', query);
+      hilog.info(DOMAIN, TAG, 'Executing search with query: %{public}s, service: %{public}s', query, selectedService.type);
 
       const result = await service.search(query, commonOptions, selectedService);
 
@@ -177,6 +188,7 @@ export class SearchToolService {
       }
       result.items = updatedItems;
 
+      hilog.info(DOMAIN, TAG, 'Search completed successfully with %{public}d results', result.items.length);
       return result;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Search execution failed: %{public}s', String(error));
