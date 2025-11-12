@@ -41,7 +41,7 @@
 │   └── ...
 │
 ├── Services (服务层)
-│   ├── NetworkManager.ets    - 网络请求管理
+│   ├── NetworkManagerV2.ets  - 网络请求管理（事件驱动）
 │   ├── DatabaseManager.ets   - 数据库管理
 │   ├── TitleGenerationService.ets - 标题生成服务
 │   ├── BrowserHelper.ets     - 浏览器辅助
@@ -223,7 +223,7 @@ User Input
     ↓
 [Chat Page]
     ↓
-[NetworkManager] ←→ [AI API]
+[NetworkManagerV2] ←→ [AI API]
     ↓
 [DatabaseManager] ←→ [Local DB]
     ↓

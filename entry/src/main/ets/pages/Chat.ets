@@ -107,9 +107,9 @@ struct Chat {
   @State isInitialized: boolean = false;
   @State hasSettings: boolean = false;
   @State ctrlFlag: boolean = false;
-  @State enableWebSearch: boolean = false; // 阿里云通义千问 联网搜索开关
+  @State enableWebSearch: boolean = false; // 联网搜索开关（统一控制）
   @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
-  @State currentModelSupportsWebSearchFlag: boolean = false; // 当前模型是否支持联网搜索的UI驱动标志
+  // 🔥 移除 currentModelSupportsWebSearchFlag，不再需要显隐控制
   @State isSearching: boolean = false; // 是否正在执行搜索
   @State searchQuery: string = ''; // 当前搜索查询
   @State searchResults: string = ''; // 搜索结果摘要
@@ -463,31 +463,28 @@ struct Chat {
                   })
 
                 Row() {
-                  // 根据当前模型是否支持内置联网搜索来显示/隐藏联网搜索开关
-                  // 使用 @State 标志替代方法调用，确保 UI 能正确响应状态变化
-                  if (this.currentModelSupportsWebSearchFlag) {
-                    Toggle({ type: ToggleType.Button, isOn: this.enableWebSearch }) {
-                      Image($r('app.media.worldclock'))
-                        .size({ width: 24, height: 24 })
-                        .fillColor(this.enableWebSearch ? Color.Blue : Color.Gray)
-                    }
-                    .size({ width: 40, height: 40 })
-                    .backgroundColor(Color.Transparent)
-                    .onChange((on: boolean) => {
-                      this.enableWebSearch = on;
-                      if (this.currentSettings) {
-                        this.currentSettings.enableWebSearch = on;
-                        // 异步保存设置，不阻塞输入
-                        this.databaseManager.saveSettings(this.currentSettings).then(() => {
-                          // bump settingsVersion 以通知其他页面
-                          const ver = (this.settingsVersion ?? 0) + 1;
-                          AppStorage.setOrCreate('settingsVersion', ver);
-                        }).catch(() => {
-                        });
-                      }
-                    })
-                    .margin({ left: 12 })
+                  // 🔥 联网搜索开关 - 统一控制，始终显示
+                  Toggle({ type: ToggleType.Button, isOn: this.enableWebSearch }) {
+                    Image($r('app.media.worldclock'))
+                      .size({ width: 24, height: 24 })
+                      .fillColor(this.enableWebSearch ? Color.Blue : Color.Gray)
                   }
+                  .size({ width: 40, height: 40 })
+                  .backgroundColor(Color.Transparent)
+                  .onChange((on: boolean) => {
+                    this.enableWebSearch = on;
+                    if (this.currentSettings) {
+                      this.currentSettings.enableWebSearch = on;
+                      // 异步保存设置，不阻塞输入
+                      this.databaseManager.saveSettings(this.currentSettings).then(() => {
+                        // bump settingsVersion 以通知其他页面
+                        const ver = (this.settingsVersion ?? 0) + 1;
+                        AppStorage.setOrCreate('settingsVersion', ver);
+                      }).catch(() => {
+                      });
+                    }
+                  })
+                  .margin({ left: 12 })
 
                   Blank()
 
@@ -776,8 +773,7 @@ struct Chat {
         this.enableWebSearch = !!settings.enableWebSearch;
         // 联动识别阿里云开关
         this.isAliyunActive = this.isAliyunProviderActive();
-        // 同步当前模型是否支持搜索的标志
-        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
+        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
         hilog.error(DOMAIN, TAG, 'Active provider resolved', {
           providerId: activeProvider.id,
           providerName: activeProvider.displayName,
@@ -832,9 +828,9 @@ struct Chat {
           await this.loadChatHistory();
         }
 
-        // 每次设置刷新后，同步更新阿里云识别状态和当前模型搜索能力，驱动 UI 即时变化
+        // 每次设置刷新后，同步更新阿里云识别状态
         this.isAliyunActive = this.isAliyunProviderActive();
-        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
+        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
 
         this.previousSettingsVersion = targetVersion;
         this.logSettingsVersionState('Chat: reloadChatState completed');
@@ -1171,9 +1167,9 @@ struct Chat {
         // 保存到数据库
         await this.databaseManager.saveSettings(this.currentSettings);
 
-        // 切换模型后，立即刷新是否为阿里云状态和当前模型搜索能力，驱动 UI
+        // 切换模型后，立即刷新是否为阿里云状态
         this.isAliyunActive = this.isAliyunProviderActive();
-        this.currentModelSupportsWebSearchFlag = this.isCurrentModelSupportsWebSearch();
+        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
 
         this.showToast(`已切换到${provider.displayName}的${model.displayName}`, 2000);
       }
@@ -1288,28 +1284,7 @@ struct Chat {
     return false;
   }
 
-  // 判断当前活跃模型是否支持内置联网搜索
-  private isCurrentModelSupportsWebSearch(): boolean {
-    const settings = this.currentSettings;
-    if (!settings || !settings.activeProviderId || !settings.activeModelId) {
-      return false;
-    }
-
-    // 查找当前活跃的提供商
-    const activeProvider = settings.providers.find(p => p.id === settings.activeProviderId);
-    if (!activeProvider) {
-      return false;
-    }
-
-    // 查找当前活跃的模型
-    const activeModel = activeProvider.models.find(m => m.id === settings.activeModelId);
-    if (!activeModel) {
-      return false;
-    }
-
-    // 返回模型是否支持联网搜索
-    return !!activeModel.supportsWebSearch;
-  }
+  // 🔥 移除 isCurrentModelSupportsWebSearch 方法，不再需要显隐控制
 
   // 判断是否应该生成标题
   private shouldGenerateTitle(): boolean {
@@ -1853,22 +1828,37 @@ struct Chat {
       // 7️⃣ 准备AI消息列表
       const messagesForAI = this.prepareMessagesForAPI(userMessage);
 
-      // 8️⃣ 检查是否启用联网搜索并构建工具数组
+      // 8️⃣ 检查是否启用联网搜索并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
+      // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
+      let enableAlibabaSearch = false;
+      
       try {
-        const searchConfig = this.searchConfigManager.getConfig();
-        // 检查是否启用网络搜索，并且已配置搜索服务
-        if (searchConfig && searchConfig.enableWebSearch && searchConfig.enabledServices.length > 0) {
-          const selectedService = this.searchConfigManager.getSelectedService();
-          if (selectedService) {
-            const toolDef = this.searchToolService.getToolDefinition();
-            tools = [toolDef as object];
-            hilog.info(DOMAIN, TAG, 'Web search tool enabled with service: %{public}s', selectedService.type);
-          } else {
-            hilog.warn(DOMAIN, TAG, 'Web search enabled but no service selected');
+        if (this.enableWebSearch) {
+          // 如果是阿里云，使用内置搜索
+          if (this.isAliyunActive) {
+            enableAlibabaSearch = true;
+            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search (enable_search=true)');
+          } 
+          // 否则，使用外置工具调用搜索
+          else {
+            const searchConfig = this.searchConfigManager.getConfig();
+            // 检查是否已配置搜索服务
+            if (searchConfig && searchConfig.enabledServices.length > 0) {
+              const selectedService = this.searchConfigManager.getSelectedService();
+              if (selectedService) {
+                const toolDef = this.searchToolService.getToolDefinition();
+                tools = [toolDef as object];
+                hilog.info(DOMAIN, TAG, 'Using external search tool with service: %{public}s', selectedService.type);
+              } else {
+                hilog.warn(DOMAIN, TAG, 'Web search enabled but no service selected');
+              }
+            } else {
+              hilog.warn(DOMAIN, TAG, 'Web search enabled but no services configured');
+            }
           }
         } else {
-          hilog.info(DOMAIN, TAG, 'Web search not enabled or no services configured');
+          hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle');
         }
       } catch (configError) {
         hilog.warn(DOMAIN, TAG, 'Failed to get search config, using default: %{public}s', String(configError));
@@ -1882,8 +1872,8 @@ struct Chat {
         this.currentSettings!.modelName,
         messagesForAI,
         {
-          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
-          tools: tools.length > 0 ? tools : undefined, // OpenAI 工具调用
+          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
+          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
           abortController: this.currentAbortController,
           requestTimeout: 30000
         }
@@ -2132,20 +2122,37 @@ struct Chat {
           i, msg.role, String(!!msg.toolCallId), String(!!(msg.toolCalls && msg.toolCalls.length > 0)), msg.content.length);
       }
 
-      // 检查搜索配置并构建工具数组
+      // 检查搜索配置并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
+      // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
+      let enableAlibabaSearch = false;
+      
       try {
-        const searchConfig = this.searchConfigManager.getConfig();
-        // 检查是否启用网络搜索，并且已配置搜索服务
-        if (searchConfig && searchConfig.enableWebSearch && searchConfig.enabledServices.length > 0) {
-          const selectedService = this.searchConfigManager.getSelectedService();
-          if (selectedService) {
-            const toolDef = this.searchToolService.getToolDefinition();
-            tools = [toolDef as object];
-            hilog.info(DOMAIN, TAG, 'Web search tool enabled in continuation with service: %{public}s', selectedService.type);
-          } else {
-            hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no service selected');
+        if (this.enableWebSearch) {
+          // 如果是阿里云，使用内置搜索
+          if (this.isAliyunActive) {
+            enableAlibabaSearch = true;
+            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search in continuation (enable_search=true)');
           }
+          // 否则，使用外置工具调用搜索
+          else {
+            const searchConfig = this.searchConfigManager.getConfig();
+            // 检查是否已配置搜索服务
+            if (searchConfig && searchConfig.enabledServices.length > 0) {
+              const selectedService = this.searchConfigManager.getSelectedService();
+              if (selectedService) {
+                const toolDef = this.searchToolService.getToolDefinition();
+                tools = [toolDef as object];
+                hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s', selectedService.type);
+              } else {
+                hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no service selected');
+              }
+            } else {
+              hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no services configured');
+            }
+          }
+        } else {
+          hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle in continuation');
         }
       } catch (configError) {
         hilog.warn(DOMAIN, TAG, 'Failed to get search config in continueConversation: %{public}s', String(configError));
@@ -2162,8 +2169,8 @@ struct Chat {
         this.currentSettings!.modelName,
         messagesForAI,
         {
-          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
-          tools: tools.length > 0 ? tools : undefined,
+          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
+          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
           abortController: this.currentAbortController,
           requestTimeout: 30000
         }
@@ -2398,6 +2405,34 @@ struct Chat {
 
       hilog.error(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
+      // 🔥 检查是否启用联网搜索并构建工具数组（互斥逻辑）
+      let tools: object[] = [];
+      let enableAlibabaSearch = false;
+      
+      try {
+        if (this.enableWebSearch) {
+          // 如果是阿里云，使用内置搜索
+          if (this.isAliyunActive) {
+            enableAlibabaSearch = true;
+            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search in regeneration (enable_search=true)');
+          }
+          // 否则，使用外置工具调用搜索
+          else {
+            const searchConfig = this.searchConfigManager.getConfig();
+            if (searchConfig && searchConfig.enabledServices.length > 0) {
+              const selectedService = this.searchConfigManager.getSelectedService();
+              if (selectedService) {
+                const toolDef = this.searchToolService.getToolDefinition();
+                tools = [toolDef as object];
+                hilog.info(DOMAIN, TAG, 'Using external search tool in regeneration with service: %{public}s', selectedService.type);
+              }
+            }
+          }
+        }
+      } catch (configError) {
+        hilog.warn(DOMAIN, TAG, 'Failed to get search config in regeneration: %{public}s', String(configError));
+      }
+
       // 发送流式请求重新生成（使用新的事件驱动架构）
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings?.apiUrl || '',
@@ -2405,7 +2440,8 @@ struct Chat {
         this.currentSettings?.modelName || '',
         messagesForAI,
         {
-          enableWebSearch: this.isAliyunActive && this.enableWebSearch,
+          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
+          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
           abortController: this.currentAbortController,
           requestTimeout: 30000
         }

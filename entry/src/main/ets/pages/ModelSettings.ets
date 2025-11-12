@@ -3,7 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { AppSettings, AIProvider, AIModel, ChatMessage } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { DatabaseManager } from '../services/DatabaseManager';
-import { NetworkManager } from '../services/NetworkManager';
+import { NetworkManagerV2 } from '../services/NetworkManagerV2';
 import { NativeDialogHelper } from '../components/NativeDialogHelper';
 import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { ModelSettingsDialog } from '../components/ModelSettingsDialog';
@@ -41,7 +41,7 @@ struct ModelSettings {
   @State activeProviderId: string = '';
   @State activeModelId: string = '';
   private databaseManager = DatabaseManager.getInstance();
-  private networkManager = NetworkManager.getInstance();
+  private networkManager = NetworkManagerV2.getInstance();
   // bindSheet 状态
   @State private isSettingsSheetVisible: boolean = false;
   @State private activeSheetType: string = '';

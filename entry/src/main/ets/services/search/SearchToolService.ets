@@ -132,6 +132,7 @@ export class SearchToolService {
 
   /**
    * 执行搜索
+   * 注意：开关控制已统一在 Chat.ets 中，此处不再检查 enableWebSearch
    */
   async executeSearch(
     query: string,
@@ -139,13 +140,6 @@ export class SearchToolService {
   ): Promise<SearchResult> {
     try {
       const config = this.configManager.getConfig();
-      
-      // 检查是否启用网络搜索
-      if (!config.enableWebSearch) {
-        hilog.error(DOMAIN, TAG, 'Web search is not enabled in configuration');
-        const err = new Error('网络搜索未启用，请在设置中开启');
-        throw err;
-      }
       
       // 检查是否有可用的搜索服务
       if (!config.enabledServices || config.enabledServices.length === 0) {

@@ -14,16 +14,16 @@
  */
 
 import { ChatMessage } from '../services/DataModels';
-import { NetworkManager } from '../services/NetworkManager';
+import { NetworkManagerV2 } from '../services/NetworkManagerV2';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 const DOMAIN = 0x0000;
 const TAG = 'TitleGenerationService';
 
 export class TitleGenerationService {
-  private networkManager: NetworkManager;
+  private networkManager: NetworkManagerV2;
 
   constructor() {
-    this.networkManager = NetworkManager.getInstance();
+    this.networkManager = NetworkManagerV2.getInstance();
   }
 
   /**
