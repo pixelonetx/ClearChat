@@ -17,7 +17,7 @@ import { SearchReferencesDialog, SearchReference } from './SearchReferencesDialo
 export struct MessageItem {
   // 导航栈：用于在消息中点击链接时跳转到内置浏览器
   @Consume('NavPathStack') pathStack: NavPathStack;
-  @Prop message: ChatMessage;
+  @Prop @Watch('onMessageChanged') message: ChatMessage;
   // 回调函数 - 消息操作事件
   onCopy?: (message: ChatMessage) => void | Promise<void>;
   onEdit?: (message: ChatMessage) => void | Promise<void>;
@@ -29,6 +29,8 @@ export struct MessageItem {
   // 缓存计算结果以提升性能，避免重复计算
   @State private isUserMessage: boolean = false;
   @State private messageContent: string = '';
+  // 新增：响应式搜索阶段状态
+  @State private currentSearchStage: 'none' | 'searching' | 'results' | 'summarizing' | 'done' | 'error' = 'none';
   // 搜索引用对话框
   @State showSearchReferencesDialog: boolean = false;
   @State searchReferences: SearchReference[] = [];
@@ -51,14 +53,33 @@ export struct MessageItem {
     return typeof this.message.content === 'string' && this.message.content.startsWith('[搜索失败]');
   }
 
-  private get searchStage(): 'none' | 'searching' | 'results' | 'summarizing' | 'done' | 'error' {
-    if (!this.isAssistant) return 'none';
-    if (this.isSearchError) return 'error';
-    if (this.hasToolCalls && !this.hasCitations) return 'searching';
-    if (this.hasCitations && this.message.content.length === 0) return 'summarizing';
-    if (this.hasCitations && this.message.content.length > 0) return 'done';
-    if (this.message.content.length === 0) return 'summarizing';
-    return 'none';
+  // 更新搜索阶段
+  private updateSearchStage(): void {
+    if (!this.isAssistant) {
+      this.currentSearchStage = 'none';
+      return;
+    }
+    if (this.isSearchError) {
+      this.currentSearchStage = 'error';
+      return;
+    }
+    if (this.hasToolCalls && !this.hasCitations) {
+      this.currentSearchStage = 'searching';
+      return;
+    }
+    if (this.hasCitations && this.message.content.length === 0) {
+      this.currentSearchStage = 'summarizing';
+      return;
+    }
+    if (this.hasCitations && this.message.content.length > 0) {
+      this.currentSearchStage = 'done';
+      return;
+    }
+    if (this.message.content.length === 0) {
+      this.currentSearchStage = 'summarizing';
+      return;
+    }
+    this.currentSearchStage = 'none';
   }
 
   /**
@@ -67,6 +88,22 @@ export struct MessageItem {
   aboutToAppear() {
     this.isUserMessage = this.message.role === 'user';
     this.messageContent = this.message.content;
+    this.updateSearchStage();
+  }
+
+  /**
+   * 当消息变化时更新状态
+   */
+  onMessageChanged(): void {
+    this.messageContent = this.message.content;
+    this.updateSearchStage();
+  }
+
+  /**
+   * 当消息内容变化时更新状态
+   */
+  aboutToRecycle(): void {
+    this.updateSearchStage();
   }
 
   /**
@@ -313,56 +350,114 @@ export struct MessageItem {
         .justifyContent(FlexAlign.Start)
       }
 
-      if (this.searchStage !== 'none') {
-        Row() {
-          Row() {
-            if (this.searchStage === 'searching') {
-              Row({ space: 6 }) {
-                Text('🔍').fontSize(12)
-                Text('正在联网搜索…').fontSize(12)
-              }
-            } else if (this.searchStage === 'summarizing') {
-              Row({ space: 6 }) {
-                Text('🔎').fontSize(12)
-                Text(this.hasCitations ? `已找到${this.message.citations!.length}条，生成摘要中…` : '生成中…').fontSize(12)
-              }
-            } else if (this.searchStage === 'done') {
-              Row({ space: 6 }) {
-                Text('🔎').fontSize(12)
-                Text(`已使用联网搜索（${this.message.citations!.length} 个来源）`).fontSize(12)
-              }
-            } else if (this.searchStage === 'error') {
-              Row({ space: 6 }) {
-                Text('⚠️').fontSize(12)
-                Text('搜索失败').fontSize(12)
-              }
-            }
+      // 原生简洁的搜索状态展示
+      if (this.currentSearchStage !== 'none') {
+        Row({ space: 10 }) {
+          if (this.currentSearchStage === 'searching') {
+            // 搜索中
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color($r('sys.color.ohos_id_color_emphasize'))
+            
+            Text('正在联网搜索...')
+              .fontSize(14)
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
+              
+          } else if (this.currentSearchStage === 'summarizing') {
+            // 生成摘要中
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color($r('sys.color.ohos_id_color_warning'))
+            
+            Text(this.hasCitations ? `找到 ${this.message.citations!.length} 个结果，生成摘要中...` : '生成中...')
+              .fontSize(14)
+              .fontColor($r('sys.color.ohos_id_color_text_primary'))
+              
+          } else if (this.currentSearchStage === 'done') {
+            // 搜索完成
+            Image($r('sys.symbol.checkmark_circle_fill'))
+              .width(18)
+              .height(18)
+              .fillColor(Color.Green)
+            
+            Text(`已使用联网搜索 (${this.message.citations!.length} 个来源)`)
+              .fontSize(14)
+              .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+              
+          } else if (this.currentSearchStage === 'error') {
+            // 搜索失败
+            Image($r('sys.symbol.exclamationmark_circle_fill'))
+              .width(18)
+              .height(18)
+              .fillColor($r('sys.color.ohos_id_color_warning'))
+            
+            Text('搜索失败')
+              .fontSize(14)
+              .fontColor($r('sys.color.ohos_id_color_warning'))
           }
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .backgroundColor($r('app.color.input_area_color'))
-          .borderRadius(16)
         }
-        .margin({ bottom: 8 })
-        .width('auto')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor($r('app.color.input_area_color'))
+        .borderRadius(8)
+        .margin({ bottom: 10 })
       }
 
+      // 原生简洁的引用卡片展示
       if (this.hasCitations) {
-        Column() {
+        Column({ space: 6 }) {
+          // 引用标题行
+          Row({ space: 6 }) {
+            Image($r('sys.symbol.link'))
+              .width(16)
+              .height(16)
+              .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+            
+            Text(`${this.message.citations!.length} 个参考来源`)
+              .fontSize(13)
+              .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+          }
+          
+          // 展示前3个引用 - 原生列表样式
           ForEach(this.message.citations!.slice(0, Math.min(3, this.message.citations!.length)), (c: Citation, i: number) => {
-            Button() {
-              Column() {
-                Text(`${i + 1}. ${c.title ?? '来源'}`).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Row({ space: 12 }) {
+              // 序号
+              Text(`${i + 1}`)
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('sys.color.ohos_id_color_emphasize'))
+                .width(24)
+              
+              // 标题和URL
+              Column({ space: 2 }) {
+                Text(c.title ?? '来源')
+                  .fontSize(14)
+                  .fontColor($r('sys.color.ohos_id_color_text_primary'))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                
                 if (c.url) {
-                  Text(c.url).fontSize(10).opacity(0.7).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(c.url)
+                    .fontSize(12)
+                    .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
               }
+              .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
+              
+              // 箭头
+              Image($r('sys.symbol.chevron_right'))
+                .width(16)
+                .height(16)
+                .fillColor($r('sys.color.ohos_id_color_fourth'))
             }
-            .type(ButtonType.Capsule)
-            .backgroundColor($r('app.color.common_background'))
-            .fontColor($r('app.color.text_color'))
-            .height(32)
-            .margin({ bottom: 6 })
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .backgroundColor($r('sys.color.ohos_id_color_background'))
+            .borderRadius(8)
             .onClick(() => {
               const refs: SearchReference[] = [];
               const totalLocal = this.message.citations!.length;
@@ -383,15 +478,23 @@ export struct MessageItem {
             })
           }, (c: Citation, i: number) => `${i}`)
 
+          // 查看全部按钮
           if (this.message.citations!.length > 3) {
-            Button() {
-              Text(`查看全部 ${this.message.citations!.length} 个来源`).fontSize(12)
+            Row({ space: 6 }) {
+              Text(`查看全部 ${this.message.citations!.length} 个来源`)
+                .fontSize(14)
+                .fontColor($r('sys.color.ohos_id_color_emphasize'))
+              
+              Image($r('sys.symbol.chevron_right'))
+                .width(16)
+                .height(16)
+                .fillColor($r('sys.color.ohos_id_color_emphasize'))
             }
-            .type(ButtonType.Capsule)
-            .backgroundColor($r('app.color.input_area_color'))
-            .fontColor($r('app.color.text_color'))
-            .height(32)
-            .margin({ bottom: 8 })
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .backgroundColor($r('sys.color.ohos_id_color_background'))
+            .borderRadius(8)
+            .justifyContent(FlexAlign.Center)
             .onClick(() => {
               const refs: SearchReference[] = [];
               const totalLocal = this.message.citations!.length;
@@ -412,8 +515,11 @@ export struct MessageItem {
             })
           }
         }
-        .margin({ bottom: 8 })
+        .margin({ bottom: 12 })
         .width('100%')
+        .padding(12)
+        .backgroundColor($r('app.color.input_area_color'))
+        .borderRadius(12)
       }
 
       Row() {

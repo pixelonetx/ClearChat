@@ -204,66 +204,94 @@ export struct SearchResultsCard {
 
   @Builder
   private resultItemView(item: SearchResultItemData, index: number) {
-    Column({ space: 4 }) {
-      // 标题和 URL
-      Row() {
-        Column({ space: 4 }) {
-          Text(item.title)
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
+    Row({ space: 12 }) {
+      // 索引徽章
+      Column() {
+        Text(`${index + 1}`)
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+      }
+      .width(26)
+      .height(26)
+      .backgroundColor($r('sys.color.ohos_id_color_emphasize'))
+      .borderRadius(13)
+      .justifyContent(FlexAlign.Center)
+
+      // 内容区域
+      Column({ space: 6 }) {
+        // 标题
+        Text(item.title)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.ohos_id_color_text_primary'))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        // 摘要/文本
+        if (item.text) {
+          Text(item.text)
+            .fontSize(12)
+            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
             .maxLines(2)
-            .ellipsisMode(EllipsisMode.END)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .lineHeight(18)
+        }
+
+        // URL 栏
+        Row({ space: 6 }) {
+          Image($r('sys.symbol.link'))
+            .width(12)
+            .height(12)
+            .fillColor($r('sys.color.ohos_id_color_emphasize'))
 
           Text(item.url)
             .fontSize(11)
-            .fontColor($r('app.color.brand_primary'))
+            .fontColor($r('sys.color.ohos_id_color_emphasize'))
             .maxLines(1)
-            .ellipsisMode(EllipsisMode.END)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          Image($r('sys.symbol.arrow_up_right'))
+            .width(12)
+            .height(12)
+            .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+            .opacity(0.6)
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-
-        Image($r('app.media.ic_external_link'))
-          .width(14)
-          .height(14)
-          .fillColor($r('app.color.text_secondary'))
-          .margin({ left: 8 })
-      }
-      .width('100%')
-      .onClick(() => {
-        this.onLinkTap?.(item.url);
-      })
-
-      // 摘要/文本
-      Text(item.text)
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .maxLines(2)
-        .ellipsisMode(EllipsisMode.END)
         .width('100%')
-        .margin({ top: 4 })
-
-      // 索引标签（用于引用）
-      if (item.index !== undefined && item.id) {
-        Row({ space: 4 }) {
-          Text(`[${item.index}]`)
-            .fontSize(10)
-            .fontColor($r('app.color.text_tertiary'))
-            .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-            .backgroundColor($r('app.color.surface_secondary'))
-            .borderRadius(4)
-
-          Text(`ID: ${item.id}`)
-            .fontSize(10)
-            .fontColor($r('app.color.text_tertiary'))
-        }
-        .margin({ top: 4 })
+        .padding({ top: 4, bottom: 4, left: 8, right: 8 })
+        .backgroundColor($r('app.color.input_area_color'))
+        .borderRadius(6)
       }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .padding(8)
-    .backgroundColor($r('app.color.surface_secondary'))
-    .borderRadius(8)
+    .padding(12)
+    .backgroundColor($r('app.color.common_background'))
+    .borderRadius(10)
+    .border({
+      width: 1,
+      color: $r('sys.color.ohos_id_color_list_separator')
+    })
+    .shadow({
+      radius: 4,
+      color: 'rgba(0, 0, 0, 0.04)',
+      offsetX: 0,
+      offsetY: 2
+    })
+    .onClick(() => {
+      this.onLinkTap?.(item.url);
+    })
+    .stateStyles({
+      pressed: {
+        .scale({ x: 0.98, y: 0.98 })
+        .backgroundColor($r('app.color.input_area_color'))
+      }
+    })
+    .animation({
+      duration: 200,
+      curve: Curve.EaseInOut
+    })
   }
 }
