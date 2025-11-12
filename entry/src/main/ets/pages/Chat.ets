@@ -1983,8 +1983,7 @@ struct Chat {
           hilog.info(DOMAIN, TAG, 'Executing search for query: %{public}s with toolCallId: %{public}s', 
             query, toolCall.id);
 
-          // 显示搜索状态提示
-          this.showToast(`正在搜索: ${query}`);
+          
 
           // 执行搜索
           const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
@@ -2022,8 +2021,7 @@ struct Chat {
             }
           }
 
-          // 继续对话 - 基于搜索结果生成回复
-          await this.continueConversationWithToolResult(conversationId, searchResult, toolCall.id, toolCall.name);
+          await this.continueConversationWithToolResult(conversationId, assistantMessageIndex, searchResult, toolCall.id, toolCall.name);
 
         } catch (error) {
           hilog.error(DOMAIN, TAG, 'Tool execution failed: %{public}s', String(error));
@@ -2043,7 +2041,7 @@ struct Chat {
             errorMessage = `搜索失败: ${err.message}`;
           }
           
-          this.showToast(errorMessage);
+          
           
           // 在消息中显示错误
           if (assistantMessageIndex < this.messages.length) {
@@ -2062,6 +2060,7 @@ struct Chat {
   // ✅ 继续对话 - 在工具执行后
   private async continueConversationWithToolResult(
     conversationId: string,
+    assistantMessageIndex: number,
     searchResult?: import('../services/search/SearchModels').SearchResult,
     toolCallId?: string,
     toolName?: string
@@ -2119,18 +2118,9 @@ struct Chat {
 
       }
 
-      // 初始化新的流式消息（AI的继续回答）
-      const dummyMessage = new ChatMessage(
-        '',
-        'user',
-        { conversationId: conversationId, timestamp: Date.now() }
-      );
-      const streamingResult = await this.initializeStreamingMessage(dummyMessage, conversationId);
-      const streamingIndex = streamingResult.index;
+    const streamingIndex = assistantMessageIndex;
 
-      // 准备消息列表 - 包含：user → assistant(with tool_call) → tool_result → 新assistant(stream)
-      // 注意：需要排除最后一个空的 assistant 消息（刚刚创建的流式消息占位符）
-      const allMessages = this.messages.slice(0, this.messages.length - 1); // 排除刚创建的空 assistant
+      const allMessages = this.messages.slice(0, this.messages.length);
       const messagesForAI = allMessages.slice(Math.max(0, allMessages.length - 20));
 
       hilog.info(DOMAIN, TAG, 'Continuing with %{public}d messages in context (excluded new assistant placeholder)', messagesForAI.length);
