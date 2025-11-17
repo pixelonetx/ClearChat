@@ -6,6 +6,7 @@
  */
 
 import { WebBrowserParam } from '../components/WebViewBrowser';
+import { MessageStyle } from './MessageStyle';
 
 export interface SearchResultItem {
   title: string;
@@ -93,12 +94,12 @@ export struct SearchResultsSheet {
               // 结果编号和标题
               Row({ space: 8 }) {
                 Text(`${item.index ?? idx + 1}.`)
-                  .fontSize(12)
+                  .fontSize(MessageStyle.SEARCH_RESULT_SUMMARY_FONT_SIZE)
                   .fontColor($r('app.color.text_secondary'))
                   .width(24)
 
                 Text(item.title)
-                  .fontSize(14)
+                  .fontSize(MessageStyle.SEARCH_RESULT_TITLE_FONT_SIZE)
                   .fontWeight(FontWeight.Medium)
                   .layoutWeight(1)
                   .maxLines(2)
@@ -110,7 +111,7 @@ export struct SearchResultsSheet {
               // 摘要文本
               if (item.text) {
                 Text(item.text)
-                  .fontSize(12)
+                  .fontSize(MessageStyle.SEARCH_RESULT_SUMMARY_FONT_SIZE)
                   .fontColor($r('app.color.text_secondary'))
                   .margin({ top: 6, left: 32 })
                   .maxLines(2)
@@ -121,11 +122,11 @@ export struct SearchResultsSheet {
               // URL
               Row({ space: 6 }) {
                 Text('🔗')
-                  .fontSize(12)
+                  .fontSize(MessageStyle.SEARCH_RESULT_SUMMARY_FONT_SIZE)
                   .margin({ left: 32 })
 
                 Text(item.url)
-                  .fontSize(11)
+                  .fontSize(MessageStyle.SEARCH_RESULT_URL_FONT_SIZE)
                   .fontColor(Color.Blue)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })

@@ -12,6 +12,10 @@
  * - 字体配置：monospace、default
  * - 装饰效果：underline、linethrough 等
  *
+ * 备注：
+ * - TEXT_FONT_SIZE 用于渲染 Markdown 中的普通文本内容（段落、引用等）
+ * - 这是助手消息的实际字号控制点
+ *
  * 使用方式：
  * - 通过 MarkdownStyle.CATEGORY_NAME 访问
  * - 所有常量均为只读静态属性
@@ -33,7 +37,7 @@ export class MarkdownStyle {
   static readonly HEADING_SIZE_H6: number = 12;
 
   /** 普通文本字体大小 */
-  static readonly TEXT_FONT_SIZE: number = 14;
+  static readonly TEXT_FONT_SIZE: number = 15;
   /** 代码块文本字体大小 */
   static readonly CODE_FONT_SIZE: number = 14;
   /** 表格单元格文本字体大小 */

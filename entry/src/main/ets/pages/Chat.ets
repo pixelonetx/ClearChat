@@ -46,6 +46,15 @@ interface MaybeStringifiable {
   toString?: () => string;
 }
 
+interface ResponseInfo {
+  status?: number;
+}
+
+interface ExtendedError extends Error {
+  code?: string | number;
+  response?: ResponseInfo;
+}
+
 class ToastOptions {
   message: string;
   duration?: number;
@@ -193,7 +202,20 @@ struct Chat {
       }
     }
 
-    if (!rawMessage) {
+    // 如果 toString() 返回的是 [object Object]，说明错误对象无法序列化
+    // 这时尝试获取错误的其他属性
+    if (!rawMessage || rawMessage === '[object Object]') {
+      const extendedError = error as ExtendedError;
+      if (extendedError.name) {
+        rawMessage = extendedError.name;
+      } else if (extendedError.code) {
+        rawMessage = `错误代码: ${extendedError.code}`;
+      } else if (extendedError.response?.status) {
+        rawMessage = `HTTP ${extendedError.response.status}`;
+      }
+    }
+
+    if (!rawMessage || rawMessage === '[object Object]') {
       return '发送消息失败';
     }
 
@@ -415,7 +437,8 @@ struct Chat {
                             if (message.id !== undefined) {
                               return `saved_${message.id}_${message.content.length}`;
                             } else {
-                              return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+                              return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp %
+                                10000}`;
                             }
                           })
                         }
@@ -451,8 +474,9 @@ struct Chat {
                       })
                       .onScrollEdge((side: Edge) => {
                         // 🆕 检测是否滑到了底部边缘
-                        if (side === Edge.Bottom && !this.shouldAutoScroll) {
-                          // 用户已滑到底部且当前不在自动跟随模式，自动隐藏按钮并启用自动跟随
+                        // 只要检测到底部边缘，就隐藏按钮并启用自动跟随
+                        if (side === Edge.Bottom) {
+                          // 用户已滑到底部，自动隐藏按钮并启用自动跟随
                           this.shouldAutoScroll = true;
                           this.showScrollToBottomButton = false;
                           hilog.info(DOMAIN, TAG, 'User scrolled to bottom, re-enable auto-scroll');
@@ -984,7 +1008,7 @@ struct Chat {
       // 🆕 重置自动滚动状态并滚动到底部
       this.shouldAutoScroll = true;
       this.showScrollToBottomButton = false;
-      
+
       // 滚动到底部
       setTimeout(() => {
         this.scrollToBottom();
@@ -1568,14 +1592,21 @@ struct Chat {
    * @param emitter 事件发射器
    * @param streamingMessageIndex 流式消息索引
    * @param conversationId 对话ID
+   * @param isToolContinuation 是否是工具继续阶段（默认 false）
    */
   private setupStreamEventHandlers(
     emitter: StreamEventEmitter,
     streamingMessageIndex: number,
-    conversationId: string
+    conversationId: string,
+    isToolContinuation: boolean = false
   ): void {
-    hilog.info(DOMAIN, TAG, 'Setting up stream event handlers for message index: %{public}d', streamingMessageIndex);
-    
+    hilog.info(DOMAIN, TAG,
+      'Setting up stream event handlers for message index: %{public}d, isToolContinuation=%{public}s',
+      streamingMessageIndex, String(isToolContinuation));
+
+    // 🔥 标志：用于跟踪是否已处理工具调用（防止 COMPLETE 事件在工具执行期间重置状态）
+    let toolCallHandled = false;
+
     // 监听数据事件
     emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
       const chunk = payload as string;
@@ -1592,20 +1623,30 @@ struct Chat {
 
     // 监听完成事件
     emitter.once(StreamEventType.COMPLETE, () => {
-      hilog.info(DOMAIN, TAG, 'Received COMPLETE event for message index: %{public}d', streamingMessageIndex);
-      this.handleStreamComplete();
+      hilog.info(DOMAIN, TAG, 'Received COMPLETE event for message index: %{public}d, toolCallHandled=%{public}s',
+        streamingMessageIndex, String(toolCallHandled));
+
+      // 🔥 关键修复：只有在没有工具调用时才重置状态
+      // 如果有工具调用，让 continueConversationWithToolResult 中的流来处理完成
+      if (!toolCallHandled) {
+        this.handleStreamComplete();
+      }
+
       // 异步持久化，不阻塞UI状态更新
-      this.persistStreamedMessage(streamingMessageIndex, conversationId)
-        .catch((err: Error) => {
-          hilog.error(DOMAIN, TAG, 'Failed to persist message: %{public}s', String(err));
-        });
+      if (!toolCallHandled) {
+        this.persistStreamedMessage(streamingMessageIndex, conversationId)
+          .catch((err: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist message: %{public}s', String(err));
+          });
+      }
     });
 
     // 监听错误事件
     emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
       const error = payload as Error;
       hilog.error(DOMAIN, TAG, 'Received ERROR event: %{public}s', String(error));
-      this.handleStreamError(streamingMessageIndex, error);
+      // 🔥 在工具继续阶段的错误会有不同的处理
+      this.handleStreamError(streamingMessageIndex, error, isToolContinuation);
     });
 
     // 监听警告事件（可选）
@@ -1618,13 +1659,18 @@ struct Chat {
     emitter.once(StreamEventType.TOOL_CALL, (payload: EventPayload) => {
       const toolCalls = payload as import('../services/StreamEventEmitter').ToolCallData[];
       hilog.info(DOMAIN, TAG, 'Received TOOL_CALL event with %{public}d calls', toolCalls.length);
+
+      // 🔥 标记已处理工具调用，这样之后的 COMPLETE 事件就不会重置状态
+      toolCallHandled = true;
+
       this.handleToolCalls(toolCalls, streamingMessageIndex, conversationId)
         .catch((err: Error) => {
           hilog.error(DOMAIN, TAG, 'Failed to handle tool calls: %{public}s', String(err));
-          this.handleStreamError(streamingMessageIndex, err);
+          // 工具调用错误不应该通过 handleStreamError 处理，因为已经在 handleToolCalls 中处理过了
+          // this.handleStreamError(streamingMessageIndex, err);
         });
     });
-    
+
     hilog.info(DOMAIN, TAG, 'Stream event handlers setup completed');
   }
 
@@ -1776,8 +1822,9 @@ struct Chat {
    * 处理流式请求错误
    * @param messageIndex 消息索引
    * @param error 错误对象
+   * @param isToolContinuation 是否是工具继续阶段的错误（默认 false）
    */
-  private handleStreamError(messageIndex: number, error: Error): void {
+  private handleStreamError(messageIndex: number, error: Error, isToolContinuation: boolean = false): void {
     const friendlyError = this.getFriendlySendErrorMessage(error);
 
     // 如果是用户主动中止，保留已显示的内容；否则显示错误提示
@@ -1787,7 +1834,9 @@ struct Chat {
         if (msg.content.length === 0) {
           msg.content = `[错误] ${friendlyError}`;
         } else {
-          msg.content += `\n\n[错误] 生成过程中出现错误: ${friendlyError}`;
+          // 根据是否是工具继续阶段来显示不同的错误前缀
+          const errorPrefix = isToolContinuation ? '继续生成失败' : '生成过程中出现错误';
+          msg.content += `\n\n[错误] ${errorPrefix}: ${friendlyError}`;
         }
       });
     }
@@ -1922,14 +1971,14 @@ struct Chat {
       // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
       let enableAlibabaSearch = false;
-      
+
       try {
         if (this.enableWebSearch) {
           // 如果是阿里云，使用内置搜索
           if (this.isAliyunActive) {
             enableAlibabaSearch = true;
             hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search (enable_search=true)');
-          } 
+          }
           // 否则，使用外置工具调用搜索
           else {
             const searchConfig = this.searchConfigManager.getConfig();
@@ -2018,36 +2067,39 @@ struct Chat {
     // 🔥 关键修复：将工具调用信息保存到 assistant 消息中
     if (assistantMessageIndex < this.messages.length) {
       // 转换为 ToolCall 格式
-      const formattedToolCalls: import('../services/DataModels').ToolCall[] = toolCalls.map((tc): import('../services/DataModels').ToolCall => {
-        const toolFunction: import('../services/DataModels').ToolFunction = {
-          name: tc.name,
-          arguments: tc.arguments
-        };
-        
-        const toolCall: import('../services/DataModels').ToolCall = {
-          id: tc.id,
-          type: tc.type || 'function',
-          function: toolFunction
-        };
-        
-        return toolCall;
-      });
-      
+      const formattedToolCalls: import('../services/DataModels').ToolCall[] =
+        toolCalls.map((tc): import('../services/DataModels').ToolCall => {
+          const toolFunction: import('../services/DataModels').ToolFunction = {
+            name: tc.name,
+            arguments: tc.arguments
+          };
+
+          const toolCall: import('../services/DataModels').ToolCall = {
+            id: tc.id,
+            type: tc.type || 'function',
+            function: toolFunction
+          };
+
+          return toolCall;
+        });
+
       this.replaceMessageAt(assistantMessageIndex, (msg) => {
         msg.toolCalls = formattedToolCalls;
       });
-      
+
       hilog.info(DOMAIN, TAG, 'Saved %{public}d tool calls to assistant message', formattedToolCalls.length);
     }
 
-    // 停止当前流
-    this.handleStreamComplete();
+    // 🔥 重要修复：不在此处调用 handleStreamComplete()
+    // 原因：工具调用完成后还需继续生成模型回答，不应该重置 isGenerating 状态
+    // handleStreamComplete() 应该在最终流完成时由 setupStreamEventHandlers 中的 COMPLETE 事件处理器调用
+    // this.handleStreamComplete();
 
     // 执行每个工具调用
     for (const toolCall of toolCalls) {
-      hilog.info(DOMAIN, TAG, 'Processing tool call: id=%{public}s, name=%{public}s, type=%{public}s', 
+      hilog.info(DOMAIN, TAG, 'Processing tool call: id=%{public}s, name=%{public}s, type=%{public}s',
         String(toolCall.id || 'MISSING'), String(toolCall.name), String(toolCall.type));
-      
+
       if (toolCall.name === 'search_web' && toolCall.arguments) {
         try {
           // 验证工具调用 ID
@@ -2060,10 +2112,9 @@ struct Chat {
           const args = JSON.parse(toolCall.arguments) as SearchToolArgs;
           const query = args.query;
 
-          hilog.info(DOMAIN, TAG, 'Executing search for query: %{public}s with toolCallId: %{public}s', 
+          hilog.info(DOMAIN, TAG, 'Executing search for query: %{public}s with toolCallId: %{public}s',
             query, toolCall.id);
 
-          
 
           // 执行搜索
           const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
@@ -2101,12 +2152,13 @@ struct Chat {
             }
           }
 
-          await this.continueConversationWithToolResult(conversationId, assistantMessageIndex, searchResult, toolCall.id, toolCall.name);
+          await this.continueConversationWithToolResult(conversationId, assistantMessageIndex, searchResult,
+            toolCall.id, toolCall.name);
 
         } catch (error) {
           hilog.error(DOMAIN, TAG, 'Tool execution failed: %{public}s', String(error));
           const err = error instanceof Error ? error : new Error(String(error));
-          
+
           // 显示友好的错误提示
           let errorMessage = '搜索失败';
           if (err.message.includes('未配置')) {
@@ -2120,16 +2172,27 @@ struct Chat {
           } else {
             errorMessage = `搜索失败: ${err.message}`;
           }
-          
-          
-          
-          // 在消息中显示错误
+
+          // 🔥 关键修复：只在消息为空时才设置错误，否则追加
+          // 这样可以保留已有的内容并追加错误说明
           if (assistantMessageIndex < this.messages.length) {
             this.replaceMessageAt(assistantMessageIndex, (msg) => {
-              msg.content = `[搜索失败] ${errorMessage}\n\n请检查搜索配置或稍后重试。`;
+              if (msg.content.length === 0) {
+                // 消息为空，设置错误信息
+                msg.content = `[搜索失败] ${errorMessage}\n\n请检查搜索配置或稍后重试。`;
+              } else {
+                // 消息不为空，追加错误信息而不是替换
+                msg.content += `\n\n[搜索失败] ${errorMessage}\n请检查搜索配置或稍后重试。`;
+              }
             });
           }
-          
+
+          // 🔥 错误处理：如果搜索失败，不继续生成，而是重置状态
+          // 这样可以避免继续对话时出现"生成过程中出现错误"
+          this.isLoading = false;
+          this.isGenerating = false;
+          this.currentAbortController = null;
+
           // 不抛出错误，允许继续处理其他工具调用
           continue;
         }
@@ -2150,12 +2213,17 @@ struct Chat {
       return;
     }
 
-    // 重置状态
+    // ✅ 关键修复：保持 isGenerating = true，因为工具执行后还要继续生成模型回答
+    // 不要在此处重置状态，应该让 setupStreamEventHandlers 中的事件处理器来管理
+    // 这样可以确保按钮在整个过程中保持正确的状态
+
+    // 保持 isLoading = true 和 isGenerating = true，确保按钮显示"停止"而不是"发送"
     this.isLoading = true;
-    this.isGenerating = true;
+    // isGenerating 应该已经为 true（来自 handleToolCalls 调用前的状态）
     this.currentAbortController = createAbortController();
-    
-    hilog.info(DOMAIN, TAG, 'Starting continueConversationWithToolResult, isLoading=%{public}s, isGenerating=%{public}s', 
+
+    hilog.info(DOMAIN, TAG,
+      'Starting continueConversationWithToolResult, isLoading=%{public}s, isGenerating=%{public}s',
       String(this.isLoading), String(this.isGenerating));
 
     try {
@@ -2192,30 +2260,34 @@ struct Chat {
         // 为内存中的消息分配一个临时ID（不从数据库获取）
         toolResultMessage.id = -toolContent.length; // 使用负数作为临时ID标识
 
-        hilog.info(DOMAIN, TAG, 'Added tool result message to memory with %{public}d search items, toolCallId preserved: %{public}s', 
+        hilog.info(DOMAIN, TAG,
+          'Added tool result message to memory with %{public}d search items, toolCallId preserved: %{public}s',
           searchResult.items.length, String(!!this.messages[toolIndex].toolCallId));
 
       }
 
-    const streamingIndex = assistantMessageIndex;
+      const streamingIndex = assistantMessageIndex;
 
       const allMessages = this.messages.slice(0, this.messages.length);
       const messagesForAI = allMessages.slice(Math.max(0, allMessages.length - 20));
 
-      hilog.info(DOMAIN, TAG, 'Continuing with %{public}d messages in context (excluded new assistant placeholder)', messagesForAI.length);
-      
+      hilog.info(DOMAIN, TAG, 'Continuing with %{public}d messages in context (excluded new assistant placeholder)',
+        messagesForAI.length);
+
       // 打印消息序列以便调试
       for (let i = 0; i < messagesForAI.length; i++) {
         const msg = messagesForAI[i];
-        hilog.info(DOMAIN, TAG, 'Message[%{public}d]: role=%{public}s, hasToolCallId=%{public}s, hasToolCalls=%{public}s, contentLength=%{public}d', 
-          i, msg.role, String(!!msg.toolCallId), String(!!(msg.toolCalls && msg.toolCalls.length > 0)), msg.content.length);
+        hilog.info(DOMAIN, TAG,
+          'Message[%{public}d]: role=%{public}s, hasToolCallId=%{public}s, hasToolCalls=%{public}s, contentLength=%{public}d',
+          i, msg.role, String(!!msg.toolCallId), String(!!(msg.toolCalls && msg.toolCalls.length > 0)),
+          msg.content.length);
       }
 
       // 检查搜索配置并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
       // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
       let enableAlibabaSearch = false;
-      
+
       try {
         if (this.enableWebSearch) {
           // 如果是阿里云，使用内置搜索
@@ -2232,7 +2304,8 @@ struct Chat {
               if (selectedService) {
                 const toolDef = this.searchToolService.getToolDefinition();
                 tools = [toolDef as object];
-                hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s', selectedService.type);
+                hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s',
+                  selectedService.type);
               } else {
                 hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no service selected');
               }
@@ -2249,9 +2322,9 @@ struct Chat {
 
       // 发送流式请求
       hilog.info(DOMAIN, TAG, 'About to send stream request for continuation...');
-      hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d', 
+      hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
         this.currentSettings!.apiUrl.substring(0, 30), this.currentSettings!.modelName, messagesForAI.length);
-      
+
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings!.apiUrl,
         this.currentSettings!.apiKey,
@@ -2268,10 +2341,11 @@ struct Chat {
       hilog.info(DOMAIN, TAG, 'Stream request sent, emitter created successfully');
 
       // 🔥 关键修复：设置事件处理器来接收流式响应
-      this.setupStreamEventHandlers(emitter, streamingIndex, conversationId);
-      
+      // 传递 isToolContinuation = true，表示这是工具继续阶段的错误处理
+      this.setupStreamEventHandlers(emitter, streamingIndex, conversationId, true);
+
       hilog.info(DOMAIN, TAG, 'Stream event handlers set up for continuation response, waiting for data...');
-      
+
       // ⏱️ 设置超时保护：如果60秒内没有收到任何数据或完成事件，强制重置状态
       const timeoutId = setTimeout(() => {
         if (this.isLoading || this.isGenerating) {
@@ -2280,7 +2354,7 @@ struct Chat {
           this.isGenerating = false;
           this.currentAbortController = null;
           this.showToast('请求超时，请重试');
-          
+
           // 在消息中显示超时提示
           if (streamingIndex < this.messages.length) {
             this.replaceMessageAt(streamingIndex, (msg) => {
@@ -2291,7 +2365,7 @@ struct Chat {
           }
         }
       }, 60000);
-      
+
       // 在完成或错误时清除超时
       emitter.once(StreamEventType.COMPLETE, () => {
         clearTimeout(timeoutId);
@@ -2306,6 +2380,22 @@ struct Chat {
       this.isGenerating = false;
       this.currentAbortController = null;
       const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
+
+      // 🔥 关键修复：在消息中追加错误而不是覆盖
+      // 如果已经有搜索结果，应该追加错误而不是完全替换
+      const streamingIndex = assistantMessageIndex;
+      if (streamingIndex < this.messages.length) {
+        this.replaceMessageAt(streamingIndex, (msg) => {
+          if (msg.content.length === 0) {
+            // 如果消息为空，显示错误
+            msg.content = `[错误] ${friendlyError}`;
+          } else {
+            // 如果已有内容，追加错误
+            msg.content += `\n\n[错误] 继续生成失败: ${friendlyError}`;
+          }
+        });
+      }
+
       this.showToast(friendlyError);
     }
   }
@@ -2505,7 +2595,7 @@ struct Chat {
       // 🔥 检查是否启用联网搜索并构建工具数组（互斥逻辑）
       let tools: object[] = [];
       let enableAlibabaSearch = false;
-      
+
       try {
         if (this.enableWebSearch) {
           // 如果是阿里云，使用内置搜索
@@ -2521,7 +2611,8 @@ struct Chat {
               if (selectedService) {
                 const toolDef = this.searchToolService.getToolDefinition();
                 tools = [toolDef as object];
-                hilog.info(DOMAIN, TAG, 'Using external search tool in regeneration with service: %{public}s', selectedService.type);
+                hilog.info(DOMAIN, TAG, 'Using external search tool in regeneration with service: %{public}s',
+                  selectedService.type);
               }
             }
           }
