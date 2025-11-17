@@ -113,6 +113,9 @@ struct Chat {
   @State isSearching: boolean = false; // 是否正在执行搜索
   @State searchQuery: string = ''; // 当前搜索查询
   @State searchResults: string = ''; // 搜索结果摘要
+  // 🆕 自动滚动相关状态
+  @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
+  @State showScrollToBottomButton: boolean = false; // 是否显示"滚动到底部"按钮
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManagerV2.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -368,76 +371,137 @@ struct Chat {
                 .height('100%')
                 .justifyContent(FlexAlign.Center)
               } else {
-                // 消息列表
-                if (this.messages.length === 0) {
-                  // 空状态
+                // 🆕 使用Stack包裹消息列表和浮层按钮
+                Stack() {
+                  // 消息列表
                   Column() {
-                    Text('有什么可以帮忙的？')
-                      .fontSize(18)
-                      .margin({ top: 16 })
+                    if (this.messages.length === 0) {
+                      // 空状态
+                      Column() {
+                        Text('有什么可以帮忙的？')
+                          .fontSize(18)
+                          .margin({ top: 16 })
 
-                    if (!this.hasSettings) {
-                      Button('配置API设置')
-                        .buttonStyle(ButtonStyleMode.NORMAL)
-                        .padding({ left: 20, right: 20 })
-                        .margin({ top: 16 })
-                        .onClick(() => {
-                          this.pathStack.pushPathByName("ModelSettings", null);
-                          this.hideKeyboard();
+                        if (!this.hasSettings) {
+                          Button('配置API设置')
+                            .buttonStyle(ButtonStyleMode.NORMAL)
+                            .padding({ left: 20, right: 20 })
+                            .margin({ top: 16 })
+                            .onClick(() => {
+                              this.pathStack.pushPathByName("ModelSettings", null);
+                              this.hideKeyboard();
+                            })
+                        }
+                      }
+                      .width('100%')
+                      .layoutWeight(1)
+                      .justifyContent(FlexAlign.Center)
+                    } else {
+                      // 消息列表（使用 LazyForEach 虚拟化以提升性能）
+                      Scroll(this.scroller) {
+                        Column() {
+                          LazyForEach(this.messageDataSource, (message: ChatMessage, index: number) => {
+                            MessageItem({
+                              message: message,
+                              onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
+                              onEdit: (msg: ChatMessage): void => {
+                                this.editMessage(msg);
+                              },
+                              onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
+                              onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
+                            })
+                          }, (message: ChatMessage, index: number) => {
+                            // 稳定的 key 生成策略，减少重建和提升滚动性能
+                            if (message.id !== undefined) {
+                              return `saved_${message.id}_${message.content.length}`;
+                            } else {
+                              return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+                            }
+                          })
+                        }
+                        .padding({
+                          left: 16,
+                          right: 16,
+                          top: 16,
+                          bottom: 16
                         })
-                    }
-                  }
-                  .width('100%')
-                  .layoutWeight(1)
-                  .justifyContent(FlexAlign.Center)
-                } else {
-                  // 消息列表（使用 LazyForEach 虚拟化以提升性能）
-                  Scroll(this.scroller) {
-                    Column() {
-                      LazyForEach(this.messageDataSource, (message: ChatMessage, index: number) => {
-                        MessageItem({
-                          message: message,
-                          onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                          onEdit: (msg: ChatMessage): void => {
-                            this.editMessage(msg);
-                          },
-                          onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
-                          onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
-                        })
-                      }, (message: ChatMessage, index: number) => {
-                        // 稳定的 key 生成策略，减少重建和提升滚动性能
-                        if (message.id !== undefined) {
-                          return `saved_${message.id}_${message.content.length}`;
-                        } else {
-                          return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+                        .width('100%')
+                        .alignItems(HorizontalAlign.Center)
+                        .justifyContent(FlexAlign.Start)
+                      }
+                      .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
+                      .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
+                      .onScrollFrameBegin((offset, state) => {
+                        // 🆕 改进的逻辑：
+                        // 1. 如果用户向上滑，禁用自动跟随
+                        // 2. 如果用户向下滑且当前不在自动跟随模式，检查是否到底部
+                        if (offset !== 0) {
+                          if (offset > 0 && this.shouldAutoScroll) {
+                            // 向上滑且当前在自动跟随模式，禁用自动跟随
+                            this.shouldAutoScroll = false;
+                            this.showScrollToBottomButton = true;
+                          } else if (offset < 0 && !this.shouldAutoScroll) {
+                            // 向下滑且当前在禁用自动跟随模式，检查是否快到底部
+                            // 如果继续向下滑动且不在自动跟随，说明用户在浏览消息
+                            // 不需要立即隐藏按钮，让用户继续浏览
+                          }
+                        }
+                        // 动态调整滚动量实现自定义阻尼
+                        return { offsetRemain: offset * 0.7 }
+                      })
+                      .onScrollEdge((side: Edge) => {
+                        // 🆕 检测是否滑到了底部边缘
+                        if (side === Edge.Bottom && !this.shouldAutoScroll) {
+                          // 用户已滑到底部且当前不在自动跟随模式，自动隐藏按钮并启用自动跟随
+                          this.shouldAutoScroll = true;
+                          this.showScrollToBottomButton = false;
+                          hilog.info(DOMAIN, TAG, 'User scrolled to bottom, re-enable auto-scroll');
                         }
                       })
+                      .layoutWeight(1)
+                      .scrollable(ScrollDirection.Vertical)
+                      .scrollBar(BarState.Off)
+                      .width('100%')
+                      .align(Alignment.TopStart)
+                      .onClick(() => {
+                        this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
+                      })
                     }
-                    .padding({
-                      left: 16,
-                      right: 16,
-                      top: 16,
-                      bottom: 16
-                    })
-                    .width('100%')
-                    .alignItems(HorizontalAlign.Center)
-                    .justifyContent(FlexAlign.Start)
                   }
-                  .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
-                  .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
-                  .onScrollFrameBegin((offset, state) => {
-                    // 动态调整滚动量实现自定义阻尼
-                    return { offsetRemain: offset * 0.7 }
-                  })
                   .layoutWeight(1)
-                  .scrollable(ScrollDirection.Vertical)
-                  .scrollBar(BarState.Off)
                   .width('100%')
-                  .align(Alignment.TopStart)
-                  .onClick(() => {
-                    this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
-                  })
+
+                  // "滚动到底部"按钮 - 浮在消息列表上方
+                  if (this.showScrollToBottomButton) {
+                    Button('↓')
+                      .fontSize(16)
+                      .fontColor($r('app.color.text_color'))
+                      .type(ButtonType.Circle)
+                      // .backgroundColor($r('app.color.start_window_background'))
+                      .backgroundColor(Color.Transparent)
+                      .size({ height: 40, width: 40 })
+                      .padding({ left: 6, right: 6 })
+                      .backgroundBlurStyle(BlurStyle.Thin, {
+                        colorMode: ThemeColorMode.LIGHT, // 适配浅色主题
+                        adaptiveColor: AdaptiveColor.DEFAULT,
+                        scale: 1.0 // 模糊缩放比例
+                      })
+                      .onClick(() => {
+                        // 直接滚动，不经过scrollToBottom()的检查
+                        if (this.scroller) {
+                          this.scroller.scrollEdge(Edge.Bottom);
+                        }
+                        // 滚动后重新启用自动跟随，隐藏按钮
+                        this.shouldAutoScroll = true;
+                        this.showScrollToBottomButton = false;
+                      })
+                      .margin({ bottom: 16 })
+                      .zIndex(5)
+                  }
                 }
+                .alignContent(Alignment.Bottom)
+                .width('100%')
+                .layoutWeight(1)
               }
 
               // 输入
@@ -698,6 +762,17 @@ struct Chat {
       const context = getContext(this) as common.UIAbilityContext;
       await this.databaseManager.initDatabase(context);
 
+      // 🔥 清理历史中的tool消息（修复消息顺序问题）
+      try {
+        const cleanedCount = await this.databaseManager.cleanupToolMessages();
+        if (cleanedCount > 0) {
+          hilog.warn(DOMAIN, TAG, 'Cleaned up %{public}d tool messages from database', cleanedCount);
+        }
+      } catch (cleanupError) {
+        hilog.warn(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(cleanupError));
+        // 不阻塞应用启动，忽略清理失败
+      }
+
       // 初始化搜索配置管理器
       try {
         await this.searchConfigManager.init(context);
@@ -906,6 +981,10 @@ struct Chat {
       }
       this.notifyMessagesUpdated();
 
+      // 🆕 重置自动滚动状态并滚动到底部
+      this.shouldAutoScroll = true;
+      this.showScrollToBottomButton = false;
+      
       // 滚动到底部
       setTimeout(() => {
         this.scrollToBottom();
@@ -1401,7 +1480,9 @@ struct Chat {
     const streamingMessage = new ChatMessage('', 'assistant', {
       conversationId: conversationId,
       modelName: modelInfo.modelName,
-      providerName: modelInfo.providerName
+      providerName: modelInfo.providerName,
+      // 🔥 关键修复：AI消息时间戳应该严格晚于用户消息，确保正确的显示顺序
+      timestamp: Math.max(userMessage.timestamp + 1, Date.now())
     });
 
     const index = this.appendMessage(streamingMessage);
@@ -1799,6 +1880,9 @@ struct Chat {
       // 2️⃣ 前置检查和准备
       await this.waitForLatestSettings('sendMessage');
       this.hideKeyboard();
+      // 🆕 发送消息时重置自动滚动状态
+      this.shouldAutoScroll = true;
+      this.showScrollToBottomButton = false;
       this.scrollToBottom();
 
       // 3️⃣ 确保对话存在
@@ -2093,7 +2177,7 @@ struct Chat {
           throw new Error('工具调用ID缺失，无法继续对话');
         }
 
-        // 添加工具结果消息到对话历史 - 这个消息包含搜索结果，大模型会据此生成回答
+        // 添加工具结果消息到对话历史（仅内存，不持久化）- 这个消息包含搜索结果，大模型会据此生成回答
         const toolResultMessage = new ChatMessage(
           toolContent,
           'tool',
@@ -2102,14 +2186,13 @@ struct Chat {
 
         hilog.info(DOMAIN, TAG, 'Creating tool message with toolCallId: %{public}s', toolCallId);
 
+        // 🔥 关键修复：仅添加到内存中，不保存到数据库
+        // 这样可以避免tool消息在UI中显示导致的消息顺序混乱
         const toolIndex = this.appendMessage(toolResultMessage);
-        const toolId = await this.databaseManager.insertChatMessage(toolResultMessage);
-        this.replaceMessageAt(toolIndex, (msg) => {
-          msg.id = toolId;
-        });
+        // 为内存中的消息分配一个临时ID（不从数据库获取）
+        toolResultMessage.id = -toolContent.length; // 使用负数作为临时ID标识
 
-        // 🔍 验证 toolCallId 在 replaceMessageAt 后是否保留
-        hilog.info(DOMAIN, TAG, 'Added tool result message with %{public}d search items, toolCallId preserved: %{public}s', 
+        hilog.info(DOMAIN, TAG, 'Added tool result message to memory with %{public}d search items, toolCallId preserved: %{public}s', 
           searchResult.items.length, String(!!this.messages[toolIndex].toolCallId));
 
       }
@@ -2243,6 +2326,12 @@ struct Chat {
   }
 
   scrollToBottom() {
+    // 🆕 只在自动跟随模式下执行滚动，禁止AI生成消息时用户看不见
+    if (!this.shouldAutoScroll) {
+      hilog.info(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
+      return;
+    }
+
     if (this.scroller) {
       try {
         this.scroller.scrollEdge(Edge.Bottom);

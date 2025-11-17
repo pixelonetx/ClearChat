@@ -43,7 +43,7 @@ struct SearchServices {
   @State testingServiceId: string = '';
   @State connectionStatus: Record<string, boolean | null> = {};
   @State showAddServiceDialog: boolean = false;
-  @State selectedServiceType: string = 'tavily';
+  @State selectedServiceType: string = 'Tavily';
   @State newServiceApiKey: string = '';
   @State newServiceUrl: string = '';
   @State newServiceEngines: string = '';
@@ -84,19 +84,19 @@ struct SearchServices {
 
   private getServiceName(service: SearchServiceOptions): string {
     switch (service.type) {
-      case 'tavily':
+      case 'Tavily':
         return 'Tavily';
-      case 'exa':
+      case 'Exa':
         return 'Exa';
-      case 'zhipu':
+      case 'Zhipu':
         return '智谱';
-      case 'searxng':
+      case 'SearXNG':
         return 'SearXNG';
-      case 'brave':
+      case 'Brave':
         return 'Brave';
-      case 'metaso':
+      case 'Metaso':
         return '秘塔';
-      case 'google_custom_search':
+      case 'GoogleCustomSearch':
         return 'Google Custom Search';
       default:
         return service.id;
@@ -105,19 +105,19 @@ struct SearchServices {
 
   private getServiceDescription(service: SearchServiceOptions): string {
     switch (service.type) {
-      case 'tavily':
+      case 'Tavily':
         return '为 LLM 优化的 AI 搜索 API';
-      case 'exa':
+      case 'Exa':
         return '神经搜索引擎';
-      case 'zhipu':
+      case 'Zhipu':
         return '中文 AI 搜索服务';
-      case 'searxng':
+      case 'SearXNG':
         return '隐私搜索引擎';
-      case 'brave':
+      case 'Brave':
         return '独立搜索引擎';
-      case 'metaso':
+      case 'Metaso':
         return '中文搜索引擎';
-      case 'google_custom_search':
+      case 'GoogleCustomSearch':
         return '谷歌自定义搜索';
       default:
         return '搜索服务';
@@ -131,28 +131,28 @@ struct SearchServices {
       let newService: SearchServiceOptions | null = null;
 
       switch (this.selectedServiceType) {
-        case 'tavily':
+        case 'Tavily':
           if (!this.newServiceApiKey.trim()) {
             this.showToast('请输入 API Key');
             return;
           }
           newService = new TavilyOptions(serviceId, this.newServiceApiKey);
           break;
-        case 'exa':
+        case 'Exa':
           if (!this.newServiceApiKey.trim()) {
             this.showToast('请输入 API Key');
             return;
           }
           newService = new ExaOptions(serviceId, this.newServiceApiKey);
           break;
-        case 'zhipu':
+        case 'Zhipu':
           if (!this.newServiceApiKey.trim()) {
             this.showToast('请输入 API Key');
             return;
           }
           newService = new ZhipuOptions(serviceId, this.newServiceApiKey);
           break;
-        case 'searxng':
+        case 'SearXNG':
           if (!this.newServiceUrl.trim()) {
             this.showToast('请输入 SearXNG 实例 URL');
             return;
@@ -166,21 +166,21 @@ struct SearchServices {
             this.newServicePassword
           );
           break;
-        case 'brave':
+        case 'Brave':
           if (!this.newServiceApiKey.trim()) {
             this.showToast('请输入 API Key');
             return;
           }
           newService = new BraveOptions(serviceId, this.newServiceApiKey);
           break;
-        case 'metaso':
+        case 'Metaso':
           if (!this.newServiceApiKey.trim()) {
             this.showToast('请输入 API Key');
             return;
           }
           newService = new MetasoOptions(serviceId, this.newServiceApiKey);
           break;
-        case 'google_custom_search':
+        case 'GoogleCustomSearch':
           if (!this.newServiceApiKey.trim() || !this.newServiceSearchEngineId.trim()) {
             this.showToast('请输入 API Key 和搜索引擎 ID');
             return;
@@ -358,7 +358,7 @@ struct SearchServices {
               .selected(0)
               .value(this.selectedServiceType)
               .onSelect((index: number, value?: string | string[]) => {
-                const types = ['tavily', 'exa', 'zhipu', 'searxng', 'brave', 'metaso', 'google_custom_search'];
+                const types = ['Tavily', 'Exa', 'Zhipu', 'SearXNG', 'Brave', 'Metaso', 'GoogleCustomSearch'];
                 if (index >= 0 && index < types.length) {
                   this.selectedServiceType = types[index];
                 }
@@ -369,8 +369,7 @@ struct SearchServices {
           .width('100%');
 
           // 根据服务类型显示不同字段
-          if (this.selectedServiceType === 'searxng') {
-            // SearXNG 特殊字段
+          // SearXNG 特殊字段
             Column({ space: 8 }) {
               Text('实例 URL')
                 .fontSize(13)
@@ -385,6 +384,8 @@ struct SearchServices {
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
+
+            if (this.selectedServiceType === 'SearXNG') {
 
             Column({ space: 8 }) {
               Text('搜索引擎（可选）')
@@ -446,7 +447,7 @@ struct SearchServices {
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
-          } else if (this.selectedServiceType === 'google_custom_search') {
+          } else if (this.selectedServiceType === 'GoogleCustomSearch') {
             // Google Custom Search 特殊字段
             Column({ space: 8 }) {
               Text('API Key')
