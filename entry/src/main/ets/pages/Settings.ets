@@ -157,8 +157,9 @@ struct Settings {
       $$this.showAboutSheet,
       AboutSheetBuilder,
       {
-        detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-        preferType: SheetType.CENTER
+        height: SheetSize.FIT_CONTENT,
+        showClose: true,
+        dragBar: true,
       }
     )
     .onReady((context: NavDestinationContext) => {
