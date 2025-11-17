@@ -322,6 +322,7 @@ export class DatabaseManager {
 
     const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
     predicates.equalTo('conversation_id', conversationId)
+      .notEqualTo('role', 'tool')  // 🔥 过滤掉tool消息，不加载到前端显示
       .orderByAsc('timestamp')
       .limitAs(limit);
 
@@ -471,6 +472,28 @@ export class DatabaseManager {
   //     throw new DatabaseError(`Failed to clear all conversations: ${error}`);
   //   }
   // }
+
+  /**
+   * 🔥 清理所有tool类型的消息（修复历史数据）
+   * 这些消息不应该被保存到数据库，仅在内存中使用
+   */
+  async cleanupToolMessages(): Promise<number> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+
+    const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
+    predicates.equalTo('role', 'tool');
+
+    try {
+      const deletedCount = await this.rdbStore.delete(predicates);
+      hilog.info(DOMAIN, TAG, 'Cleaned up %{public}d tool messages from database', deletedCount);
+      return deletedCount;
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(error));
+      throw new DatabaseError(`Failed to cleanup tool messages: ${error}`);
+    }
+  }
 
   /**
    * 删除单条消息
