@@ -6,47 +6,39 @@
 @Builder
 export function AboutSheetBuilder() {
   Column() {
-    Scroll() {
-      Column({ space: 24 }) {
-        // 应用信息区域
-        Column({ space: 16 }) {
-          // 应用图标
-          Image($r('app.media.foreground'))
-            .width(80)
-            .height(80)
-            .borderRadius(20)
+    // 应用信息区域
+    Column({ space: 8 }) {
+      // 应用图标
+      Image($r('app.media.foreground'))
+        .width(80)
+        .height(80)
+        .borderRadius(20)
 
-          // 应用名称
-          Text('ClearChat')
-            .fontSize(20)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('sys.color.ohos_id_color_text_primary'))
+      // 应用名称
+      Text('ClearChat')
+        .fontSize(20)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.ohos_id_color_text_primary'))
 
-          // 版本信息
-          Text('版本 0.2.5')
-            .fontSize(14)
-            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
-        }
-        .width('100%')
-        .padding({ top: 8 })
-        .alignItems(HorizontalAlign.Center)
-
-        // 功能特性列表
-        Column({ space: 12 }) {
-          InfoCard('隐私安全', '所有对话数据仅存储在本地设备，确保您的隐私安全')
-          InfoCard('多模型支持', '支持接入多种主流大语言模型服务')
-          InfoCard('Markdown 渲染', '完整支持 Markdown 语法，让对话更易读')
-        }
-        .width('100%')
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 24, bottom: 24 })
+      // 版本信息
+      Text('版本 0.2.5')
+        .fontSize(14)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
     }
-    .scrollBar(BarState.Off)
-    .edgeEffect(EdgeEffect.Spring)
+    .width('100%')
+    .padding({ top: 8, bottom: 16 })
+    .alignItems(HorizontalAlign.Center)
+
+    // 功能特性列表
+    Column({ space: 12 }) {
+      InfoCard('隐私安全', '所有对话数据仅存储在本地设备，确保您的隐私安全')
+      InfoCard('多模型支持', '支持接入多种主流大语言模型服务')
+      InfoCard('Markdown 渲染', '完整支持 Markdown 语法，让对话更易读')
+    }
+    .width('100%')
   }
   .width('100%')
-  .height('100%')
+  .padding({ left: 16, right: 16, top: 24, bottom: 24 })
 }
 
 @Builder
