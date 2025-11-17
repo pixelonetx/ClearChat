@@ -36,6 +36,11 @@ export function AboutSheetBuilder() {
       InfoCard('Markdown 渲染', '完整支持 Markdown 语法，让对话更易读')
     }
     .width('100%')
+
+    Text('特别感谢全体用户')
+      .fontSize(14)
+      .fontColor($r('app.color.text_secondary'))
+      .padding({top:16, bottom:16})
   }
   .width('100%')
   .padding({ left: 16, right: 16, top: 24, bottom: 24 })
@@ -59,7 +64,7 @@ function InfoCard(title: string, content: string) {
   }
   .width('100%')
   .padding(16)
-  .backgroundColor($r('sys.color.ohos_id_color_foreground_contrary'))
+  .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
   .borderRadius(16)
   .alignItems(HorizontalAlign.Start)
 }
