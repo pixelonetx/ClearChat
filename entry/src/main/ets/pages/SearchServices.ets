@@ -370,6 +370,7 @@ struct SearchServices {
 
           // 根据服务类型显示不同字段
           // SearXNG 特殊字段
+          if (this.selectedServiceType === 'SearXNG') {
             Column({ space: 8 }) {
               Text('实例 URL')
                 .fontSize(13)
@@ -384,8 +385,6 @@ struct SearchServices {
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
-
-            if (this.selectedServiceType === 'SearXNG') {
 
             Column({ space: 8 }) {
               Text('搜索引擎（可选）')

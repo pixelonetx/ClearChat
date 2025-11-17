@@ -12,6 +12,7 @@ import { ChatMessage, Citation } from '../services/DataModels';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { WebBrowserParam } from '../components/WebViewBrowser';
 import { SearchReferencesDialog, SearchReference } from './SearchReferencesDialog';
+import { MessageStyle } from './MessageStyle';
 
 @Component
 export struct MessageItem {
@@ -306,7 +307,7 @@ export struct MessageItem {
         Row() {
           Column() {
             Text(this.messageContent)
-              .fontSize($r('app.float.message_text_font_size')) //14
+              .fontSize(MessageStyle.USER_MESSAGE_FONT_SIZE)
               .fontColor($r('app.color.text_color'))
               .maxLines(999)
               .textOverflow({ overflow: TextOverflow.None })
@@ -342,7 +343,7 @@ export struct MessageItem {
       if (this.message.modelName) {
         Row() {
           Text(this.message.modelName)
-            .fontSize(12)
+            .fontSize(MessageStyle.MODEL_NAME_FONT_SIZE)
             // .opacity(0.8)
             .margin({ bottom: 8 })
         }
@@ -361,7 +362,7 @@ export struct MessageItem {
               .color($r('sys.color.ohos_id_color_emphasize'))
             
             Text('正在联网搜索...')
-              .fontSize(14)
+              .fontSize(MessageStyle.SEARCH_STATUS_FONT_SIZE)
               .fontColor($r('sys.color.ohos_id_color_text_primary'))
               
           } else if (this.currentSearchStage === 'summarizing') {
@@ -372,7 +373,7 @@ export struct MessageItem {
               .color($r('sys.color.ohos_id_color_warning'))
             
             Text(this.hasCitations ? `找到 ${this.message.citations!.length} 个结果，生成摘要中...` : '生成中...')
-              .fontSize(14)
+              .fontSize(MessageStyle.SEARCH_STATUS_FONT_SIZE)
               .fontColor($r('sys.color.ohos_id_color_text_primary'))
               
           } else if (this.currentSearchStage === 'done') {
@@ -415,7 +416,7 @@ export struct MessageItem {
               .fillColor($r('sys.color.ohos_id_color_text_secondary'))
             
             Text(`${this.message.citations!.length} 个参考来源`)
-              .fontSize(13)
+              .fontSize(MessageStyle.CITATION_COUNT_FONT_SIZE)
               .fontColor($r('sys.color.ohos_id_color_text_secondary'))
           }
           
@@ -424,7 +425,7 @@ export struct MessageItem {
             Row({ space: 12 }) {
               // 序号
               Text(`${i + 1}`)
-                .fontSize(14)
+                .fontSize(MessageStyle.CITATION_TITLE_FONT_SIZE)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.ohos_id_color_emphasize'))
                 .width(24)
@@ -432,14 +433,14 @@ export struct MessageItem {
               // 标题和URL
               Column({ space: 2 }) {
                 Text(c.title ?? '来源')
-                  .fontSize(14)
+                  .fontSize(MessageStyle.CITATION_TITLE_FONT_SIZE)
                   .fontColor($r('sys.color.ohos_id_color_text_primary'))
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 
                 if (c.url) {
                   Text(c.url)
-                    .fontSize(12)
+                    .fontSize(MessageStyle.CITATION_URL_FONT_SIZE)
                     .fontColor($r('sys.color.ohos_id_color_text_secondary'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -482,7 +483,7 @@ export struct MessageItem {
           if (this.message.citations!.length > 3) {
             Row({ space: 6 }) {
               Text(`查看全部 ${this.message.citations!.length} 个来源`)
-                .fontSize(14)
+                .fontSize(MessageStyle.CITATION_TITLE_FONT_SIZE)
                 .fontColor($r('sys.color.ohos_id_color_emphasize'))
               
               Image($r('sys.symbol.chevron_right'))
