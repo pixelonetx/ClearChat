@@ -326,7 +326,7 @@ struct SearchServices {
         Text('添加搜索服务')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#1A1A1A')
+          .fontColor($r('app.color.text_color'))
           .layoutWeight(1);
       }
       .width('100%')
@@ -343,7 +343,7 @@ struct SearchServices {
           Column({ space: 8 }) {
             Text('服务类型')
               .fontSize(13)
-              .fontColor('#666666')
+              .fontColor($r('app.color.text_secondary'))
               .fontWeight(FontWeight.Medium);
 
             Select([
@@ -364,8 +364,6 @@ struct SearchServices {
                 }
               })
               .width('100%')
-              .borderRadius(12)
-              .backgroundColor('#F8F9FA');
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%');
@@ -376,7 +374,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('实例 URL')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: 'https://your-searxng-instance.com', text: this.newServiceUrl })
@@ -384,9 +382,6 @@ struct SearchServices {
                   this.newServiceUrl = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -394,7 +389,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('搜索引擎（可选）')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: 'google,bing', text: this.newServiceEngines })
@@ -402,9 +397,6 @@ struct SearchServices {
                   this.newServiceEngines = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -412,7 +404,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('语言（可选）')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: 'zh-CN', text: this.newServiceLanguage })
@@ -420,9 +412,6 @@ struct SearchServices {
                   this.newServiceLanguage = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -430,7 +419,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('用户名（可选）')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: '用户名', text: this.newServiceUsername })
@@ -438,9 +427,6 @@ struct SearchServices {
                   this.newServiceUsername = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -448,7 +434,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('密码（可选）')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: '密码', text: this.newServicePassword })
@@ -457,9 +443,6 @@ struct SearchServices {
                   this.newServicePassword = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -468,7 +451,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('API Key')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: '输入 API Key', text: this.newServiceApiKey })
@@ -476,9 +459,6 @@ struct SearchServices {
                   this.newServiceApiKey = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -486,7 +466,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('搜索引擎 ID')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: '输入搜索引擎 ID', text: this.newServiceSearchEngineId })
@@ -494,9 +474,6 @@ struct SearchServices {
                   this.newServiceSearchEngineId = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -505,7 +482,7 @@ struct SearchServices {
             Column({ space: 8 }) {
               Text('API Key')
                 .fontSize(13)
-                .fontColor('#666666')
+                .fontColor($r('app.color.text_secondary'))
                 .fontWeight(FontWeight.Medium);
 
               TextInput({ placeholder: '输入 API Key', text: this.newServiceApiKey })
@@ -513,9 +490,6 @@ struct SearchServices {
                   this.newServiceApiKey = value;
                 })
                 .width('100%')
-                .borderRadius(12)
-                .backgroundColor('#F8F9FA')
-                .padding(12);
             }
             .alignItems(HorizontalAlign.Start)
             .width('100%');
@@ -523,31 +497,25 @@ struct SearchServices {
         }
         .padding({ left: 24, right: 24 })
       }
-      .layoutWeight(1)
       .scrollBar(BarState.Off);
 
       // 按钮行
       Row({ space: 12 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(48)
-          .fontSize(16)
-          .fontColor('#666666')
-          .backgroundColor('#F0F0F0')
-          .borderRadius(12)
-          .onClick(() => {
-            this.showAddServiceDialog = false;
-            this.resetServiceForm();
-          });
+        // Button('取消')
+        //   .layoutWeight(1)
+        //   .height(48)
+        //   .fontSize(16)
+        //   .fontColor('#666666')
+        //   .backgroundColor('#F0F0F0')
+        //   .borderRadius(12)
+        //   .onClick(() => {
+        //     this.showAddServiceDialog = false;
+        //     this.resetServiceForm();
+        //   });
 
         Button('添加')
           .layoutWeight(1)
-          .height(48)
           .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .type(ButtonType.Normal)
-          .backgroundColor('#007AFF')
-          .borderRadius(12)
           .onClick(() => this.handleAddService());
       }
       .width('100%')
@@ -559,8 +527,6 @@ struct SearchServices {
       });
     }
     .width('100%')
-    .backgroundColor('#FFFFFF')
-    .borderRadius({ topLeft: 16, topRight: 16 });
   }
 
   build() {
@@ -574,19 +540,18 @@ struct SearchServices {
               Text('通用设置')
                 .fontSize(17)
                 .fontWeight(FontWeight.Bold)
-                .fontColor($r('app.color.text_color'));
+                .fontColor($r('app.color.text_color'))
+                .width('100%')
 
               // 返回结果数设置
               Column({ space: 12 }) {
                 Row() {
                   Text('返回结果数')
                     .fontSize(15)
-                    .fontColor('#1A1A1A');
                   Blank();
                   Text(String(this.resultSize))
                     .fontSize(15)
                     .fontWeight(FontWeight.Medium)
-                    .fontColor('#007AFF');
                 }
                 .width('100%');
 
@@ -598,9 +563,6 @@ struct SearchServices {
                   style: SliderStyle.OutSet
                 })
                   .width('100%')
-                  .blockColor('#007AFF')
-                  .trackColor('#E5E5EA')
-                  .selectedColor('#007AFF')
                   .onChange((value) => {
                     this.resultSize = Math.round(value);
                     this.handleUpdateSettings();
@@ -608,21 +570,18 @@ struct SearchServices {
               }
               .width('100%')
               .padding(16)
-              .backgroundColor('#FFFFFF')
+              .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
               .borderRadius(12)
-              .shadow({ radius: 8, color: '#0D000000', offsetY: 2 });
 
               // 超时时间设置
               Column({ space: 12 }) {
                 Row() {
                   Text('超时时间')
                     .fontSize(15)
-                    .fontColor('#1A1A1A');
                   Blank();
-                  Text(`${this.timeout / 1000}s`)
+                  Text(`${this.timeout / 1000} s`)
                     .fontSize(15)
                     .fontWeight(FontWeight.Medium)
-                    .fontColor('#007AFF');
                 }
                 .width('100%');
 
@@ -634,9 +593,6 @@ struct SearchServices {
                   style: SliderStyle.OutSet
                 })
                   .width('100%')
-                  .blockColor('#007AFF')
-                  .trackColor('#E5E5EA')
-                  .selectedColor('#007AFF')
                   .onChange((value) => {
                     this.timeout = Math.round(value);
                     this.handleUpdateSettings();
@@ -644,53 +600,40 @@ struct SearchServices {
               }
               .width('100%')
               .padding(16)
-              .backgroundColor('#FFFFFF')
+              .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
               .borderRadius(12)
-              .shadow({ radius: 8, color: '#0D000000', offsetY: 2 });
             }
             .width('100%');
 
             // 搜索服务列表卡片
             Column({ space: 16 }) {
-              Row() {
+              Column({ space: 16 }) {
                 Text('搜索服务')
                   .fontSize(17)
                   .fontWeight(FontWeight.Bold)
-                  .fontColor('#1A1A1A')
-                  .layoutWeight(1);
+                  .fontColor($r('app.color.text_color'))
+                  .width('100%')
 
-                Button({ type: ButtonType.Normal }) {
-                  Row({ space: 6 }) {
-                    Text('添加')
-                      .fontSize(14)
-                      .fontColor('#FFFFFF')
-                      .fontWeight(FontWeight.Medium);
-                  }
-                }
-                .height(36)
-                .padding({ left: 16, right: 16 })
-                .backgroundColor('#007AFF')
-                .borderRadius(18)
+                Button('添加')
+                .type(ButtonType.Capsule)
                 .onClick(() => this.showAddServiceDialog = true);
               }
-              .width('100%');
 
               if (this.config.enabledServices.length === 0) {
                 Column({ space: 12 }) {
                   Image($r('sys.symbol.magnifyingglass'))
                     .width(48)
                     .height(48)
-                    .fillColor('#C7C7CC')
                     .opacity(0.5);
 
                   Text('暂无搜索服务')
                     .fontSize(15)
-                    .fontColor('#8E8E93')
+                    .fontColor($r('app.color.text_secondary'))
                     .fontWeight(FontWeight.Medium);
 
                   Text('点击上方"添加"按钮配置搜索服务')
                     .fontSize(13)
-                    .fontColor('#C7C7CC');
+                    .fontColor($r('app.color.text_secondary'));
                 }
                 .width('100%')
                 .padding(40)
@@ -712,12 +655,11 @@ struct SearchServices {
                           Text(this.getServiceName(service))
                             .fontSize(16)
                             .fontWeight(FontWeight.Medium)
-                            .fontColor('#1A1A1A');
+                            .fontColor($r('app.color.text_color'))
                           Text(this.getServiceDescription(service))
                             .fontSize(13)
-                            .fontColor('#8E8E93');
+                            .fontColor($r('app.color.text_secondary'))
                         }
-                        .layoutWeight(1)
                         .alignItems(HorizontalAlign.Start);
                       }
                       .width('100%')
@@ -744,7 +686,7 @@ struct SearchServices {
                         }
                         .height(32)
                         .padding({ left: 12, right: 12 })
-                        .backgroundColor('#F0F5FF')
+                        .backgroundColor($r('app.color.dialog_button_bac_color'))
                         .borderRadius(8)
                         .opacity(this.testingServiceId === service.id ? 0.5 : 1)
                         .enabled(this.testingServiceId !== service.id)
@@ -758,7 +700,7 @@ struct SearchServices {
                         }
                         .height(32)
                         .padding({ left: 12, right: 12 })
-                        .backgroundColor('#FFF0F0')
+                        .backgroundColor($r('app.color.dialog_button_bac_color'))
                         .borderRadius(8)
                         .onClick(() => this.handleRemoveService(index));
                       }
@@ -766,7 +708,7 @@ struct SearchServices {
                     }
                     .width('100%')
                     .padding(16)
-                    .backgroundColor('#FFFFFF')
+                    .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
                     .borderRadius(12)
                     .shadow({ radius: 8, color: '#0D000000', offsetY: 2 });
                   }, (service: SearchServiceOptions) => service.id);
@@ -787,9 +729,9 @@ struct SearchServices {
       .width('100%')
       .height('100%')
     }
-    .bindSheet(this.showAddServiceDialog, this.BuildAddServiceDialog(), {
+    .bindSheet($$this.showAddServiceDialog, this.BuildAddServiceDialog(), {
       height: SheetSize.FIT_CONTENT,
-      showClose: false,
+      showClose: true,
       dragBar: true,
       onDisappear: () => {
         this.showAddServiceDialog = false;

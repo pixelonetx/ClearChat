@@ -1699,9 +1699,15 @@ struct Chat {
   private handleStreamError(messageIndex: number, error: Error): void {
     const friendlyError = this.getFriendlySendErrorMessage(error);
 
-    if (messageIndex < this.messages.length) {
+    // 如果是用户主动中止，保留已显示的内容；否则显示错误提示
+    if (!this.userAbortedGeneration && messageIndex < this.messages.length) {
       this.replaceMessageAt(messageIndex, (msg) => {
-        msg.content = `[错误] ${friendlyError}`;
+        // 如果消息为空，显示错误提示；如果已有内容，追加错误说明
+        if (msg.content.length === 0) {
+          msg.content = `[错误] ${friendlyError}`;
+        } else {
+          msg.content += `\n\n[错误] 生成过程中出现错误: ${friendlyError}`;
+        }
       });
     }
 
@@ -2223,6 +2229,7 @@ struct Chat {
 
   /**
    * 停止当前的AI生成
+   * 重要：已显示的内容会被保留
    */
   stopGeneration() {
     if (this.currentAbortController && this.isGenerating) {
@@ -2230,7 +2237,8 @@ struct Chat {
       this.userAbortedGeneration = true;
       this.currentAbortController.abort();
       // 不立即设置状态，让onComplete回调来处理
-      this.showToast('已停止生成');
+      // 这样可以确保已显示的内容被完整保留
+      this.showToast('已停止生成，已显示的内容已保留');
     }
   }
 
@@ -2706,7 +2714,7 @@ struct Chat {
         .width('100%')
         .layoutWeight(1)
         .scrollable(ScrollDirection.Vertical)
-        .scrollBar(BarState.Off)
+        .scrollBar(BarState.Auto)
         .align(Alignment.TopStart)
       }
 
