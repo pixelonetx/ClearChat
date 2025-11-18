@@ -133,7 +133,7 @@ export struct ModelSettingsDialog {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
       .padding(12)
-      .backgroundColor('#f5f5f5')
+      .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
       .borderRadius(8)
       .margin({ bottom: 24 })
 

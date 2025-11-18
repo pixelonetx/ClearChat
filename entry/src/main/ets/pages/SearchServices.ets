@@ -44,6 +44,7 @@ struct SearchServices {
   @State connectionStatus: Record<string, boolean | null> = {};
   @State showAddServiceDialog: boolean = false;
   @State selectedServiceType: string = 'Tavily';
+  @State newServiceName: string = '';
   @State newServiceApiKey: string = '';
   @State newServiceUrl: string = '';
   @State newServiceEngines: string = '';
@@ -83,6 +84,19 @@ struct SearchServices {
   }
 
   private getServiceName(service: SearchServiceOptions): string {
+    // 从服务ID中提取用户自定义的名称
+    // ID 格式: 类型_用户名称_时间戳
+    const parts = service.id.split('_');
+    if (parts.length >= 3) {
+      // 获取中间部分作为用户名称 (从第二个下划线到倒数第二个下划线之间)
+      const userNameParts = parts.slice(1, -1); // 移除类型和时间戳
+      const userName = userNameParts.join('_'); // 如果用户名称中有下划线，重新连接
+      if (userName.trim()) {
+        return userName;
+      }
+    }
+    
+    // 降级处理：如果无法从ID提取，则使用类型名称
     switch (service.type) {
       case 'Tavily':
         return 'Tavily';
@@ -126,8 +140,14 @@ struct SearchServices {
 
   private async handleAddService(): Promise<void> {
     try {
-      // 自动生成服务 ID: 类型 + 时间戳
-      const serviceId = `${this.selectedServiceType}_${Date.now()}`;
+      // 验证服务名称
+      if (!this.newServiceName.trim()) {
+        this.showToast('请输入服务名称');
+        return;
+      }
+
+      // 使用用户输入的名称作为服务 ID
+      const serviceId = `${this.selectedServiceType}_${this.newServiceName}_${Date.now()}`;
       let newService: SearchServiceOptions | null = null;
 
       switch (this.selectedServiceType) {
@@ -203,6 +223,7 @@ struct SearchServices {
   }
 
   private resetServiceForm(): void {
+    this.newServiceName = '';
     this.newServiceApiKey = '';
     this.newServiceUrl = '';
     this.newServiceEngines = '';
@@ -339,6 +360,22 @@ struct SearchServices {
 
       Scroll() {
         Column({ space: 20 }) {
+          // 服务名称输入
+          Column({ space: 8 }) {
+            Text('服务名称')
+              .fontSize(13)
+              .fontColor($r('app.color.text_secondary'))
+              .fontWeight(FontWeight.Medium);
+
+            TextInput({ placeholder: '例如：我的搜索服务', text: this.newServiceName })
+              .onChange((value) => {
+                this.newServiceName = value;
+              })
+              .width('100%')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .width('100%');
+
           // 服务类型选择
           Column({ space: 8 }) {
             Text('服务类型')
