@@ -141,3 +141,4 @@ export class BraveSearchService extends SearchService<BraveOptions> {
     });
   }
 }
+

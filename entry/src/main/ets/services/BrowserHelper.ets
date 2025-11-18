@@ -29,7 +29,7 @@ export class BrowserHelper {
             duration: 2000
           });
         } catch (toastErr) {
-          hilog.warn(DOMAIN, TAG, 'Toast display failed (invalid url): %{public}s', String(toastErr));
+          
         }
         return false;
       }
@@ -45,7 +45,7 @@ export class BrowserHelper {
       };
 
       await context.startAbility(want);
-      hilog.info(DOMAIN, TAG, 'Successfully started browser with URL: %{public}s', normalizedUrl);
+      
 
       try {
         Prompt.showToast({
@@ -53,7 +53,7 @@ export class BrowserHelper {
           duration: 1500
         });
       } catch (toastErr) {
-        hilog.warn(DOMAIN, TAG, 'Toast display failed (start browser): %{public}s', String(toastErr));
+        
       }
 
       return true;
@@ -68,7 +68,7 @@ export class BrowserHelper {
           duration: 2000
         });
       } catch (toastErr) {
-        hilog.warn(DOMAIN, TAG, 'Toast display failed (browser error): %{public}s', String(toastErr));
+        
       }
 
       return false;
@@ -139,3 +139,4 @@ export class BrowserHelper {
     return matches.map(url => BrowserHelper.normalizeUrl(url)).filter(url => BrowserHelper.isValidUrl(url));
   }
 }
+

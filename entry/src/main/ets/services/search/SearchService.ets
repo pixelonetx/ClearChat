@@ -79,3 +79,4 @@ export abstract class SearchService<T extends SearchServiceOptions> {
     });
   }
 }
+

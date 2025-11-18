@@ -67,7 +67,7 @@ struct SearchServices {
       this.resultSize = config.commonOptions.resultSize ?? 10;
       this.timeout = config.commonOptions.timeout ?? 10000;
       this.connectionStatus = config.connectionStatus ?? {};
-      hilog.info(DOMAIN, TAG, 'Config loaded: %{public}d services', config.enabledServices.length);
+      
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to load config: %{public}s', String(error));
       this.showToast('加载配置失败');
@@ -78,7 +78,7 @@ struct SearchServices {
     try {
       Prompt.showToast({ message, duration: 2000 });
     } catch (error) {
-      hilog.warn(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(error));
+      
     }
   }
 

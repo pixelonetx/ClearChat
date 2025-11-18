@@ -349,3 +349,4 @@ export class GoogleCustomSearchOptions extends SearchServiceOptions {
     );
   }
 }
+

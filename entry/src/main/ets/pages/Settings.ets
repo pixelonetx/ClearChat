@@ -52,7 +52,7 @@ struct Settings {
         duration: 2000
       });
     } catch (err) {
-      hilog.warn(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(err));
+      
     }
   }
 
@@ -349,7 +349,7 @@ struct Settings {
       primaryButton: {
         value: '取消',
         action: () => {
-          hilog.info(DOMAIN, TAG, '用户取消打开链接');
+          
         }
       },
       secondaryButton: {
