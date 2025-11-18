@@ -145,3 +145,4 @@ export class MetasoSearchService extends SearchService<MetasoOptions> {
     });
   }
 }
+

@@ -479,7 +479,6 @@ struct Chat {
                           // 用户已滑到底部，自动隐藏按钮并启用自动跟随
                           this.shouldAutoScroll = true;
                           this.showScrollToBottomButton = false;
-                          hilog.info(DOMAIN, TAG, 'User scrolled to bottom, re-enable auto-scroll');
                         }
                       })
                       .layoutWeight(1)
@@ -648,7 +647,7 @@ struct Chat {
                     distance: 5 // 增加最小滑动距离，避免误触
                   })
                     .onActionStart(() => {
-                      hilog.error(DOMAIN, TAG, '[GESTURE error] Close gesture started');
+                      
                     })
                     .onActionUpdate((event: PanUpdateEvent) => {
                       hilog.error(DOMAIN, TAG, '[GESTURE error] Pan gesture - offsetX=%{public}s',
@@ -656,7 +655,7 @@ struct Chat {
                       // 向左滑超过阈值，关闭侧栏
                       const closeThreshold = -30; // 增加阈值，减少误触
                       if (event.offsetX < closeThreshold) {
-                        hilog.error(DOMAIN, TAG, '[GESTURE error] Closing sidebar - threshold reached');
+                        
                         animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
                           this.showSideBar = false;
                           this.showControlButton = true;
@@ -664,11 +663,11 @@ struct Chat {
                       }
                     })
                     .onActionEnd(() => {
-                      hilog.error(DOMAIN, TAG, '[GESTURE error] Close gesture ended');
+                      
                     })
                 )
                 .onClick(() => {
-                  hilog.error(DOMAIN, TAG, '[OVERLAY error] Overlay clicked - closing sidebar');
+                  
                   if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
                     animateTo({
                       duration: Chat.ANIMATION_DURATION,
@@ -724,7 +723,7 @@ struct Chat {
     try {
       Prompt.showToast(options);
     } catch (toastError) {
-      hilog.error(DOMAIN, TAG, 'Failed to show toast: %{public}s', String(toastError));
+      
     }
   }
 
@@ -747,7 +746,7 @@ struct Chat {
         });
       }
     } catch (err) {
-      hilog.error(DOMAIN, TAG, 'Failed to setup window listener: %{public}s', String(err));
+      
     }
   }
 
@@ -790,7 +789,7 @@ struct Chat {
       try {
         const cleanedCount = await this.databaseManager.cleanupToolMessages();
         if (cleanedCount > 0) {
-          hilog.warn(DOMAIN, TAG, 'Cleaned up %{public}d tool messages from database', cleanedCount);
+          
         }
       } catch (cleanupError) {
         hilog.warn(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(cleanupError));
@@ -828,7 +827,7 @@ struct Chat {
       this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
       this.isInitialized = true;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to initialize app: %{public}s', String(error));
+      
       this.showToast('应用初始化失败');
     }
   }
@@ -880,10 +879,10 @@ struct Chat {
           modelName: activeModel.name
         });
       } else {
-        hilog.warn(DOMAIN, TAG, 'Configuration exists but required API信息未填写完整。');
+        
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to load settings: %{public}s', String(error));
+      
       this.hasSettings = false;
     }
   }
@@ -1014,7 +1013,7 @@ struct Chat {
         this.scrollToBottom();
       }, 100);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to load chat history: %{public}s', String(error));
+      
       this.showToast('加载聊天记录失败');
     }
   }
@@ -1023,7 +1022,7 @@ struct Chat {
     try {
       this.conversations = await this.databaseManager.getAllConversations();
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to load conversations: %{public}s', String(error));
+      
       this.showToast('加载对话列表失败');
     }
   }
@@ -1125,9 +1124,9 @@ struct Chat {
     }
 
     try {
-      hilog.error(DOMAIN, TAG, 'Creating new conversation...');
+      
       const newConversation = await this.databaseManager.createConversation('新对话');
-      hilog.error(DOMAIN, TAG, 'New conversation created');
+      
 
       this.currentConversation = newConversation;
       this.messages = [];
@@ -1142,7 +1141,7 @@ struct Chat {
       // 确保加载状态被重置
       this.isLoading = false;
 
-      hilog.error(DOMAIN, TAG, 'New conversation setup completed');
+      
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to create new conversation: %{public}s', String(error));
       this.showToast('创建对话失败');
@@ -1192,7 +1191,7 @@ struct Chat {
         }
       },
       () => {
-        hilog.error(DOMAIN, TAG, 'User cancelled conversation deletion');
+        
       }
     );
   }
@@ -1218,7 +1217,7 @@ struct Chat {
 
       this.showToast('对话已删除');
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
+      
       this.showToast('删除对话失败');
     }
   }
@@ -1610,14 +1609,14 @@ struct Chat {
     // 监听数据事件
     emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
       const chunk = payload as string;
-      hilog.info(DOMAIN, TAG, 'Received DATA event, chunk length: %{public}d', chunk.length);
+      
       this.appendChunkToMessage(streamingMessageIndex, chunk, conversationId);
     });
 
     // 监听元数据事件
     emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
       const meta = payload as StreamMetadata;
-      hilog.info(DOMAIN, TAG, 'Received METADATA event');
+      
       this.updateStreamingMessageMetadata(streamingMessageIndex, meta, conversationId);
     });
 
@@ -1636,7 +1635,7 @@ struct Chat {
       if (!toolCallHandled) {
         this.persistStreamedMessage(streamingMessageIndex, conversationId)
           .catch((err: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist message: %{public}s', String(err));
+            
           });
       }
     });
@@ -1652,13 +1651,13 @@ struct Chat {
     // 监听警告事件（可选）
     emitter.on(StreamEventType.WARNING, (payload: EventPayload) => {
       const warning = payload as string;
-      hilog.warn(DOMAIN, TAG, 'Stream warning: %{public}s', warning);
+      
     });
 
     // 监听工具调用事件
     emitter.once(StreamEventType.TOOL_CALL, (payload: EventPayload) => {
       const toolCalls = payload as import('../services/StreamEventEmitter').ToolCallData[];
-      hilog.info(DOMAIN, TAG, 'Received TOOL_CALL event with %{public}d calls', toolCalls.length);
+      
 
       // 🔥 标记已处理工具调用，这样之后的 COMPLETE 事件就不会重置状态
       toolCallHandled = true;
@@ -1671,7 +1670,7 @@ struct Chat {
         });
     });
 
-    hilog.info(DOMAIN, TAG, 'Stream event handlers setup completed');
+    
   }
 
   // ✅ 事件驱动处理 - 设置重新生成事件处理
@@ -1748,7 +1747,7 @@ struct Chat {
             modelName: regeneratedMessage.modelName ?? null,
             providerName: regeneratedMessage.providerName ?? null
           }).catch((metadataError: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist regenerated metadata: %{public}s', String(metadataError));
+            
           });
         }
       }
@@ -1756,7 +1755,7 @@ struct Chat {
 
     // 监听完成事件 - 处理重新生成完成
     emitter.once(StreamEventType.COMPLETE, () => {
-      hilog.error(DOMAIN, TAG, 'Regeneration completed');
+      
 
       // 立即重置UI状态，不等待数据库操作
       this.isLoading = false;
@@ -1781,7 +1780,7 @@ struct Chat {
                 this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
                   messageToPersist.id = savedId;
                 });
-                hilog.error(DOMAIN, TAG, 'Regenerated message saved with new ID: %{public}s', String(savedId));
+                
               }
               // 滚动到底部
               setTimeout(() => {
@@ -1800,7 +1799,7 @@ struct Chat {
     // 监听错误事件 - 处理重新生成失败
     emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
       const error = payload as Error;
-      hilog.error(DOMAIN, TAG, 'Regeneration failed: %{public}s', String(error));
+      
 
       if (this.currentConversation && this.currentConversation.id === conversationId) {
         if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
@@ -1911,7 +1910,7 @@ struct Chat {
         }
         this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
           .catch((metadataError: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist streaming metadata: %{public}s', String(metadataError));
+            
           });
       }
     }
@@ -1977,7 +1976,7 @@ struct Chat {
           // 如果是阿里云，使用内置搜索
           if (this.isAliyunActive) {
             enableAlibabaSearch = true;
-            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search (enable_search=true)');
+            
           }
           // 否则，使用外置工具调用搜索
           else {
@@ -1988,19 +1987,19 @@ struct Chat {
               if (selectedService) {
                 const toolDef = this.searchToolService.getToolDefinition();
                 tools = [toolDef as object];
-                hilog.info(DOMAIN, TAG, 'Using external search tool with service: %{public}s', selectedService.type);
+                
               } else {
-                hilog.warn(DOMAIN, TAG, 'Web search enabled but no service selected');
+                
               }
             } else {
-              hilog.warn(DOMAIN, TAG, 'Web search enabled but no services configured');
+              
             }
           }
         } else {
           hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle');
         }
       } catch (configError) {
-        hilog.warn(DOMAIN, TAG, 'Failed to get search config, using default: %{public}s', String(configError));
+        
         // 降级到不使用工具调用
       }
 
@@ -2119,7 +2118,7 @@ struct Chat {
           // 执行搜索
           const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
 
-          hilog.info(DOMAIN, TAG, 'Search completed with %{public}d results', searchResult.items.length);
+          
 
           // 将搜索结果转换为Citation数组，保存到AI消息中
           let citations: Citation[] = [];
@@ -2209,7 +2208,7 @@ struct Chat {
     toolName?: string
   ): Promise<void> {
     if (!this.currentConversation || this.currentConversation.id !== conversationId) {
-      hilog.warn(DOMAIN, TAG, 'Conversation changed, skipping tool result continuation');
+      
       return;
     }
 
@@ -2252,7 +2251,7 @@ struct Chat {
           { conversationId: conversationId, timestamp: Date.now(), toolCallId: toolCallId }
         );
 
-        hilog.info(DOMAIN, TAG, 'Creating tool message with toolCallId: %{public}s', toolCallId);
+        
 
         // 🔥 关键修复：仅添加到内存中，不保存到数据库
         // 这样可以避免tool消息在UI中显示导致的消息顺序混乱
@@ -2293,7 +2292,7 @@ struct Chat {
           // 如果是阿里云，使用内置搜索
           if (this.isAliyunActive) {
             enableAlibabaSearch = true;
-            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search in continuation (enable_search=true)');
+            
           }
           // 否则，使用外置工具调用搜索
           else {
@@ -2307,21 +2306,21 @@ struct Chat {
                 hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s',
                   selectedService.type);
               } else {
-                hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no service selected');
+                
               }
             } else {
-              hilog.warn(DOMAIN, TAG, 'Web search enabled in continuation but no services configured');
+              
             }
           }
         } else {
           hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle in continuation');
         }
       } catch (configError) {
-        hilog.warn(DOMAIN, TAG, 'Failed to get search config in continueConversation: %{public}s', String(configError));
+        
       }
 
       // 发送流式请求
-      hilog.info(DOMAIN, TAG, 'About to send stream request for continuation...');
+      
       hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
         this.currentSettings!.apiUrl.substring(0, 30), this.currentSettings!.modelName, messagesForAI.length);
 
@@ -2338,13 +2337,13 @@ struct Chat {
         }
       );
 
-      hilog.info(DOMAIN, TAG, 'Stream request sent, emitter created successfully');
+      
 
       // 🔥 关键修复：设置事件处理器来接收流式响应
       // 传递 isToolContinuation = true，表示这是工具继续阶段的错误处理
       this.setupStreamEventHandlers(emitter, streamingIndex, conversationId, true);
 
-      hilog.info(DOMAIN, TAG, 'Stream event handlers set up for continuation response, waiting for data...');
+      
 
       // ⏱️ 设置超时保护：如果60秒内没有收到任何数据或完成事件，强制重置状态
       const timeoutId = setTimeout(() => {
@@ -2375,7 +2374,7 @@ struct Chat {
       });
 
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to continue conversation with tool result: %{public}s', String(error));
+      
       this.isLoading = false;
       this.isGenerating = false;
       this.currentAbortController = null;
@@ -2426,7 +2425,7 @@ struct Chat {
       try {
         this.scroller.scrollEdge(Edge.Bottom);
       } catch (error) {
-        hilog.error(DOMAIN, TAG, 'Failed to scroll to bottom: %{public}s', String(error));
+        
         // 备用方案：尝试使用scrollTo方法
         try {
           const currentOffset = this.scroller.currentOffset();
@@ -2448,12 +2447,12 @@ struct Chat {
 
       if (success) {
         this.showToast('已复制到剪贴板');
-        hilog.error(DOMAIN, TAG, 'Message copied successfully: %{public}s', String(message.content));
+        
       } else {
         this.showToast('复制失败');
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to copy message: %{public}s', String(error));
+      
       this.showToast('复制失败');
     }
   }
@@ -2505,7 +2504,7 @@ struct Chat {
 
       this.showToast('消息已删除');
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to delete message: %{public}s', String(error));
+      
       this.showToast('删除消息失败');
     }
   }
@@ -2601,7 +2600,7 @@ struct Chat {
           // 如果是阿里云，使用内置搜索
           if (this.isAliyunActive) {
             enableAlibabaSearch = true;
-            hilog.info(DOMAIN, TAG, 'Using Alibaba built-in search in regeneration (enable_search=true)');
+            
           }
           // 否则，使用外置工具调用搜索
           else {
@@ -2618,7 +2617,7 @@ struct Chat {
           }
         }
       } catch (configError) {
-        hilog.warn(DOMAIN, TAG, 'Failed to get search config in regeneration: %{public}s', String(configError));
+        
       }
 
       // 发送流式请求重新生成（使用新的事件驱动架构）
@@ -2639,7 +2638,7 @@ struct Chat {
       this.setupRegenrationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
 
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to regenerate message: %{public}s', String(error));
+      
       this.isLoading = false;
       this.showToast('重新生成失败');
     }
@@ -2652,7 +2651,7 @@ struct Chat {
       this.notifyMessagesUpdated();
       this.showToast('聊天记录已清空');
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to clear history: %{public}s', String(error));
+      
       this.showToast('清空记录失败');
     }
   }
@@ -2677,7 +2676,7 @@ struct Chat {
           hilog.error(DOMAIN, TAG, 'Keyboard hidden successfully');
         })
         .catch((error: Error) => {
-          hilog.error(DOMAIN, TAG, 'Failed to hide keyboard: %{public}s', String(error));
+          
         });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Error getting input method controller: %{public}s', String(error));
@@ -3044,7 +3043,7 @@ struct Chat {
 
       this.showToast('重命名成功', 2000);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to rename conversation: %{public}s', String(error));
+      
       this.showToast('重命名失败', 2000);
     }
   }
@@ -3121,7 +3120,7 @@ struct Chat {
               breakpoint = 'xs';
             }
 
-            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Calculated breakpoint: %{public}s', String(breakpoint));
+            
 
             // 只使用AppStorage更新，@StorageLink会自动同步
             AppStorage.setOrCreate('currentBreakPoint', breakpoint);
@@ -3131,7 +3130,11 @@ struct Chat {
           });
       }
     } catch (err) {
-      hilog.error(DOMAIN, TAG, 'Failed to update breakpoint: %{public}s', String(err));
+      
     }
   }
 }
+
+
+
+

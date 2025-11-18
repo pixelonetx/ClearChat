@@ -201,7 +201,7 @@ struct ModelSettings {
         version, String(updated));
       if (!updated) {
         AppStorage.SetOrCreate('settingsVersion', version);
-        hilog.info(DOMAIN, TAG, 'ModelSettings: settingsVersion created with value %{public}d', version);
+        
       }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to update settings version: %{public}s', String(error));
@@ -295,7 +295,7 @@ struct ModelSettings {
     try {
       const settings = await this.fetchSettings();
       if (!settings) {
-        hilog.info(DOMAIN, TAG, 'No settings found in database');
+        
         this.providers = [];
         this.activeProviderId = '';
         this.activeModelId = '';
@@ -310,7 +310,7 @@ struct ModelSettings {
         this.activeProviderId = '';
         this.activeModelId = '';
         this.currentProviderIndex = 0;
-        hilog.info(DOMAIN, TAG, 'Settings found but no providers configured.');
+        
         return true;
       }
 
@@ -327,7 +327,7 @@ struct ModelSettings {
       this.activeProviderId = resolvedProvider.id;
       this.activeModelId = resolvedModelId;
 
-      hilog.info(DOMAIN, TAG, 'Loaded providers from database: %{public}d', storedProviders.length);
+      
       return true;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to load settings: %{public}s', String(error));
@@ -866,3 +866,4 @@ struct ModelSettings {
     })
   }
 }
+

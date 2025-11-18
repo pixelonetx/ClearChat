@@ -181,3 +181,4 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
     return encoded;
   }
 }
+

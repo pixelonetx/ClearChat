@@ -139,3 +139,4 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
     });
   }
 }
+

@@ -1,6 +1,6 @@
 /**
  * SearchConfigManager.ets
- * 
+ *
  * 搜索配置管理器
  * 负责保存、加载和管理搜索服务配置
  */
@@ -9,8 +9,7 @@ import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Context } from '@ohos.abilityAccessCtrl';
 import {
-  SearchCommonOptions,
-  SearchServiceOptions
+  SearchCommonOptions, SearchServiceOptions
 } from './SearchModels';
 
 const DOMAIN = 0x0009;
@@ -22,16 +21,16 @@ const TAG = 'SearchConfigManager';
 export interface SearchConfig {
   // 启用的搜索服务列表
   enabledServices: SearchServiceOptions[];
-  
+
   // 当前选中的搜索服务索引
   selectedServiceIndex: number;
-  
+
   // 通用搜索选项
   commonOptions: SearchCommonOptions;
-  
+
   // 是否启用网络搜索
   enableWebSearch: boolean;
-  
+
   // 搜索连接状态（服务ID -> 连接状态）
   connectionStatus: Record<string, boolean>;
 }
@@ -50,7 +49,6 @@ export class SearchConfigManager {
     enableWebSearch: false,
     connectionStatus: {}
   };
-
   private readonly PREFERENCES_NAME = 'search_config';
   private readonly KEY_CONFIG = 'search_config_data';
   private readonly KEY_ENABLED_SERVICES = 'search_enabled_services';
@@ -73,19 +71,19 @@ export class SearchConfigManager {
    */
   async init(context: Context): Promise<void> {
     this.context = context;
-    
+
     // 先初始化默认配置
     this.initializeDefaultConfig();
-    
+
     try {
       this.preferencesProxy = await preferences.getPreferences(context, this.PREFERENCES_NAME);
       await this.loadConfig();
-      hilog.info(DOMAIN, TAG, 'SearchConfigManager initialized successfully');
+      
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager preferences: %{public}s', err.message);
       // 不抛出错误，使用默认配置继续运行
-      hilog.warn(DOMAIN, TAG, 'Using default search config');
+      
     }
   }
 
@@ -95,7 +93,7 @@ export class SearchConfigManager {
   private async loadConfig(): Promise<void> {
     try {
       if (!this.preferencesProxy) {
-        hilog.warn(DOMAIN, TAG, 'Preferences proxy not initialized, keeping default config');
+        
         return;
       }
 
@@ -105,13 +103,13 @@ export class SearchConfigManager {
       const webSearchEnabled = this.preferencesProxy.getSync(this.KEY_WEB_SEARCH_ENABLED, false) as boolean;
 
       this.config.selectedServiceIndex = selectedIndex;
-      
+
       try {
         const servicesData = JSON.parse(enabledServicesJson) as Object[];
         this.config.enabledServices = servicesData.map((data: Object) => {
           return SearchServiceOptions.fromJson(data);
         });
-        hilog.info(DOMAIN, TAG, 'Loaded %{public}d search services', this.config.enabledServices.length);
+        
       } catch (error) {
         hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services: %{public}s', String(error));
         this.config.enabledServices = [];
@@ -131,8 +129,8 @@ export class SearchConfigManager {
       }
 
       this.config.enableWebSearch = webSearchEnabled;
-      
-      hilog.info(DOMAIN, TAG, 'Config loaded: enableWebSearch=%{public}s, services=%{public}d', 
+
+      hilog.info(DOMAIN, TAG, 'Config loaded: enableWebSearch=%{public}s, services=%{public}d',
         String(this.config.enableWebSearch), this.config.enabledServices.length);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -162,7 +160,9 @@ export class SearchConfigManager {
    */
   async saveConfig(): Promise<void> {
     try {
-      if (!this.preferencesProxy) return;
+      if (!this.preferencesProxy) {
+        return;
+      }
 
       const enabledServicesJson = JSON.stringify(
         this.config.enabledServices.map(s => s.toJson())
@@ -174,7 +174,7 @@ export class SearchConfigManager {
       this.preferencesProxy.putSync(this.KEY_WEB_SEARCH_ENABLED, this.config.enableWebSearch);
 
       await this.preferencesProxy.flush();
-      hilog.info(DOMAIN, TAG, 'Config saved successfully');
+      
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to save config: %{public}s', err.message);
@@ -189,7 +189,7 @@ export class SearchConfigManager {
   getConfig(): SearchConfig {
     // 如果配置为空或未初始化，使用默认配置
     if (!this.config || !this.config.commonOptions) {
-      hilog.warn(DOMAIN, TAG, 'Config not initialized, returning default config');
+      
       return {
         enabledServices: [],
         selectedServiceIndex: 0,
@@ -241,8 +241,8 @@ export class SearchConfigManager {
    * 获取选中的搜索服务
    */
   getSelectedService(): SearchServiceOptions | null {
-    if (this.config.selectedServiceIndex < 0 || 
-        this.config.selectedServiceIndex >= this.config.enabledServices.length) {
+    if (this.config.selectedServiceIndex < 0 ||
+      this.config.selectedServiceIndex >= this.config.enabledServices.length) {
       return null;
     }
     return this.config.enabledServices[this.config.selectedServiceIndex];
@@ -276,6 +276,7 @@ export class SearchConfigManager {
 
   /**
    * 测试服务连接
+   * 通过执行一个测试查询来验证 API 连接和凭证的有效性
    */
   async testConnection(serviceId: string): Promise<boolean> {
     try {
@@ -283,12 +284,25 @@ export class SearchConfigManager {
       if (!service) {
         return false;
       }
-
-      // TODO: 实现实际的连接测试逻辑
-      // 这里只是一个占位符
-      return true;
+      
+      const searchModule = await import('./SearchServiceFactory');
+      const SearchServiceFactory = searchModule.SearchServiceFactory;
+      const searchService = SearchServiceFactory.getService(service);
+      
+      const result = await searchService.search('test', { resultSize: 1, timeout: 5000 }, service);
+      const success = result && typeof result === 'object';
+      
+      this.setConnectionStatus(serviceId, success);
+      
+      if (!success) {
+        hilog.error(DOMAIN, TAG, 'Connection test failed for service: %{public}s', serviceId);
+      }
+      
+      return success;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Connection test failed for %{public}s: %{public}s', serviceId, String(error));
+      const err = error instanceof Error ? error : new Error(String(error));
+      hilog.error(DOMAIN, TAG, 'Connection test error for %{public}s: %{public}s', serviceId, err.message);
+      this.setConnectionStatus(serviceId, false);
       return false;
     }
   }
@@ -313,10 +327,12 @@ export class SearchConfigManager {
    */
   async clearConfig(): Promise<void> {
     try {
-      if (!this.preferencesProxy) return;
+      if (!this.preferencesProxy) {
+        return;
+      }
       await this.preferencesProxy.clear();
       this.initializeDefaultConfig();
-      hilog.info(DOMAIN, TAG, 'Config cleared');
+      
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to clear config: %{public}s', err.message);
@@ -324,3 +340,4 @@ export class SearchConfigManager {
     }
   }
 }
+

@@ -259,8 +259,6 @@ export class NetworkManagerV2 {
     const sanitizedModel = this.sanitizeIdentifier(model || '');
     const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
-    hilog.info(DOMAIN, TAG, 'Starting stream chat request (V2)...');
-
     try {
       // 1️⃣ 验证输入
       this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
@@ -285,7 +283,6 @@ export class NetworkManagerV2 {
         // assistant 消息可能包含 tool_calls
         if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
           requestMsg.tool_calls = msg.toolCalls;
-          hilog.info(DOMAIN, TAG, 'Including %{public}d tool_calls in assistant message', msg.toolCalls.length);
         }
         
         return requestMsg;
@@ -300,17 +297,6 @@ export class NetworkManagerV2 {
         enable_search: config.enableWebSearch === true ? true : undefined,
         tools: config.tools // OpenAI 工具调用
       };
-      
-      // 🔍 调试日志：打印请求体概要
-      hilog.info(DOMAIN, TAG, 'Request body: model=%{public}s, messages=%{public}d, tools=%{public}s, enable_search=%{public}s', 
-        sanitizedModel, requestMessages.length, String(!!config.tools), String(!!config.enableWebSearch));
-      
-      // 打印每个消息的摘要
-      for (let i = 0; i < requestMessages.length; i++) {
-        const reqMsg = requestMessages[i];
-        hilog.info(DOMAIN, TAG, 'Message[%{public}d]: role=%{public}s, contentLen=%{public}d, hasToolCalls=%{public}s, hasToolCallId=%{public}s',
-          i, reqMsg.role, reqMsg.content.length, String(!!(reqMsg.tool_calls)), String(!!reqMsg.tool_call_id));
-      }
 
       // 3️⃣ 创建 HTTP 请求
       const httpRequest = http.createHttp();
@@ -578,11 +564,10 @@ export class NetworkManagerV2 {
 
     hilog.info(DOMAIN, TAG, 'Performing HTTP request to: %{public}s', url);
 
-    return new Promise<number>((resolve, reject) => {
-      httpRequest.requestInStream(url, options).then((responseCode: number) => {
-        hilog.info(DOMAIN, TAG, 'HTTP response code: %{public}d', responseCode);
-        resolve(responseCode);
-      }).catch((err: Error) => {
+      return new Promise<number>((resolve, reject) => {
+        httpRequest.requestInStream(url, options).then((responseCode: number) => {
+          resolve(responseCode);
+        }).catch((err: Error) => {
         hilog.error(DOMAIN, TAG, 'HTTP request error: %{public}s', String(err));
         reject(err);
       });
@@ -687,15 +672,11 @@ export class NetworkManagerV2 {
     const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
     hilog.info(DOMAIN, TAG, 'Starting non-streaming chat request');
-    hilog.info(DOMAIN, TAG, 'API URL: %{public}s', sanitizedApiUrl);
-    hilog.info(DOMAIN, TAG, 'Model: %{public}s', sanitizedModel);
-    hilog.info(DOMAIN, TAG, 'Messages count: %{public}d', messages.length);
-
+    
     // 验证输入
     this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
 
     const requestUrl = this.resolveChatCompletionsUrl(sanitizedApiUrl);
-    hilog.info(DOMAIN, TAG, 'Resolved chat endpoint: %{public}s', requestUrl);
 
     return new Promise((resolve, reject) => {
       const httpRequest = http.createHttp();
@@ -747,7 +728,6 @@ export class NetworkManagerV2 {
         try {
           if (data.responseCode === 200) {
             const responseData = data.result as string;
-            hilog.info(DOMAIN, TAG, 'Received response: %{public}s', responseData);
 
             const response: ChatResponse = JSON.parse(responseData);
 

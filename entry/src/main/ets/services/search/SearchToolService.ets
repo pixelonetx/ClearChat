@@ -162,7 +162,7 @@ export class SearchToolService {
         timeout: config.commonOptions.timeout ?? 10000
       };
 
-      hilog.info(DOMAIN, TAG, 'Executing search with query: %{public}s, service: %{public}s', query, selectedService.type);
+      
 
       const result = await service.search(query, commonOptions, selectedService);
 
@@ -182,7 +182,7 @@ export class SearchToolService {
       }
       result.items = updatedItems;
 
-      hilog.info(DOMAIN, TAG, 'Search completed successfully with %{public}d results', result.items.length);
+      
       return result;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Search execution failed: %{public}s', String(error));
@@ -291,3 +291,4 @@ export class SearchToolService {
     return uuid;
   }
 }
+

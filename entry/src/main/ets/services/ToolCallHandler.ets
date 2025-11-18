@@ -70,8 +70,6 @@ export class ToolCallHandler {
    * 执行工具调用
    */
   async executeToolCall(toolCall: ToolCall): Promise<ToolCallResult> {
-    hilog.info(DOMAIN, TAG, '🔧 Executing tool call: %{public}s', toolCall.name);
-
     if (toolCall.name !== 'search_web') {
       return {
         toolCallId: toolCall.id,
@@ -111,7 +109,6 @@ export class ToolCallHandler {
 
       // 执行搜索
       const startTime = Date.now();
-      hilog.info(DOMAIN, TAG, '🔍 Searching: %{public}s', query);
 
       const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
 
@@ -136,7 +133,6 @@ export class ToolCallHandler {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      hilog.error(DOMAIN, TAG, '❌ Tool execution failed: %{public}s', errorMsg);
 
       // 调用搜索错误回调
       const argsStr = toolCall.arguments || '{}';
