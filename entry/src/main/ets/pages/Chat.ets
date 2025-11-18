@@ -110,6 +110,8 @@ struct Chat {
   // 缓存已分组的对话数据，避免重复计算
   @State private cachedGroupedConversations: Record<string, Conversation[]> | null = null;
   @State private cachedGroupedKeys: string[] = [];
+  // 🔥 逻辑时间戳：确保消息顺序正确，即使系统时间不准确
+  private logicalTimestamp: number = Date.now();
   // 应用状态
   @State isLoading: boolean = false;
   @State isGenerating: boolean = false; // 新增：跟踪是否正在生成内容
@@ -122,9 +124,9 @@ struct Chat {
   @State isSearching: boolean = false; // 是否正在执行搜索
   @State searchQuery: string = ''; // 当前搜索查询
   @State searchResults: string = ''; // 搜索结果摘要
-  // 🆕 自动滚动相关状态
-  @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
+  // 滚动按钮相关状态
   @State showScrollToBottomButton: boolean = false; // 是否显示"滚动到底部"按钮
+  @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManagerV2.getInstance();
   private titleGenerationService: TitleGenerationService = new TitleGenerationService();
@@ -144,6 +146,22 @@ struct Chat {
   private notifyMessagesUpdated(): void {
     // 更新数据源引用与刷新（数组引用经常被替换）
     this.messageDataSource.setDataRef(this.messages);
+  }
+
+  /**
+   * 生成递增的逻辑时间戳，确保消息顺序正确
+   * 即使系统时间不准确或时间戳相同，也能保证消息按照发送顺序排列
+   */
+  private getNextTimestamp(): number {
+    const now = Date.now();
+    // 如果当前时间大于逻辑时间戳，更新逻辑时间戳
+    if (now > this.logicalTimestamp) {
+      this.logicalTimestamp = now;
+    } else {
+      // 否则，递增逻辑时间戳（每次增加1毫秒）
+      this.logicalTimestamp += 1;
+    }
+    return this.logicalTimestamp;
   }
 
   private cloneChatMessage(message: ChatMessage): ChatMessage {
@@ -284,9 +302,10 @@ struct Chat {
   build() {
     NavDestination() {
       SideBarContainer(SideBarContainerType.AUTO) {
-        Column() {
-          this.SidebarContent()
-        }
+        this.SidebarContent()
+        // Column() {
+        //   this.SidebarContent()
+        // }
 
         // 主内容区域
         Column() {
@@ -393,32 +412,32 @@ struct Chat {
                 .height('100%')
                 .justifyContent(FlexAlign.Center)
               } else {
-                // 🆕 使用Stack包裹消息列表和浮层按钮
-                Stack() {
-                  // 消息列表
-                  Column() {
-                    if (this.messages.length === 0) {
-                      // 空状态
-                      Column() {
-                        Text('有什么可以帮忙的？')
-                          .fontSize(18)
-                          .margin({ top: 16 })
+                // 消息列表
+                Column() {
+                  if (this.messages.length === 0) {
+                    // 空状态
+                    Column() {
+                      Text('有什么可以帮忙的？')
+                        .fontSize(18)
+                        .margin({ top: 16 })
 
-                        if (!this.hasSettings) {
-                          Button('配置API设置')
-                            .buttonStyle(ButtonStyleMode.NORMAL)
-                            .padding({ left: 20, right: 20 })
-                            .margin({ top: 16 })
-                            .onClick(() => {
-                              this.pathStack.pushPathByName("ModelSettings", null);
-                              this.hideKeyboard();
-                            })
-                        }
+                      if (!this.hasSettings) {
+                        Button('配置API设置')
+                          .buttonStyle(ButtonStyleMode.NORMAL)
+                          .padding({ left: 20, right: 20 })
+                          .margin({ top: 16 })
+                          .onClick(() => {
+                            this.pathStack.pushPathByName("ModelSettings", null);
+                            this.hideKeyboard();
+                          })
                       }
-                      .width('100%')
-                      .layoutWeight(1)
-                      .justifyContent(FlexAlign.Center)
-                    } else {
+                    }
+                    .width('100%')
+                    .layoutWeight(1)
+                    .justifyContent(FlexAlign.Center)
+                  } else {
+
+                    Stack() {
                       // 消息列表（使用 LazyForEach 虚拟化以提升性能）
                       Scroll(this.scroller) {
                         Column() {
@@ -454,31 +473,22 @@ struct Chat {
                       }
                       .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
                       .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
-                      .onScrollFrameBegin((offset, state) => {
-                        // 🆕 改进的逻辑：
-                        // 1. 如果用户向上滑，禁用自动跟随
-                        // 2. 如果用户向下滑且当前不在自动跟随模式，检查是否到底部
-                        if (offset !== 0) {
-                          if (offset > 0 && this.shouldAutoScroll) {
-                            // 向上滑且当前在自动跟随模式，禁用自动跟随
-                            this.shouldAutoScroll = false;
-                            this.showScrollToBottomButton = true;
-                          } else if (offset < 0 && !this.shouldAutoScroll) {
-                            // 向下滑且当前在禁用自动跟随模式，检查是否快到底部
-                            // 如果继续向下滑动且不在自动跟随，说明用户在浏览消息
-                            // 不需要立即隐藏按钮，让用户继续浏览
-                          }
-                        }
-                        // 动态调整滚动量实现自定义阻尼
-                        return { offsetRemain: offset * 0.7 }
-                      })
                       .onScrollEdge((side: Edge) => {
-                        // 🆕 检测是否滑到了底部边缘
-                        // 只要检测到底部边缘，就隐藏按钮并启用自动跟随
+                        // 只关心底部边缘事件
+                        // 这是判断用户是否在列表底部的最可靠方式
                         if (side === Edge.Bottom) {
-                          // 用户已滑到底部，自动隐藏按钮并启用自动跟随
-                          this.shouldAutoScroll = true;
+                          // 用户已滑到底部，隐藏"滚动到底部"按钮
                           this.showScrollToBottomButton = false;
+                          this.shouldAutoScroll = true;
+                        }
+                      })
+                      .onScroll((xOffset: number, yOffset: number) => {
+                        // 当用户离开底部时（向上滑），显示按钮
+                        // yOffset > 0 表示向上滑（内容向上移动，露出顶部）
+                        if (yOffset > 0 && !this.showScrollToBottomButton) {
+                          // 用户向上滑，显示按钮
+                          this.showScrollToBottomButton = true;
+                          this.shouldAutoScroll = false;
                         }
                       })
                       .layoutWeight(1)
@@ -489,42 +499,40 @@ struct Chat {
                       .onClick(() => {
                         this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
                       })
-                    }
-                  }
-                  .layoutWeight(1)
-                  .width('100%')
 
-                  // "滚动到底部"按钮 - 浮在消息列表上方
-                  if (this.showScrollToBottomButton) {
-                    Button('↓')
-                      .fontSize(16)
-                      .fontColor($r('app.color.text_color'))
-                      .type(ButtonType.Circle)
-                      // .backgroundColor($r('app.color.start_window_background'))
-                      .backgroundColor(Color.Transparent)
-                      .size({ height: 40, width: 40 })
-                      .padding({ left: 6, right: 6 })
-                      .backgroundBlurStyle(BlurStyle.Thin, {
-                        colorMode: ThemeColorMode.LIGHT, // 适配浅色主题
-                        adaptiveColor: AdaptiveColor.DEFAULT,
-                        scale: 1.0 // 模糊缩放比例
-                      })
-                      .onClick(() => {
-                        // 直接滚动，不经过scrollToBottom()的检查
-                        if (this.scroller) {
-                          this.scroller.scrollEdge(Edge.Bottom);
-                        }
-                        // 滚动后重新启用自动跟随，隐藏按钮
-                        this.shouldAutoScroll = true;
-                        this.showScrollToBottomButton = false;
-                      })
-                      .margin({ bottom: 16 })
-                      .zIndex(5)
+                      // "滚动到底部"按钮 - 浮在消息列表上方
+                      if (this.showScrollToBottomButton) {
+                        Button('↓')
+                          .fontSize(16)
+                          .fontColor($r('app.color.text_color'))
+                          .type(ButtonType.Circle)
+                          // .backgroundColor($r('app.color.start_window_background'))
+                          .backgroundColor(Color.Transparent)
+                          .size({ height: 40, width: 40 })
+                          .padding({ left: 6, right: 6 })
+                          .backgroundBlurStyle(BlurStyle.Thin, {
+                            colorMode: ThemeColorMode.LIGHT, // 适配浅色主题
+                            adaptiveColor: AdaptiveColor.DEFAULT,
+                            scale: 1.0 // 模糊缩放比例
+                          })
+                          .onClick(() => {
+                            // 直接滚动，不经过scrollToBottom()的检查
+                            if (this.scroller) {
+                              this.scroller.scrollEdge(Edge.Bottom);
+                            }
+                            // 滚动后隐藏按钮并启用自动跟随
+                            this.shouldAutoScroll = true;
+                            this.showScrollToBottomButton = false;
+                          })
+                          .margin({ bottom: 16 })
+                          .zIndex(5)
+                      }
+                    }
+                    .alignContent(Alignment.Bottom)
                   }
                 }
-                .alignContent(Alignment.Bottom)
-                .width('100%')
                 .layoutWeight(1)
+                .width('100%')
               }
 
               // 输入
@@ -550,7 +558,7 @@ struct Chat {
                   })
 
                 Row() {
-                  // 🔥 联网搜索开关 - 统一控制，始终显示
+                  // 联网搜索开关 - 统一控制，始终显示
                   Toggle({ type: ToggleType.Button, isOn: this.enableWebSearch }) {
                     Image($r('app.media.worldclock'))
                       .size({ width: 24, height: 24 })
@@ -682,7 +690,6 @@ struct Chat {
             }
           }
         }
-
       }
       .gesture(
         PanGesture({
@@ -705,6 +712,7 @@ struct Chat {
       .width('100%')
       .height('100%')
     }
+    .width('100%')
     .backgroundColor($r('app.color.common_background'))
     .hideTitleBar(true)
     .onReady((context: NavDestinationContext) => {
@@ -785,7 +793,7 @@ struct Chat {
       const context = getContext(this) as common.UIAbilityContext;
       await this.databaseManager.initDatabase(context);
 
-      // 🔥 清理历史中的tool消息（修复消息顺序问题）
+      // 清理历史中的tool消息（修复消息顺序问题）
       try {
         const cleanedCount = await this.databaseManager.cleanupToolMessages();
         if (cleanedCount > 0) {
@@ -871,7 +879,7 @@ struct Chat {
         this.enableWebSearch = !!settings.enableWebSearch;
         // 联动识别阿里云开关
         this.isAliyunActive = this.isAliyunProviderActive();
-        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
+        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
         hilog.error(DOMAIN, TAG, 'Active provider resolved', {
           providerId: activeProvider.id,
           providerName: activeProvider.displayName,
@@ -928,7 +936,7 @@ struct Chat {
 
         // 每次设置刷新后，同步更新阿里云识别状态
         this.isAliyunActive = this.isAliyunProviderActive();
-        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
+        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
 
         this.previousSettingsVersion = targetVersion;
         this.logSettingsVersionState('Chat: reloadChatState completed');
@@ -1004,7 +1012,18 @@ struct Chat {
       }
       this.notifyMessagesUpdated();
 
-      // 🆕 重置自动滚动状态并滚动到底部
+      // 🔥 同步逻辑时间戳：从已加载的消息中找出最大时间戳
+      if (this.messages.length > 0) {
+        let maxTimestamp = 0;
+        for (let i = 0; i < this.messages.length; i++) {
+          if (this.messages[i].timestamp > maxTimestamp) {
+            maxTimestamp = this.messages[i].timestamp;
+          }
+        }
+        this.logicalTimestamp = maxTimestamp;
+      }
+
+      // 重置自动滚动状态并滚动到底部
       this.shouldAutoScroll = true;
       this.showScrollToBottomButton = false;
 
@@ -1163,6 +1182,7 @@ struct Chat {
     try {
       this.currentConversation = conversation;
       await this.loadChatHistory();
+      // 🔥 loadChatHistory 中已经同步逻辑时间戳，这里不需要额外处理
       this.hideSidebar();
 
       // 确保加载状态被重置
@@ -1271,7 +1291,7 @@ struct Chat {
 
         // 切换模型后，立即刷新是否为阿里云状态
         this.isAliyunActive = this.isAliyunProviderActive();
-        // 🔥 移除 currentModelSupportsWebSearchFlag 更新，不再需要
+        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
 
         this.showToast(`已切换到${provider.displayName}的${model.displayName}`, 2000);
       }
@@ -1386,7 +1406,7 @@ struct Chat {
     return false;
   }
 
-  // 🔥 移除 isCurrentModelSupportsWebSearch 方法，不再需要显隐控制
+  // 移除 isCurrentModelSupportsWebSearch 方法，不再需要显隐控制
 
   // 判断是否应该生成标题
   private shouldGenerateTitle(): boolean {
@@ -1447,7 +1467,7 @@ struct Chat {
     return (totalUserChars + totalAiChars) >= 25;
   }
 
-  // ✅ 分离职责 - 消息验证和初始化
+  // 分离职责 - 消息验证和初始化
   /**
    * 验证和准备消息
    * @param text 原始输入文本
@@ -1484,11 +1504,12 @@ struct Chat {
     }
 
     return new ChatMessage(trimmedInput, 'user', {
-      conversationId: this.currentConversation?.id || 'default'
+      conversationId: this.currentConversation?.id || 'default',
+      timestamp: this.getNextTimestamp()  // 🔥 使用逻辑时间戳确保顺序
     });
   }
 
-  // ✅ 分离职责 - 初始化流式消息
+  // 分离职责 - 初始化流式消息
   /**
    * 初始化流式AI消息并保存到数据库
    * @param userMessage 用户消息
@@ -1504,8 +1525,8 @@ struct Chat {
       conversationId: conversationId,
       modelName: modelInfo.modelName,
       providerName: modelInfo.providerName,
-      // 🔥 关键修复：AI消息时间戳应该严格晚于用户消息，确保正确的显示顺序
-      timestamp: Math.max(userMessage.timestamp + 1, Date.now())
+      // 🔥 关键修复：使用逻辑时间戳确保AI消息严格晚于用户消息
+      timestamp: this.getNextTimestamp()
     });
 
     const index = this.appendMessage(streamingMessage);
@@ -1519,7 +1540,7 @@ struct Chat {
     return result;
   }
 
-  // ✅ 分离职责 - 追加数据块
+  // 分离职责 - 追加数据块
   /**
    * 将流式数据块追加到消息中
    * @param messageIndex 消息索引
@@ -1542,7 +1563,7 @@ struct Chat {
     }
   }
 
-  // ✅ 分离职责 - 处理流式完成
+  // 分离职责 - 处理流式完成
   /**
    * 处理流式请求完成，重置UI状态
    */
@@ -1553,7 +1574,7 @@ struct Chat {
     this.userAbortedGeneration = false;
   }
 
-  // ✅ 分离职责 - 持久化消息
+  // 分离职责 - 持久化消息
   /**
    * 异步持久化流式消息到数据库
    * @param messageIndex 消息索引
@@ -1585,7 +1606,7 @@ struct Chat {
     }
   }
 
-  // ✅ 事件驱动处理 - 设置流式事件处理
+  // 事件驱动处理 - 设置流式事件处理
   /**
    * 为流式请求设置事件处理（替代回调地狱）
    * @param emitter 事件发射器
@@ -1603,7 +1624,7 @@ struct Chat {
       'Setting up stream event handlers for message index: %{public}d, isToolContinuation=%{public}s',
       streamingMessageIndex, String(isToolContinuation));
 
-    // 🔥 标志：用于跟踪是否已处理工具调用（防止 COMPLETE 事件在工具执行期间重置状态）
+    // 标志：用于跟踪是否已处理工具调用（防止 COMPLETE 事件在工具执行期间重置状态）
     let toolCallHandled = false;
 
     // 监听数据事件
@@ -1625,7 +1646,7 @@ struct Chat {
       hilog.info(DOMAIN, TAG, 'Received COMPLETE event for message index: %{public}d, toolCallHandled=%{public}s',
         streamingMessageIndex, String(toolCallHandled));
 
-      // 🔥 关键修复：只有在没有工具调用时才重置状态
+      // 关键修复：只有在没有工具调用时才重置状态
       // 如果有工具调用，让 continueConversationWithToolResult 中的流来处理完成
       if (!toolCallHandled) {
         this.handleStreamComplete();
@@ -1644,7 +1665,7 @@ struct Chat {
     emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
       const error = payload as Error;
       hilog.error(DOMAIN, TAG, 'Received ERROR event: %{public}s', String(error));
-      // 🔥 在工具继续阶段的错误会有不同的处理
+      // 在工具继续阶段的错误会有不同的处理
       this.handleStreamError(streamingMessageIndex, error, isToolContinuation);
     });
 
@@ -1659,7 +1680,7 @@ struct Chat {
       const toolCalls = payload as import('../services/StreamEventEmitter').ToolCallData[];
       
 
-      // 🔥 标记已处理工具调用，这样之后的 COMPLETE 事件就不会重置状态
+      // 标记已处理工具调用，这样之后的 COMPLETE 事件就不会重置状态
       toolCallHandled = true;
 
       this.handleToolCalls(toolCalls, streamingMessageIndex, conversationId)
@@ -1673,7 +1694,7 @@ struct Chat {
     
   }
 
-  // ✅ 事件驱动处理 - 设置重新生成事件处理
+  // 事件驱动处理 - 设置重新生成事件处理
   /**
    * 为重新生成流式请求设置事件处理
    * @param emitter 事件发射器
@@ -1816,7 +1837,7 @@ struct Chat {
     });
   }
 
-  // ✅ 分离职责 - 处理流式错误
+  // 分离职责 - 处理流式错误
   /**
    * 处理流式请求错误
    * @param messageIndex 消息索引
@@ -1847,7 +1868,7 @@ struct Chat {
     this.showToast(friendlyError);
   }
 
-  // ✅ 分离职责 - 更新元数据
+  // 分离职责 - 更新元数据
   /**
    * 更新流式消息的元数据
    * @param streamingMessageIndex 流式消息索引
@@ -1916,24 +1937,24 @@ struct Chat {
     }
   }
 
-  // ✅ 简化的主函数 - 仅负责流程控制
+  // 简化的主函数 - 仅负责流程控制
   async sendMessage() {
     try {
-      // 1️⃣ 验证和准备消息
+      // 验证和准备消息
       const userMessage = this.validateAndPrepareMessage(this.inputText);
       if (!userMessage) {
         return;
       }
 
-      // 2️⃣ 前置检查和准备
+      // 前置检查和准备
       await this.waitForLatestSettings('sendMessage');
       this.hideKeyboard();
-      // 🆕 发送消息时重置自动滚动状态
+      // 发送消息时重置自动滚动状态
       this.shouldAutoScroll = true;
       this.showScrollToBottomButton = false;
       this.scrollToBottom();
 
-      // 3️⃣ 确保对话存在
+      // 确保对话存在
       if (!this.currentConversation) {
         await this.createNewConversationForMessage();
       }
@@ -1945,29 +1966,29 @@ struct Chat {
 
       const targetConversationId = this.currentConversation.id;
 
-      // 4️⃣ 准备状态和消息
+      // 准备状态和消息
       this.isLoading = true;
       this.isGenerating = true;
       this.currentAbortController = createAbortController();
       this.inputText = '';
 
-      // 5️⃣ 保存用户消息
+      // 保存用户消息
       const userMessageIndex = this.appendMessage(userMessage);
       const userMessageId = await this.databaseManager.insertChatMessage(userMessage);
       this.replaceMessageAt(userMessageIndex, (msg) => {
         msg.id = userMessageId;
       });
 
-      // 6️⃣ 初始化流式消息
+      // 初始化流式消息
       const streamingResult: StreamingMessageResult =
         await this.initializeStreamingMessage(userMessage, targetConversationId);
       const streamingIndex: number = streamingResult.index;
 
-      // 7️⃣ 准备AI消息列表
+      // 准备AI消息列表
       const messagesForAI = this.prepareMessagesForAPI(userMessage);
 
-      // 8️⃣ 检查是否启用联网搜索并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
-      // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
+      // 检查是否启用联网搜索并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
+      // 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
       let enableAlibabaSearch = false;
 
@@ -2003,7 +2024,7 @@ struct Chat {
         // 降级到不使用工具调用
       }
 
-      // 9️⃣ 发送流式请求（使用新的事件驱动架构）
+      // 发送流式请求（使用新的事件驱动架构）
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings!.apiUrl,
         this.currentSettings!.apiKey,
@@ -2017,7 +2038,7 @@ struct Chat {
         }
       );
 
-      // 🔟 设置事件处理（替代回调地狱）
+      // 设置事件处理（替代回调地狱）
       this.setupStreamEventHandlers(emitter, streamingIndex, targetConversationId);
 
     } catch (error) {
@@ -2029,7 +2050,7 @@ struct Chat {
     }
   }
 
-  // ✅ 辅助方法 - 创建新对话
+  // 辅助方法 - 创建新对话
   private async createNewConversationForMessage(): Promise<void> {
     try {
       const newConversation = await this.databaseManager.createConversation('新对话');
@@ -2043,7 +2064,7 @@ struct Chat {
     }
   }
 
-  // ✅ 辅助方法 - 准备API消息列表
+  // 辅助方法 - 准备API消息列表
   private prepareMessagesForAPI(userMessage: ChatMessage): ChatMessage[] {
     const endIndex = this.messages.length - 1;
     const startIndex = Math.max(0, endIndex - 10);
@@ -2054,8 +2075,8 @@ struct Chat {
     return messagesForAI;
   }
 
-  // ✅ 工具调用处理 - 执行搜索并继续对话
-  // ✅ 工具调用处理 - 执行搜索并继续对话
+  // 工具调用处理 - 执行搜索并继续对话
+  // 工具调用处理 - 执行搜索并继续对话
   private async handleToolCalls(
     toolCalls: import('../services/StreamEventEmitter').ToolCallData[],
     assistantMessageIndex: number,
@@ -2063,7 +2084,7 @@ struct Chat {
   ): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Handling %{public}d tool calls', toolCalls.length);
 
-    // 🔥 关键修复：将工具调用信息保存到 assistant 消息中
+    // 关键修复：将工具调用信息保存到 assistant 消息中
     if (assistantMessageIndex < this.messages.length) {
       // 转换为 ToolCall 格式
       const formattedToolCalls: import('../services/DataModels').ToolCall[] =
@@ -2089,7 +2110,7 @@ struct Chat {
       hilog.info(DOMAIN, TAG, 'Saved %{public}d tool calls to assistant message', formattedToolCalls.length);
     }
 
-    // 🔥 重要修复：不在此处调用 handleStreamComplete()
+    // 重要修复：不在此处调用 handleStreamComplete()
     // 原因：工具调用完成后还需继续生成模型回答，不应该重置 isGenerating 状态
     // handleStreamComplete() 应该在最终流完成时由 setupStreamEventHandlers 中的 COMPLETE 事件处理器调用
     // this.handleStreamComplete();
@@ -2172,7 +2193,7 @@ struct Chat {
             errorMessage = `搜索失败: ${err.message}`;
           }
 
-          // 🔥 关键修复：只在消息为空时才设置错误，否则追加
+          // 关键修复：只在消息为空时才设置错误，否则追加
           // 这样可以保留已有的内容并追加错误说明
           if (assistantMessageIndex < this.messages.length) {
             this.replaceMessageAt(assistantMessageIndex, (msg) => {
@@ -2186,7 +2207,7 @@ struct Chat {
             });
           }
 
-          // 🔥 错误处理：如果搜索失败，不继续生成，而是重置状态
+          // 错误处理：如果搜索失败，不继续生成，而是重置状态
           // 这样可以避免继续对话时出现"生成过程中出现错误"
           this.isLoading = false;
           this.isGenerating = false;
@@ -2199,7 +2220,7 @@ struct Chat {
     }
   }
 
-  // ✅ 继续对话 - 在工具执行后
+  // 继续对话 - 在工具执行后
   private async continueConversationWithToolResult(
     conversationId: string,
     assistantMessageIndex: number,
@@ -2212,7 +2233,7 @@ struct Chat {
       return;
     }
 
-    // ✅ 关键修复：保持 isGenerating = true，因为工具执行后还要继续生成模型回答
+    // 关键修复：保持 isGenerating = true，因为工具执行后还要继续生成模型回答
     // 不要在此处重置状态，应该让 setupStreamEventHandlers 中的事件处理器来管理
     // 这样可以确保按钮在整个过程中保持正确的状态
 
@@ -2248,12 +2269,12 @@ struct Chat {
         const toolResultMessage = new ChatMessage(
           toolContent,
           'tool',
-          { conversationId: conversationId, timestamp: Date.now(), toolCallId: toolCallId }
+          { conversationId: conversationId, timestamp: this.getNextTimestamp(), toolCallId: toolCallId }
         );
 
         
 
-        // 🔥 关键修复：仅添加到内存中，不保存到数据库
+        // 关键修复：仅添加到内存中，不保存到数据库
         // 这样可以避免tool消息在UI中显示导致的消息顺序混乱
         const toolIndex = this.appendMessage(toolResultMessage);
         // 为内存中的消息分配一个临时ID（不从数据库获取）
@@ -2283,7 +2304,7 @@ struct Chat {
       }
 
       // 检查搜索配置并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
-      // 🔥 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
+      // 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
       let tools: object[] = [];
       let enableAlibabaSearch = false;
 
@@ -2339,13 +2360,13 @@ struct Chat {
 
       
 
-      // 🔥 关键修复：设置事件处理器来接收流式响应
+      // 关键修复：设置事件处理器来接收流式响应
       // 传递 isToolContinuation = true，表示这是工具继续阶段的错误处理
       this.setupStreamEventHandlers(emitter, streamingIndex, conversationId, true);
 
       
 
-      // ⏱️ 设置超时保护：如果60秒内没有收到任何数据或完成事件，强制重置状态
+      // 设置超时保护：如果60秒内没有收到任何数据或完成事件，强制重置状态
       const timeoutId = setTimeout(() => {
         if (this.isLoading || this.isGenerating) {
           hilog.error(DOMAIN, TAG, 'Stream timeout after 60s, forcing state reset');
@@ -2380,7 +2401,7 @@ struct Chat {
       this.currentAbortController = null;
       const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
 
-      // 🔥 关键修复：在消息中追加错误而不是覆盖
+      // 关键修复：在消息中追加错误而不是覆盖
       // 如果已经有搜索结果，应该追加错误而不是完全替换
       const streamingIndex = assistantMessageIndex;
       if (streamingIndex < this.messages.length) {
@@ -2415,7 +2436,7 @@ struct Chat {
   }
 
   scrollToBottom() {
-    // 🆕 只在自动跟随模式下执行滚动，禁止AI生成消息时用户看不见
+    // 只在自动跟随模式下执行滚动，禁止AI生成消息时用户看不见
     if (!this.shouldAutoScroll) {
       hilog.info(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
       return;
@@ -2591,7 +2612,7 @@ struct Chat {
 
       hilog.error(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 🔥 检查是否启用联网搜索并构建工具数组（互斥逻辑）
+      // 检查是否启用联网搜索并构建工具数组（互斥逻辑）
       let tools: object[] = [];
       let enableAlibabaSearch = false;
 
@@ -3049,7 +3070,6 @@ struct Chat {
   }
 
   @Builder
-  @Builder
   ModelSelectorSheetBuilder() {
     ModelSelectorSheet({
       providers: this.currentSettings?.providers || [],
@@ -3120,7 +3140,7 @@ struct Chat {
               breakpoint = 'xs';
             }
 
-            
+            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Calculated breakpoint: %{public}s', String(breakpoint));
 
             // 只使用AppStorage更新，@StorageLink会自动同步
             AppStorage.setOrCreate('currentBreakPoint', breakpoint);
@@ -3130,7 +3150,7 @@ struct Chat {
           });
       }
     } catch (err) {
-      
+      hilog.error(DOMAIN, TAG, 'Failed to update breakpoint: %{public}s', String(err));
     }
   }
 }
