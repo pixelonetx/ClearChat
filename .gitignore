@@ -11,3 +11,5 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+
+.vscode/settings.json
