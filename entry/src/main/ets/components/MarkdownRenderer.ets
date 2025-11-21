@@ -280,6 +280,7 @@ export struct MarkdownRenderer {
       })
     }
     .margin({ top: MarkdownStyle.HEADING_MARGIN_TOP, bottom: MarkdownStyle.HEADING_MARGIN_BOTTOM })
+    .lineHeight(MarkdownStyle.HEADING_LINE_HEIGHT)
     .maxLines(MarkdownStyle.MAX_LINES)
     .textOverflow({ overflow: TextOverflow.None })
     .wordBreak(MarkdownStyle.WORD_BREAK)
@@ -319,6 +320,7 @@ export struct MarkdownRenderer {
             })
           }
           .maxLines(MarkdownStyle.MAX_LINES)
+          .lineHeight(MarkdownStyle.TEXT_LINE_HEIGHT)
           .textOverflow({ overflow: TextOverflow.None })
           .wordBreak(MarkdownStyle.WORD_BREAK)
           .fontStyle(FontStyle.Italic) // 引用块整体斜体
@@ -343,6 +345,7 @@ export struct MarkdownRenderer {
           Row() {
             Text(block.ordered ? `${(block.startNumber ?? 1) + index}.` : '•')
               .fontSize(MarkdownStyle.TEXT_FONT_SIZE)
+              .lineHeight(MarkdownStyle.TEXT_LINE_HEIGHT)
               .width(block.ordered ? 28 : 16)
               .textAlign(TextAlign.End)
               .margin({ right: 8 })
@@ -390,6 +393,8 @@ export struct MarkdownRenderer {
       })
     }
     .maxLines(MarkdownStyle.MAX_LINES)
+    .lineHeight(MarkdownStyle.TEXT_LINE_HEIGHT)
+    .margin({ top: MarkdownStyle.PARAGRAPH_MARGIN_TOP, bottom: MarkdownStyle.PARAGRAPH_MARGIN_BOTTOM })
     .textOverflow({ overflow: TextOverflow.None })
     .wordBreak(MarkdownStyle.WORD_BREAK)
     .copyOption(CopyOptions.InApp)

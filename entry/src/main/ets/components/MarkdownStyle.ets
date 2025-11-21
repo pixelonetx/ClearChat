@@ -24,17 +24,17 @@
 export class MarkdownStyle {
   // ============ 字体大小配置 ============
   /** 标题 H1 字体大小 */
-  static readonly HEADING_SIZE_H1: number = 24;
+  static readonly HEADING_SIZE_H1: number = 17;
   /** 标题 H2 字体大小 */
-  static readonly HEADING_SIZE_H2: number = 20;
+  static readonly HEADING_SIZE_H2: number = 16;
   /** 标题 H3 字体大小 */
-  static readonly HEADING_SIZE_H3: number = 18;
+  static readonly HEADING_SIZE_H3: number = 15;
   /** 标题 H4 字体大小 */
-  static readonly HEADING_SIZE_H4: number = 16;
+  static readonly HEADING_SIZE_H4: number = 15;
   /** 标题 H5 字体大小 */
-  static readonly HEADING_SIZE_H5: number = 14;
+  static readonly HEADING_SIZE_H5: number = 15;
   /** 标题 H6 字体大小 */
-  static readonly HEADING_SIZE_H6: number = 12;
+  static readonly HEADING_SIZE_H6: number = 15;
 
   /** 普通文本字体大小 */
   static readonly TEXT_FONT_SIZE: number = 15;
@@ -45,11 +45,11 @@ export class MarkdownStyle {
 
   // ============ 颜色配置 ============
   /** 链接颜色 */
-  static readonly LINK_COLOR: string = '#007AFF';
+  static readonly LINK_COLOR: string = '#1A73E8';
   /** 代码块（行内代码）颜色 */
-  static readonly CODE_COLOR: string = '#D63384';
+  static readonly CODE_COLOR: string = '#C678DD';
   /** 普通文本颜色 */
-  static readonly TEXT_COLOR: string = '#000000';
+  static readonly TEXT_COLOR: string = '#1F1F1F';
 
   // ============ 字体配置 ============
   /** 等宽字体（用于代码块） */
@@ -59,43 +59,53 @@ export class MarkdownStyle {
 
   // ============ 装饰效果 ============
   /** 链接下划线颜色 */
-  static readonly LINK_UNDERLINE_COLOR: string = '#007AFF';
+  static readonly LINK_UNDERLINE_COLOR: string = '#1A73E8';
 
   // ============ 间距配置 ============
   /** 标题上下间距 - 上边距 */
-  static readonly HEADING_MARGIN_TOP: number = 16;
+  static readonly HEADING_MARGIN_TOP: number = 10;
   /** 标题上下间距 - 下边距 */
-  static readonly HEADING_MARGIN_BOTTOM: number = 8;
+  static readonly HEADING_MARGIN_BOTTOM: number = 6;
+  /** 标题行高 */
+  static readonly HEADING_LINE_HEIGHT: number = 24;
+
+  /** 普通文本行高 */
+  static readonly TEXT_LINE_HEIGHT: number = 22;
+  /** 段落间距 - 上边距 */
+  static readonly PARAGRAPH_MARGIN_TOP: number = 0;
+  /** 段落间距 - 下边距 */
+  static readonly PARAGRAPH_MARGIN_BOTTOM: number = 8;
+
   /** 引用块上下间距 - 上边距 */
-  static readonly QUOTE_MARGIN_TOP: number = 8;
+  static readonly QUOTE_MARGIN_TOP: number = 6;
   /** 引用块上下间距 - 下边距 */
-  static readonly QUOTE_MARGIN_BOTTOM: number = 8;
+  static readonly QUOTE_MARGIN_BOTTOM: number = 6;
   /** 引用块左侧边距 */
   static readonly QUOTE_PADDING_LEFT: number = 12;
   /** 引用块段落间距 */
-  static readonly QUOTE_PARAGRAPH_SPACING: number = 4;
+  static readonly QUOTE_PARAGRAPH_SPACING: number = 2;
 
   /** 代码块上下间距 */
-  static readonly CODE_BLOCK_MARGIN_TOP: number = 8;
-  static readonly CODE_BLOCK_MARGIN_BOTTOM: number = 8;
+  static readonly CODE_BLOCK_MARGIN_TOP: number = 6;
+  static readonly CODE_BLOCK_MARGIN_BOTTOM: number = 6;
 
   /** 列表上下间距 */
-  static readonly LIST_MARGIN_TOP: number = 8;
-  static readonly LIST_MARGIN_BOTTOM: number = 8;
-  static readonly LIST_ITEM_MARGIN_BOTTOM: number = 4;
+  static readonly LIST_MARGIN_TOP: number = 2;
+  static readonly LIST_MARGIN_BOTTOM: number = 6;
+  static readonly LIST_ITEM_MARGIN_BOTTOM: number = 2;
 
   /** 水平线上下间距 */
-  static readonly HORIZONTAL_RULE_MARGIN_TOP: number = 16;
-  static readonly HORIZONTAL_RULE_MARGIN_BOTTOM: number = 16;
-  static readonly HORIZONTAL_RULE_HEIGHT: number = 2;
+  static readonly HORIZONTAL_RULE_MARGIN_TOP: number = 12;
+  static readonly HORIZONTAL_RULE_MARGIN_BOTTOM: number = 12;
+  static readonly HORIZONTAL_RULE_HEIGHT: number = 1;
 
   /** 表格上下间距 */
-  static readonly TABLE_MARGIN_TOP: number = 8;
-  static readonly TABLE_MARGIN_BOTTOM: number = 8;
-  static readonly TABLE_CELL_PADDING_LEFT: number = 6;
-  static readonly TABLE_CELL_PADDING_RIGHT: number = 6;
-  static readonly TABLE_CELL_PADDING_TOP: number = 8;
-  static readonly TABLE_CELL_PADDING_BOTTOM: number = 8;
+  static readonly TABLE_MARGIN_TOP: number = 6;
+  static readonly TABLE_MARGIN_BOTTOM: number = 6;
+  static readonly TABLE_CELL_PADDING_LEFT: number = 10;
+  static readonly TABLE_CELL_PADDING_RIGHT: number = 10;
+  static readonly TABLE_CELL_PADDING_TOP: number = 6;
+  static readonly TABLE_CELL_PADDING_BOTTOM: number = 6;
 
   // ============ 其他样式配置 ============
   /** 最大行数（用于 Text 组件的 maxLines） */
