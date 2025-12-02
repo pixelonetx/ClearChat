@@ -58,6 +58,7 @@ export class DatabaseManager {
   private static instance: DatabaseManager;
   private rdbStore: relationalStore.RdbStore | null = null;
   private transactionManager: TransactionManager | null = null;
+  private initialized: boolean = false;
 
   private constructor() {}
 
@@ -78,6 +79,10 @@ export class DatabaseManager {
    * @throws DatabaseError 数据库初始化失败时抛出
    */
   async initDatabase(context: Context): Promise<void> {
+    if (this.initialized && this.rdbStore && this.transactionManager) {
+      return; // 已初始化过，直接返回
+    }
+
     const config: relationalStore.StoreConfig = {
       name: Constants.DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S2, // 提升安全级别
@@ -88,10 +93,18 @@ export class DatabaseManager {
       this.rdbStore = await relationalStore.getRdbStore(context, config);
       this.transactionManager = new TransactionManager(this.rdbStore);
       await this.createTables();
+      this.initialized = true;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to initialize database: %{public}s', String(error));
       throw new DatabaseError(`Failed to initialize database: ${error}`);
     }
+  }
+
+  /**
+   * 检查数据库是否已初始化
+   */
+  isInitialized(): boolean {
+    return this.initialized && this.rdbStore !== null && this.transactionManager !== null;
   }
 
   /**
@@ -138,9 +151,9 @@ export class DatabaseManager {
     const createSettingsTable = `
       CREATE TABLE IF NOT EXISTS ${Constants.SETTINGS_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        api_url TEXT NOT NULL,
-        api_key TEXT NOT NULL,
-        model_name TEXT NOT NULL,
+        api_url TEXT,
+        api_key TEXT,
+        model_name TEXT,
         providers_data TEXT,
         active_provider_id TEXT,
         active_model_id TEXT,
@@ -318,6 +331,7 @@ export class DatabaseManager {
     predicates.equalTo('conversation_id', conversationId)
       .notEqualTo('role', 'tool')  // 过滤掉tool消息，不加载到前端显示
       .orderByAsc('timestamp')
+      .orderByAsc('id')  // 补充：按ID作为次级排序键，确保时间戳相同时按插入顺序排列
       .limitAs(limit);
 
     try {
@@ -508,17 +522,17 @@ export class DatabaseManager {
 
   /**
    * 保存应用设置
-   * 使用事务保证原子性，防止配置丢失
    */
   async saveSettings(settings: AppSettings): Promise<void> {
-    if (!this.rdbStore || !this.transactionManager) {
-      throw new DatabaseError('Database not initialized');
+    // 如果数据库未初始化，抛出错误让调用者处理
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized. Please call initDatabase() first.');
     }
 
     const valueBucket: relationalStore.ValuesBucket = {
-      'api_url': settings.apiUrl,
-      'api_key': settings.apiKey,
-      'model_name': settings.modelName,
+      'api_url': settings.apiUrl || '',
+      'api_key': settings.apiKey || '',
+      'model_name': settings.modelName || '',
       'providers_data': JSON.stringify(settings.providers ?? []),
       'active_provider_id': settings.activeProviderId ?? '',
       'active_model_id': settings.activeModelId ?? '',
@@ -526,19 +540,22 @@ export class DatabaseManager {
     };
 
     try {
-      await this.transactionManager.executeInTransaction(async () => {
-        // 尝试更新现有设置（而不是删除后插入）
-        const predicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
-        const updated = await this.rdbStore!.update(valueBucket, predicates);
+      // 检查是否存在记录
+      const predicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
+      const resultSet = await this.rdbStore.query(predicates, ['id']);
+      const hasExisting = resultSet.rowCount > 0;
+      resultSet.close();
 
-        // 如果没有现有记录，则插入新记录
-        if (updated === 0) {
-          await this.rdbStore!.insert(Constants.SETTINGS_TABLE, valueBucket);
-          hilog.info(DOMAIN, TAG, 'Settings inserted successfully');
-        } else {
-          hilog.info(DOMAIN, TAG, 'Settings updated successfully');
-        }
-      });
+      if (hasExisting) {
+        // 更新现有记录
+        const updatePredicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
+        const updated = await this.rdbStore.update(valueBucket, updatePredicates);
+        hilog.info(DOMAIN, TAG, 'Settings updated: %{public}d rows affected', updated);
+      } else {
+        // 插入新记录
+        const rowId = await this.rdbStore.insert(Constants.SETTINGS_TABLE, valueBucket);
+        hilog.info(DOMAIN, TAG, 'Settings inserted with rowId: %{public}d', rowId);
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to save settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to save settings: ${error}`);
@@ -583,12 +600,7 @@ export class DatabaseManager {
           : resultSet.getString(providersDataIndex);
         const hydratedProviders = this.parseProvidersJson(providersJson);
 
-        if (hydratedProviders.length === 0) {
-          hilog.warn(DOMAIN, TAG, 'Settings record contains no valid providers; treating as unconfigured');
-          resultSet.close();
-          return null;
-        }
-
+        // 修复：即使没有提供商，也应该返回设置对象，允许用户添加新的提供商
         resolvedSettings.providers = hydratedProviders;
 
         if (activeProviderIdIndex >= 0 && !resultSet.isColumnNull(activeProviderIdIndex)) {
@@ -603,22 +615,32 @@ export class DatabaseManager {
           resolvedSettings.activeModelId = '';
         }
 
-        const activeProvider = resolvedSettings.providers.find(provider => provider.id === resolvedSettings.activeProviderId)
-          ?? resolvedSettings.providers[0];
+        // 只在有提供商时才设置激活的提供商和模型
+        if (hydratedProviders.length > 0) {
+          const activeProvider = resolvedSettings.providers.find(provider => provider.id === resolvedSettings.activeProviderId)
+            ?? resolvedSettings.providers[0];
           resolvedSettings.activeProviderId = activeProvider.id;
 
-        let activeModel: AIModel | undefined;
-        if (activeProvider.models.length > 0) {
-          activeModel = activeProvider.models.find(model => model.id === resolvedSettings.activeModelId) ?? activeProvider.models[0];
-          resolvedSettings.activeModelId = activeModel.id;
-          resolvedSettings.modelName = activeModel.name;
+          let activeModel: AIModel | undefined;
+          if (activeProvider.models.length > 0) {
+            activeModel = activeProvider.models.find(model => model.id === resolvedSettings.activeModelId) ?? activeProvider.models[0];
+            resolvedSettings.activeModelId = activeModel.id;
+            resolvedSettings.modelName = activeModel.name;
+          } else {
+            resolvedSettings.activeModelId = '';
+            resolvedSettings.modelName = '';
+          }
+
+          resolvedSettings.apiUrl = activeProvider.apiUrl;
+          resolvedSettings.apiKey = activeProvider.apiKey;
         } else {
+          // 没有提供商时，清空激活的 ID 和配置
+          resolvedSettings.activeProviderId = '';
           resolvedSettings.activeModelId = '';
+          resolvedSettings.apiUrl = '';
+          resolvedSettings.apiKey = '';
           resolvedSettings.modelName = '';
         }
-
-        resolvedSettings.apiUrl = activeProvider.apiUrl;
-        resolvedSettings.apiKey = activeProvider.apiKey;
 
         // 读取 enable_web_search（若缺失则默认为 false）
         if (enableWebSearchIndex >= 0 && !resultSet.isColumnNull(enableWebSearchIndex)) {
@@ -900,7 +922,8 @@ export class DatabaseManager {
     const apiUrl = typeof apiUrlSource === 'string' && apiUrlSource.trim().length > 0 ? apiUrlSource : '';
     const apiKey = typeof apiKeySource === 'string' ? apiKeySource : '';
 
-    if (!id || !name || !displayName || !apiUrl) {
+    // 只要求 id 和 name 不为空即可，允许不完整的服务商配置（如用户还未填完 apiUrl）
+    if (!id || !name) {
       return null;
     }
 

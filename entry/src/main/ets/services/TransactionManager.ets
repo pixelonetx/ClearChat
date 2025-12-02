@@ -43,35 +43,35 @@ export class TransactionManager {
    * - 异常时抛出 DatabaseError
    */
   async executeInTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    let transactionStarted = false;
+
     try {
       hilog.info(DOMAIN, TAG, 'Starting transaction');
 
       // 开始事务
-      await this.rdbStore.executeSql('BEGIN TRANSACTION');
+      await this.rdbStore.beginTransaction();
+      transactionStarted = true;
 
-      try {
-        // 执行用户提供的操作
-        const result = await operation();
+      // 执行用户提供的操作
+      const result = await operation();
 
-        // 提交事务
-        await this.rdbStore.executeSql('COMMIT');
-        hilog.info(DOMAIN, TAG, 'Transaction committed successfully');
+      // 提交事务
+      await this.rdbStore.commit();
+      hilog.info(DOMAIN, TAG, 'Transaction committed successfully');
 
-        return result;
-      } catch (operationError) {
-        // 操作失败，回滚事务
-        hilog.error(DOMAIN, TAG, 'Operation failed, rolling back transaction: %{public}s', String(operationError));
-
+      return result;
+    } catch (error) {
+      // 如果事务已开始，执行回滚
+      if (transactionStarted) {
         try {
-          await this.rdbStore.executeSql('ROLLBACK');
+          await this.rdbStore.rollBack();
           hilog.info(DOMAIN, TAG, 'Transaction rolled back successfully');
         } catch (rollbackError) {
           hilog.error(DOMAIN, TAG, 'Failed to rollback transaction: %{public}s', String(rollbackError));
         }
-        // 重新抛出原始错误
-        throw new DatabaseError(String(operationError));
       }
-    } catch (error) {
+
+      // 包装错误并抛出
       const errorMessage = `Transaction execution failed: ${error}`;
       hilog.error(DOMAIN, TAG, 'Transaction execution failed: %{public}s', String(error));
       throw new DatabaseError(errorMessage);
@@ -82,21 +82,30 @@ export class TransactionManager {
    * 在事务中执行多个操作（顺序执行）
    * @param operations 操作数组
    * @returns 所有操作的结果数组
+   * @throws DatabaseError 如果任何操作或事务失败
    *
    * 用途：当需要在一个事务中执行多个操作时
    */
   async executeMultipleInTransaction<T>(
     operations: Array<() => Promise<T>>
   ): Promise<T[]> {
-    return this.executeInTransaction(async () => {
-      const results: T[] = [];
+    try {
+      return await this.executeInTransaction(async () => {
+        const results: T[] = [];
 
-      for (const operation of operations) {
-        const result = await operation();
-        results.push(result);
+        for (const operation of operations) {
+          const result = await operation();
+          results.push(result);
+        }
+
+        return results;
+      });
+    } catch (error) {
+      // 重新抛出异常，由调用者处理
+      if (error instanceof DatabaseError) {
+        throw error;
       }
-
-      return results;
-    });
+      throw new DatabaseError(`Operation failed: ${error}`);
+    }
   }
 }

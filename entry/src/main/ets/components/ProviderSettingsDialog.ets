@@ -210,6 +210,16 @@ export struct ProviderSettingsDialog {
     this.editableProvider.apiUrl = apiUrl;
     this.editableProvider.apiKey = apiKey;
 
+    // 如果 ID 为空（用户手动输入而非预设模板），生成一个新的 ID
+    if (!this.editableProvider.id || this.editableProvider.id.trim().length === 0) {
+      this.editableProvider.id = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // 如果没有 name，使用 displayName 作为 name
+    if (!this.editableProvider.name || this.editableProvider.name.trim().length === 0) {
+      this.editableProvider.name = displayName;
+    }
+
     this.onConfirm(this.cloneProvider(this.editableProvider));
   }
 
