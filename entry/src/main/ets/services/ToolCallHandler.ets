@@ -164,11 +164,11 @@ export class ToolCallHandler {
 
     // 添加摘要
     if (searchResult.answer) {
-      resultText += `📋 AI 摘要:\n${searchResult.answer}\n\n`;
+      resultText += `摘要:\n${searchResult.answer}\n\n`;
     }
 
     // 添加结果
-    resultText += `📊 搜索结果 (${searchResult.items.length} 项，耗时 ${executionTime}ms):\n\n`;
+    resultText += `搜索结果 (${searchResult.items.length} 项，耗时 ${executionTime}ms):\n\n`;
 
     for (const item of searchResult.items) {
       resultText += `**${item.index}. ${item.title}** [${item.index}:${item.id}]\n`;
@@ -221,10 +221,10 @@ export class ToolCallHandler {
         content = `🔍 正在搜索: ${query}`;
         break;
       case 'completed':
-        content = `✅ 搜索完成: ${query}\n返回 ${resultCount || 0} 条结果`;
+        content = ` 搜索完成: ${query}\n返回 ${resultCount || 0} 条结果`;
         break;
       case 'error':
-        content = `❌ 搜索失败: ${query}`;
+        content = `搜索失败: ${query}`;
         break;
     }
 

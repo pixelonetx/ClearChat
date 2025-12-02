@@ -1,14 +1,14 @@
 /**
  * NetworkManagerV2.ets
  * 
- * ✅ 改进版网络管理器 - 使用事件驱动架构
+ *  改进版网络管理器 - 使用事件驱动架构
  * 
  * 主要改进：
- * 1. ✅ 消除回调地狱 - 使用事件驱动
- * 2. ✅ 状态集中管理 - StreamState
- * 3. ✅ SSE 逻辑分离 - StreamProcessor
- * 4. ✅ 错误处理优雅 - 统一的错误流
- * 5. ✅ 支持 Promise/async-await - StreamEventPromise
+ * 1.  消除回调地狱 - 使用事件驱动
+ * 2.  状态集中管理 - StreamState
+ * 3.  SSE 逻辑分离 - StreamProcessor
+ * 4.  错误处理优雅 - 统一的错误流
+ * 5.  支持 Promise/async-await - StreamEventPromise
  * 
  * 使用示例：
  * ```
@@ -186,7 +186,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 改进版流式聊天请求 - 返回事件发射器
+   * 改进版流式聊天请求 - 返回事件发射器
    * 
    * 使用事件驱动架构，完全消除回调地狱
    * 
@@ -219,7 +219,7 @@ export class NetworkManagerV2 {
       enableWebSearch: false
     };
 
-    // ✅ 异步启动请求（不阻塞调用者）
+    // 异步启动请求（不阻塞调用者）
     this.performStreamRequest(
       apiUrl,
       apiKey,
@@ -241,7 +241,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 执行流式请求（内部方法）
+   * 执行流式请求（内部方法）
    * 
    * 使用 async/await 替代嵌套回调
    */
@@ -260,10 +260,10 @@ export class NetworkManagerV2 {
     const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
     try {
-      // 1️⃣ 验证输入
+      // 1验证输入
       this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
 
-      // 2️⃣ 准备请求
+      // 2准备请求
       const url = this.resolveChatCompletionsUrl(sanitizedApiUrl);
       const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
         const requestMsg: RequestMessage = {
@@ -298,14 +298,14 @@ export class NetworkManagerV2 {
         tools: config.tools // OpenAI 工具调用
       };
 
-      // 3️⃣ 创建 HTTP 请求
+      // 3创建 HTTP 请求
       const httpRequest = http.createHttp();
       
       // 使用对象包装 timeoutId，以便在闭包中修改
       const timeoutState: TimeoutState = { id: null };
 
       try {
-        // 4️⃣ 设置超时处理（可被每次 dataReceive 事件重置）
+        // 4设置超时处理（可被每次 dataReceive 事件重置）
         const setupTimeout = (): number => {
           if (timeoutState.id !== null) {
             clearTimeout(timeoutState.id);
@@ -326,7 +326,7 @@ export class NetworkManagerV2 {
 
         timeoutState.id = setupTimeout();
 
-        // 5️⃣ 设置中止处理
+        // 5设置中止处理
         if (config.abortController) {
           this.setupAbortHandler(
             config.abortController,
@@ -337,7 +337,7 @@ export class NetworkManagerV2 {
           );
         }
 
-        // 6️⃣ 设置 HTTP 事件处理（非回调地狱方式）
+        // 6设置 HTTP 事件处理（非回调地狱方式）
         // 注意：不能 await，因为这会一直等到 HTTP 响应完成
         this.setupHTTPEventHandlers(
           httpRequest,
@@ -348,7 +348,7 @@ export class NetworkManagerV2 {
           timeoutState
         );
 
-        // 7️⃣ 发起请求
+        // 7发起请求
         const responseCode = await this.performHTTPRequest(
           httpRequest,
           url,
@@ -357,7 +357,7 @@ export class NetworkManagerV2 {
           config.requestTimeout ?? 30000
         );
 
-        // 8️⃣ 处理响应
+        // 8处理响应
         this.handleHTTPResponse(
           responseCode,
           state,
@@ -393,7 +393,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 验证请求输入
+   * 验证请求输入
    */
   private validateRequestInputs(apiUrl: string, apiKey: string, model: string): void {
     if (!apiUrl) {
@@ -408,7 +408,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 设置超时处理
+   * 设置超时处理
    */
   private setupTimeoutHandler(
     timeout: number,
@@ -430,7 +430,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 设置中止处理
+   * 设置中止处理
    */
   private setupAbortHandler(
     abortController: AbortController,
@@ -453,7 +453,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 设置 HTTP 事件处理
+   * 设置 HTTP 事件处理
    * 
    * 使用 Promise 包装，避免深层嵌套回调
    * 每次收到数据时重置超时计时器，以支持长时间流式传输
@@ -536,7 +536,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 执行 HTTP 请求
+   * 执行 HTTP 请求
    */
   private async performHTTPRequest(
     httpRequest: http.HttpRequest,
@@ -575,7 +575,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 处理 HTTP 响应
+   * 处理 HTTP 响应
    */
   private handleHTTPResponse(
     responseCode: number,
@@ -593,7 +593,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 清理 HTTP 资源
+   * 清理 HTTP 资源
    */
   private cleanupHTTPRequest(httpRequest: http.HttpRequest): void {
     try {
@@ -608,7 +608,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ ArrayBuffer 转字符串
+   * ArrayBuffer 转字符串
    */
   private arrayBufferToString(data: ArrayBuffer): string {
     const uint8Array = new Uint8Array(data);
@@ -653,7 +653,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * ✅ 非流式聊天请求（用于标题生成、连接测试等场景）
+   * 非流式聊天请求（用于标题生成、连接测试等场景）
    * 
    * @param apiUrl API 基础 URL
    * @param apiKey API 密钥

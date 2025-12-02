@@ -332,11 +332,6 @@ export struct MessageItem {
           .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
           .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
-
-          // .constraintSize({
-          //   minWidth: 40,  // 减小最小宽度，适合短消息
-          //   minHeight: 36  // 保持最小高度，防止变成小圆形
-          // })
         }
         .constraintSize({ maxWidth: '85%' })
       }
