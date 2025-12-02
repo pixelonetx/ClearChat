@@ -927,9 +927,20 @@ struct Chat {
         await this.loadConversations();
 
         if (this.conversations.length === 0) {
-          this.currentConversation = null;
-          this.messages = [];
-          this.notifyMessagesUpdated();
+          // 修复：如果没有对话，创建一个空对话，确保 currentConversation 不为空
+          hilog.error(DOMAIN, TAG, 'No conversations after reload, creating empty conversation');
+          try {
+            const emptyConversation = await this.databaseManager.createConversation('新对话');
+            this.currentConversation = emptyConversation;
+            this.conversations.push(emptyConversation);
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          } catch (createError) {
+            hilog.error(DOMAIN, TAG, 'Failed to create conversation during reload: %{public}s', String(createError));
+            this.currentConversation = null;
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          }
         } else {
           await this.loadChatHistory();
         }
@@ -1059,8 +1070,14 @@ struct Chat {
         hilog.error(DOMAIN, TAG, 'Restored last conversation: %{public}s %{public}s',
           String(this.currentConversation.id), String(this.currentConversation.title));
       } else {
-        hilog.error(DOMAIN, TAG, 'No conversations found, will start with empty state');
-        this.currentConversation = null;
+        // 修复：如果没有对话，创建一个空对话，而不是设置为 null
+        // 这样用户第一次发送消息时就有一个现成的 conversationId
+        hilog.error(DOMAIN, TAG, 'No conversations found, creating empty conversation for initial state');
+        const emptyConversation = await this.databaseManager.createConversation('新对话');
+        this.currentConversation = emptyConversation;
+        this.conversations.push(emptyConversation);
+        hilog.error(DOMAIN, TAG, 'Created empty conversation: %{public}s %{public}s',
+          String(emptyConversation.id), String(emptyConversation.title));
       }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to restore last conversation: %{public}s', String(error));
@@ -1231,9 +1248,20 @@ struct Chat {
           this.messages = await this.databaseManager.getChatMessages(this.currentConversation.id);
           this.notifyMessagesUpdated();
         } else {
-          this.currentConversation = null;
-          this.messages = [];
-          this.notifyMessagesUpdated();
+          // 修复：删除最后一个对话后，创建一个新的空对话，而不是设置为 null
+          hilog.error(DOMAIN, TAG, 'Last conversation deleted, creating new empty conversation');
+          try {
+            const emptyConversation = await this.databaseManager.createConversation('新对话');
+            this.currentConversation = emptyConversation;
+            this.conversations = [emptyConversation];
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          } catch (createError) {
+            hilog.error(DOMAIN, TAG, 'Failed to create conversation after deletion: %{public}s', String(createError));
+            this.currentConversation = null;
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          }
         }
       }
 

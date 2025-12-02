@@ -189,9 +189,24 @@ struct ModelSettings {
   }
 
   private async persistSettingsSilently() {
-    const settings = this.buildSettingsPayload();
-    await this.databaseManager.saveSettings(settings);
-    this.notifySettingsUpdated();
+    try {
+      const settings = this.buildSettingsPayload();
+      
+      // 确保数据库已初始化
+      if (!this.databaseManager.isInitialized()) {
+        const context = getContext(this) as common.UIAbilityContext;
+        await this.databaseManager.initDatabase(context);
+      }
+      
+      await this.databaseManager.saveSettings(settings);
+      this.notifySettingsUpdated();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to persist settings: %{public}s', String(error));
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error));
+    }
   }
 
   private notifySettingsUpdated() {
@@ -353,10 +368,18 @@ struct ModelSettings {
 
   // 添加服务商
   addProvider() {
-    this.providerDraft = new AIProvider('', '', '');
+    hilog.info(DOMAIN, TAG, 'Adding new provider');
+    // 为新服务商生成唯一的 ID，确保数据可以被正确保存
+    const newProvider = new AIProvider(
+      Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+      '',
+      ''
+    );
+    this.providerDraft = newProvider;
     this.providerEditIndex = -1;
     this.activeSheetType = 'provider';
     this.isSettingsSheetVisible = true;
+    hilog.info(DOMAIN, TAG, 'Provider sheet visible set to: %{public}s', String(this.isSettingsSheetVisible));
   }
 
   // 编辑服务商
@@ -435,12 +458,14 @@ struct ModelSettings {
 
   // 添加模型
   addModel(providerIndex: number) {
+    hilog.info(DOMAIN, TAG, 'Adding new model for provider index: %{public}d', providerIndex);
     if (providerIndex >= 0 && providerIndex < this.providers.length) {
       this.modelDraft = new AIModel('', '', '');
       this.modelProviderIndex = providerIndex;
       this.modelEditIndex = -1;
       this.activeSheetType = 'model';
       this.isSettingsSheetVisible = true;
+      hilog.info(DOMAIN, TAG, 'Model sheet visible set to: %{public}s', String(this.isSettingsSheetVisible));
     }
   }
 
