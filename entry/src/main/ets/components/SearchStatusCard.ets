@@ -74,7 +74,7 @@ export struct SearchStatusCard {
               .fillColor(Color.Green)
 
             Column({ space: 4 }) {
-              Text('✅ 搜索完成')
+              Text('搜索完成')
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.ohos_id_color_text_primary'))
@@ -127,7 +127,7 @@ export struct SearchStatusCard {
               .fillColor('#F44336')
 
             Column({ space: 4 }) {
-              Text('❌ 搜索失败')
+              Text('搜索失败')
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#D32F2F')

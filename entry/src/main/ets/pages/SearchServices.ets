@@ -37,7 +37,7 @@ struct SearchServices {
     connectionStatus: {}
   };
   @State selectedIndex: number = 0;
-  // 🔥 移除 enableWebSearch 状态，统一在 Chat.ets 控制
+  // 移除 enableWebSearch 状态，统一在 Chat.ets 控制
   @State resultSize: number = 10;
   @State timeout: number = 10000;
   @State testingServiceId: string = '';
@@ -64,7 +64,7 @@ struct SearchServices {
       const config = this.configManager.getConfig();
       this.config = config;
       this.selectedIndex = config.selectedServiceIndex;
-      // 🔥 不再加载 enableWebSearch，统一在 Chat.ets 控制
+      // 不再加载 enableWebSearch，统一在 Chat.ets 控制
       this.resultSize = config.commonOptions.resultSize ?? 10;
       this.timeout = config.commonOptions.timeout ?? 10000;
       this.connectionStatus = config.connectionStatus ?? {};
@@ -312,7 +312,7 @@ struct SearchServices {
         resultSize: this.resultSize,
         timeout: this.timeout
       });
-      // 🔥 不再保存 enableWebSearch，统一在 Chat.ets 控制
+      // 不再保存 enableWebSearch，统一在 Chat.ets 控制
       this.showToast('设置已保存');
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to update settings: %{public}s', String(error));

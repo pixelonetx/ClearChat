@@ -275,7 +275,7 @@ export struct MarkdownRenderer {
   renderHeading(block: MarkdownBlock) {
     Text() {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
-        // ✅ 简化的标题渲染：集中使用 renderTextSegmentSpan
+        // 简化的标题渲染：集中使用 renderTextSegmentSpan
         this.renderTextSegmentSpan(segment, MarkdownStyle.getHeadingSize(block.level || 1))
       })
     }
@@ -312,7 +312,7 @@ export struct MarkdownRenderer {
   renderQuote(block: MarkdownBlock) {
     Row() {
       Column({ space: MarkdownStyle.QUOTE_PARAGRAPH_SPACING }) {
-        // ✅ 简化的引用渲染：集中使用 renderTextSegmentSpan，嵌套 ForEach 已优化
+        // 简化的引用渲染：集中使用 renderTextSegmentSpan，嵌套 ForEach 已优化
         ForEach(this.getQuoteParagraphs(block.content), (paragraph: string, paraIndex: number) => {
           Text() {
             ForEach(this.parser.parseTextFormatting(paragraph), (segment: TextSegment, index: number) => {
@@ -388,7 +388,7 @@ export struct MarkdownRenderer {
   renderText(block: MarkdownBlock) {
     Text() {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
-        // ✅ 简化的文本渲染：集中使用 renderTextSegmentSpan，条件判断逻辑已提取
+        // 简化的文本渲染：集中使用 renderTextSegmentSpan，条件判断逻辑已提取
         this.renderTextSegmentSpan(segment, MarkdownStyle.TEXT_FONT_SIZE)
       })
     }
@@ -429,7 +429,7 @@ export struct MarkdownRenderer {
               ForEach(row, (cell: string, cellIndex: number) => {
                 Column() {
                   Text() {
-                    // ✅ 表格单元格使用专用的 renderTableCellSegmentSpan，支持表头加粗
+                    // 表格单元格使用专用的 renderTableCellSegmentSpan，支持表头加粗
                     ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
                       this.renderTableCellSegmentSpan(segment, MarkdownStyle.TABLE_CELL_FONT_SIZE, rowIndex === 0)
                     })

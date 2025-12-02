@@ -110,7 +110,7 @@ struct Chat {
   // 缓存已分组的对话数据，避免重复计算
   @State private cachedGroupedConversations: Record<string, Conversation[]> | null = null;
   @State private cachedGroupedKeys: string[] = [];
-  // 🔥 逻辑时间戳：确保消息顺序正确，即使系统时间不准确
+  // 逻辑时间戳：确保消息顺序正确，即使系统时间不准确
   private logicalTimestamp: number = Date.now();
   // 应用状态
   @State isLoading: boolean = false;
@@ -120,7 +120,7 @@ struct Chat {
   @State ctrlFlag: boolean = false;
   @State enableWebSearch: boolean = false; // 联网搜索开关（统一控制）
   @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
-  // 🔥 移除 currentModelSupportsWebSearchFlag，不再需要显隐控制
+  // 移除 currentModelSupportsWebSearchFlag，不再需要显隐控制
   @State isSearching: boolean = false; // 是否正在执行搜索
   @State searchQuery: string = ''; // 当前搜索查询
   @State searchResults: string = ''; // 搜索结果摘要
@@ -173,8 +173,8 @@ struct Chat {
       providerMessageId: message.providerMessageId,
       providerCreatedAt: message.providerCreatedAt,
       systemFingerprint: message.systemFingerprint,
-      toolCallId: message.toolCallId, // 🔥 复制工具调用 ID (用于 tool 消息)
-      toolCalls: message.toolCalls    // 🔥 复制工具调用列表 (用于 assistant 消息)
+      toolCallId: message.toolCallId, // 复制工具调用 ID (用于 tool 消息)
+      toolCalls: message.toolCalls    // 复制工具调用列表 (用于 assistant 消息)
     });
     clone.id = message.id;
     return clone;
@@ -1012,7 +1012,7 @@ struct Chat {
       }
       this.notifyMessagesUpdated();
 
-      // 🔥 同步逻辑时间戳：从已加载的消息中找出最大时间戳
+      // 同步逻辑时间戳：从已加载的消息中找出最大时间戳
       if (this.messages.length > 0) {
         let maxTimestamp = 0;
         for (let i = 0; i < this.messages.length; i++) {
@@ -1182,7 +1182,7 @@ struct Chat {
     try {
       this.currentConversation = conversation;
       await this.loadChatHistory();
-      // 🔥 loadChatHistory 中已经同步逻辑时间戳，这里不需要额外处理
+      // loadChatHistory 中已经同步逻辑时间戳，这里不需要额外处理
       this.hideSidebar();
 
       // 确保加载状态被重置
@@ -1507,7 +1507,7 @@ struct Chat {
 
     return new ChatMessage(trimmedInput, 'user', {
       conversationId: this.currentConversation?.id || 'default',
-      timestamp: this.getNextTimestamp()  // 🔥 使用逻辑时间戳确保顺序
+      timestamp: this.getNextTimestamp()  // 使用逻辑时间戳确保顺序
     });
   }
 
@@ -1527,7 +1527,7 @@ struct Chat {
       conversationId: conversationId,
       modelName: modelInfo.modelName,
       providerName: modelInfo.providerName,
-      // 🔥 关键修复：使用逻辑时间戳确保AI消息严格晚于用户消息
+      // 关键修复：使用逻辑时间戳确保AI消息严格晚于用户消息
       timestamp: this.getNextTimestamp()
     });
 
