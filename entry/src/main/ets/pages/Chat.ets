@@ -1218,8 +1218,10 @@ struct Chat {
 
   async deleteConversation(conversation: Conversation) {
     try {
+      // 数据库操作已在 deleteConversation 中使用事务保护
       await this.databaseManager.deleteConversation(conversation.id);
 
+      // 删除成功后，在事务内进行的数据更新是安全的
       const updatedConversations = await this.databaseManager.getAllConversations();
       this.conversations = updatedConversations;
 
@@ -1237,7 +1239,7 @@ struct Chat {
 
       this.showToast('对话已删除');
     } catch (error) {
-      
+      hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
       this.showToast('删除对话失败');
     }
   }
@@ -1603,6 +1605,42 @@ struct Chat {
       await this.databaseManager.updateConversationMessageCount(conversationId);
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Error persisting message: %{public}s', String(error));
+    }
+  }
+
+  // 控制方法：停止生成与滚动行为，提前声明以便在UI回调中使用
+  private stopGeneration(): void {
+    if (this.currentAbortController && this.isGenerating) {
+      hilog.error(DOMAIN, TAG, 'Stopping AI generation...');
+      this.userAbortedGeneration = true;
+      try {
+        this.currentAbortController.abort();
+      } catch (err) {
+        // ignore abort errors
+      }
+      this.showToast('已停止生成，已显示的内容已保留');
+    }
+  }
+
+  private scrollToBottom(): void {
+    if (!this.shouldAutoScroll) {
+      hilog.info(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
+      return;
+    }
+
+    if (this.scroller) {
+      try {
+        this.scroller.scrollEdge(Edge.Bottom);
+      } catch (error) {
+        try {
+          const currentOffset = this.scroller.currentOffset();
+          if (currentOffset) {
+            this.scroller.scrollTo({ xOffset: 0, yOffset: (currentOffset.yOffset || 0) + 1000 });
+          }
+        } catch (scrollError) {
+          hilog.error(DOMAIN, TAG, 'Backup scroll method also failed: %{public}s', String(scrollError));
+        }
+      }
     }
   }
 
@@ -2034,7 +2072,7 @@ struct Chat {
           enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
           tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
           abortController: this.currentAbortController,
-          requestTimeout: 30000
+          requestTimeout: 60000 // 增加超时时间到 60秒
         }
       );
 
@@ -2249,6 +2287,7 @@ struct Chat {
     try {
       // 构建工具结果消息 - 这是API格式所需的标准tool_result
       let toolContent = '';
+      // 检查是否有搜索结果，构建工具内容
       if (searchResult) {
         // 构建搜索结果文本供API使用
         if (searchResult.answer) {
@@ -2258,41 +2297,52 @@ struct Chat {
         for (const item of searchResult.items) {
           toolContent += `[${item.index || 0}] 标题: ${item.title}\n内容: ${item.text}\nURL: ${item.url}\n\n`;
         }
-
-        // 验证 toolCallId 是否存在
-        if (!toolCallId) {
-          hilog.error(DOMAIN, TAG, 'Tool call ID is missing, cannot create tool message');
-          throw new Error('工具调用ID缺失，无法继续对话');
-        }
-
-        // 添加工具结果消息到对话历史（仅内存，不持久化）- 这个消息包含搜索结果，大模型会据此生成回答
-        const toolResultMessage = new ChatMessage(
-          toolContent,
-          'tool',
-          { conversationId: conversationId, timestamp: this.getNextTimestamp(), toolCallId: toolCallId }
-        );
-
-        
-
-        // 关键修复：仅添加到内存中，不保存到数据库
-        // 这样可以避免tool消息在UI中显示导致的消息顺序混乱
-        const toolIndex = this.appendMessage(toolResultMessage);
-        // 为内存中的消息分配一个临时ID（不从数据库获取）
-        toolResultMessage.id = -toolContent.length; // 使用负数作为临时ID标识
-
-        hilog.info(DOMAIN, TAG,
-          'Added tool result message to memory with %{public}d search items, toolCallId preserved: %{public}s',
-          searchResult.items.length, String(!!this.messages[toolIndex].toolCallId));
-
       }
 
+      // 验证 toolCallId 是否存在
+      if (!toolCallId) {
+        hilog.error(DOMAIN, TAG, 'Tool call ID is missing, cannot create tool message');
+        throw new Error('工具调用ID缺失，无法继续对话');
+      }
+
+      // 添加工具结果消息到对话历史（仅内存，不持久化）
+      const toolResultMessage = new ChatMessage(
+        toolContent,
+        'tool',
+        { conversationId: conversationId, timestamp: this.getNextTimestamp(), toolCallId: toolCallId }
+      );
+
+      // 为内存中的消息分配一个临时ID（不从数据库获取）
+      toolResultMessage.id = -toolContent.length - Math.floor(Math.random() * 10000);
+
+      // 获取当前的 Assistant 消息
+      const previousAssistantMsg = this.messages[assistantMessageIndex];
+      
+      // 准备 API 请求所需的上下文
+      const contextMessages = this.messages.slice(0, assistantMessageIndex + 1);
+      contextMessages.push(toolResultMessage);
+      
+      // 重用旧消息的 ID 和模型信息，清空内容用于接收新响应
+      // 这样避免创建重复的数据库记录
+      const modelInfo = this.getCurrentModelInfo();
+      this.replaceMessageAt(assistantMessageIndex, (msg) => {
+        // 保留原有的 ID（已在数据库中），清空内容以接收新流式数据
+        msg.content = '';
+        // 更新模型信息以反映当前使用的模型
+        msg.modelName = modelInfo.modelName;
+        msg.providerName = modelInfo.providerName;
+        msg.timestamp = this.getNextTimestamp();
+        // 保留工具调用信息
+        msg.toolCalls = previousAssistantMsg.toolCalls ? [...previousAssistantMsg.toolCalls] : [];
+      });
+      
+      // 更新当前流式更新的目标索引
       const streamingIndex = assistantMessageIndex;
 
-      const allMessages = this.messages.slice(0, this.messages.length);
-      const messagesForAI = allMessages.slice(Math.max(0, allMessages.length - 20));
+      // 构建 API 请求消息列表
+      const messagesForAI = contextMessages.slice(Math.max(0, contextMessages.length - 20));
 
-      hilog.info(DOMAIN, TAG, 'Continuing with %{public}d messages in context (excluded new assistant placeholder)',
-        messagesForAI.length);
+      hilog.info(DOMAIN, TAG, 'Continuing conversation with merged UI bubble. Context length: %{public}d', messagesForAI.length);
 
       // 打印消息序列以便调试
       for (let i = 0; i < messagesForAI.length; i++) {
@@ -2303,22 +2353,15 @@ struct Chat {
           msg.content.length);
       }
 
-      // 检查搜索配置并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
-      // 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
+      // 检查搜索配置并构建工具数组
       let tools: object[] = [];
       let enableAlibabaSearch = false;
-
       try {
         if (this.enableWebSearch) {
-          // 如果是阿里云，使用内置搜索
           if (this.isAliyunActive) {
             enableAlibabaSearch = true;
-            
-          }
-          // 否则，使用外置工具调用搜索
-          else {
+          } else {
             const searchConfig = this.searchConfigManager.getConfig();
-            // 检查是否已配置搜索服务
             if (searchConfig && searchConfig.enabledServices.length > 0) {
               const selectedService = this.searchConfigManager.getSelectedService();
               if (selectedService) {
@@ -2326,22 +2369,17 @@ struct Chat {
                 tools = [toolDef as object];
                 hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s',
                   selectedService.type);
-              } else {
-                
               }
-            } else {
-              
             }
           }
         } else {
           hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle in continuation');
         }
       } catch (configError) {
-        
+        hilog.warn(DOMAIN, TAG, 'Search config error in continuation: %{public}s', String(configError));
       }
-
-      // 发送流式请求
       
+      // 发送流式请求
       hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
         this.currentSettings!.apiUrl.substring(0, 30), this.currentSettings!.modelName, messagesForAI.length);
 
@@ -2351,22 +2389,17 @@ struct Chat {
         this.currentSettings!.modelName,
         messagesForAI,
         {
-          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
-          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
+          enableWebSearch: enableAlibabaSearch,
+          tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
-          requestTimeout: 30000
+          requestTimeout: 60000
         }
       );
 
-      
-
-      // 关键修复：设置事件处理器来接收流式响应
-      // 传递 isToolContinuation = true，表示这是工具继续阶段的错误处理
+      // 设置事件处理器来接收流式响应
       this.setupStreamEventHandlers(emitter, streamingIndex, conversationId, true);
 
-      
-
-      // 设置超时保护：如果60秒内没有收到任何数据或完成事件，强制重置状态
+      // 设置超时保护
       const timeoutId = setTimeout(() => {
         if (this.isLoading || this.isGenerating) {
           hilog.error(DOMAIN, TAG, 'Stream timeout after 60s, forcing state reset');
@@ -2375,20 +2408,31 @@ struct Chat {
           this.currentAbortController = null;
           this.showToast('请求超时，请重试');
 
-          // 在消息中显示超时提示
           if (streamingIndex < this.messages.length) {
             this.replaceMessageAt(streamingIndex, (msg) => {
               if (!msg.content || msg.content.length === 0) {
                 msg.content = '[超时] 未收到响应，请检查网络或重试';
+              } else {
+                msg.content += '\n\n[超时] 响应中断';
               }
             });
           }
         }
       }, 60000);
-
-      // 在完成或错误时清除超时
+      
       emitter.once(StreamEventType.COMPLETE, () => {
         clearTimeout(timeoutId);
+        
+        // 工具继续对话完成：重置UI状态并持久化消息
+        this.isLoading = false;
+        this.isGenerating = false;
+        this.currentAbortController = null;
+        
+        // 异步持久化流式消息到数据库
+        this.persistStreamedMessage(streamingIndex, conversationId)
+          .catch((err: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist message after tool continuation: %{public}s', String(err));
+          });
       });
       emitter.once(StreamEventType.ERROR, () => {
         clearTimeout(timeoutId);
@@ -2420,51 +2464,23 @@ struct Chat {
     }
   }
 
-  /**
-   * 停止当前的AI生成
-   * 重要：已显示的内容会被保留
-   */
-  stopGeneration() {
-    if (this.currentAbortController && this.isGenerating) {
-      hilog.error(DOMAIN, TAG, 'Stopping AI generation...');
-      this.userAbortedGeneration = true;
-      this.currentAbortController.abort();
-      // 不立即设置状态，让onComplete回调来处理
-      // 这样可以确保已显示的内容被完整保留
-      this.showToast('已停止生成，已显示的内容已保留');
-    }
-  }
-
-  scrollToBottom() {
-    // 只在自动跟随模式下执行滚动，禁止AI生成消息时用户看不见
-    if (!this.shouldAutoScroll) {
-      hilog.info(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
-      return;
-    }
-
-    if (this.scroller) {
-      try {
-        this.scroller.scrollEdge(Edge.Bottom);
-      } catch (error) {
-        
-        // 备用方案：尝试使用scrollTo方法
-        try {
-          const currentOffset = this.scroller.currentOffset();
-          if (currentOffset) {
-            this.scroller.scrollTo({ xOffset: 0, yOffset: (currentOffset.yOffset || 0) + 1000 });
-          }
-        } catch (scrollError) {
-          hilog.error(DOMAIN, TAG, 'Backup scroll method also failed: %{public}s', String(scrollError));
-        }
-      }
-    }
+  // 辅助方法：去除思维链标签
+  private cleanThinkingTags(content: string): string {
+    if (!content) return '';
+    // 移除 <reasoning_content>...</reasoning_content> 及其内容
+    // 使用非贪婪匹配，并处理多行内容
+    return content.replace(/<reasoning_content>[\s\S]*?<\/reasoning_content>/g, '').trim();
   }
 
   // 消息操作方法
   async copyMessage(message: ChatMessage) {
     try {
       const clipboardManager = ClipboardManager.getInstance();
-      const success = await clipboardManager.copyText(message.content);
+      // 清理思维链标签后再复制，如果清理后为空（只有思考内容），则复制原始内容
+      const cleanContent = this.cleanThinkingTags(message.content);
+      const textToCopy = cleanContent.length > 0 ? cleanContent : message.content;
+      
+      const success = await clipboardManager.copyText(textToCopy);
 
       if (success) {
         this.showToast('已复制到剪贴板');
@@ -2721,11 +2737,12 @@ struct Chat {
         .fontSize(14)
         .fontWeight(FontWeight.Medium)
         .width('100%')
-        .padding({ left: 4, top: 16, bottom: 8 })
+        .padding({ left: 4, top: 12, bottom: 6 })
         .textAlign(TextAlign.Start)
+        .opacity(0.7)
 
       // 该日期下的对话列表
-      List({ space: 2 }) {
+      List({ space: 4 }) {
         ForEach((this.cachedGroupedConversations?.[dateKey]) || [], (conversation: Conversation, index: number) => {
           ListItem() {
             this.ConversationItem(conversation)
@@ -2999,17 +3016,18 @@ struct Chat {
           .margin({ top: 2 })
           .width('100%')
           .textAlign(TextAlign.Start)
+          .opacity(0.6)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .height(64)
+    .height(48)
     .padding({
       left: 12,
       right: 12,
-      top: 8,
-      bottom: 8
+      top: 6,
+      bottom: 6
     })
     .borderRadius(8)
     .onClick(() => {
@@ -3024,12 +3042,45 @@ struct Chat {
     })
   }
 
-  // 格式化时间显示（只显示时分）
+  // 格式化时间显示（根据时间跨度智能显示日期和时间）
   private formatTime(timestamp: number): string {
     const date = new Date(timestamp);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    // 计算时间差（天数）
+    const timeDiff = today.getTime() - messageDate.getTime();
+    const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
-    return `${hours}:${minutes}`;
+    const time = `${hours}:${minutes}`;
+
+    // 根据日期差智能显示
+    if (daysDiff === 0) {
+      // 今天 - 只显示时间
+      return time;
+    } else if (daysDiff === 1) {
+      // 昨天 - 显示"昨天 时间"
+      return `昨天 ${time}`;
+    } else if (daysDiff >= 2 && daysDiff <= 7) {
+      // 一周内 - 显示"几天前"或具体日期
+      return `${daysDiff}天前`;
+    } else {
+      // 超过一周 - 显示具体日期
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const day = date.getDate().toString().padStart(2, '0');
+      
+      if (date.getFullYear() === now.getFullYear()) {
+        // 今年 - 显示月-日
+        return `${month}-${day}`;
+      } else {
+        // 去年或更早 - 显示年-月-日
+        const year = date.getFullYear().toString().slice(-2); // 只显示后两位
+        return `${year}-${month}-${day}`;
+      }
+    }
   }
 
   // 显示重命名对话框
