@@ -179,17 +179,17 @@ export struct WebViewBrowser {
     .title(this.pageTitle || '浏览器')
     .menus([
       {
-        value: '返回', icon: $r('app.media.arrow_go_back_line'), action: () => {
+        value: '返回', icon: $r('app.media.arrow_left_line'), action: () => {
         this.goBackOrPop();
       }
       },
       {
-        value: '刷新', icon: $r('app.media.arrow_clockwise'), action: () => {
+        value: '刷新', icon: $r('app.media.restart_line'), action: () => {
         this.refresh();
       }
       },
       {
-        value: '外部', icon: $r('app.media.worldclock'), action: () => {
+        value: '外部', icon: $r('app.media.global_line'), action: () => {
         this.openInSystemBrowser();
       }
       }

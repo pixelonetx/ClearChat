@@ -418,7 +418,7 @@ struct Chat {
                     // 空状态
                     Column() {
                       Text('有什么可以帮忙的？')
-                        .fontSize(18)
+                        .fontSize(22)
                         .margin({ top: 16 })
 
                       if (!this.hasSettings) {
