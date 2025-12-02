@@ -104,7 +104,7 @@ struct Settings {
               {
                 title: '隐私政策',
                 onClick: () => {
-                  this.openUrl('https://clearchatlegal.rth1.xyz/');
+                  this.openUrl('https://legal.zkytx.xyz/');
                 }
               }
             ]);

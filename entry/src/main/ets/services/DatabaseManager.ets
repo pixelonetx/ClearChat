@@ -26,6 +26,7 @@ import { Constants } from '../components/Constants';
 import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel, Citation } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseError } from '../components/Errors';
+import { TransactionManager } from '../services/TransactionManager';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 const DOMAIN = 0x0000;
 const TAG = 'DatabaseManager';
@@ -56,6 +57,7 @@ interface ProviderRecord {
 export class DatabaseManager {
   private static instance: DatabaseManager;
   private rdbStore: relationalStore.RdbStore | null = null;
+  private transactionManager: TransactionManager | null = null;
 
   private constructor() {}
 
@@ -84,6 +86,7 @@ export class DatabaseManager {
 
     try {
       this.rdbStore = await relationalStore.getRdbStore(context, config);
+      this.transactionManager = new TransactionManager(this.rdbStore);
       await this.createTables();
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to initialize database: %{public}s', String(error));
@@ -505,9 +508,10 @@ export class DatabaseManager {
 
   /**
    * 保存应用设置
+   * 使用事务保证原子性，防止配置丢失
    */
   async saveSettings(settings: AppSettings): Promise<void> {
-    if (!this.rdbStore) {
+    if (!this.rdbStore || !this.transactionManager) {
       throw new DatabaseError('Database not initialized');
     }
 
@@ -522,11 +526,19 @@ export class DatabaseManager {
     };
 
     try {
-      // 首先删除现有设置
-      await this.rdbStore.executeSql(`DELETE FROM ${Constants.SETTINGS_TABLE}`);
+      await this.transactionManager.executeInTransaction(async () => {
+        // 尝试更新现有设置（而不是删除后插入）
+        const predicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
+        const updated = await this.rdbStore!.update(valueBucket, predicates);
 
-      // 插入新设置
-      const rowId = await this.rdbStore.insert(Constants.SETTINGS_TABLE, valueBucket);
+        // 如果没有现有记录，则插入新记录
+        if (updated === 0) {
+          await this.rdbStore!.insert(Constants.SETTINGS_TABLE, valueBucket);
+          hilog.info(DOMAIN, TAG, 'Settings inserted successfully');
+        } else {
+          hilog.info(DOMAIN, TAG, 'Settings updated successfully');
+        }
+      });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to save settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to save settings: ${error}`);
@@ -672,22 +684,27 @@ export class DatabaseManager {
 
   /**
    * 删除对话及其所有消息
+   * 使用事务保证原子性
    */
   async deleteConversation(conversationId: string): Promise<void> {
-    if (!this.rdbStore) {
+    if (!this.rdbStore || !this.transactionManager) {
       throw new DatabaseError('Database not initialized');
     }
 
     try {
-      const messagePredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
-      messagePredicates.equalTo('conversation_id', conversationId);
-      await this.rdbStore.delete(messagePredicates);
+      await this.transactionManager.executeInTransaction(async () => {
+        // 删除所有相关消息
+        const messagePredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
+        messagePredicates.equalTo('conversation_id', conversationId);
+        await this.rdbStore!.delete(messagePredicates);
 
-      const conversationPredicates = new relationalStore.RdbPredicates('conversations');
-      conversationPredicates.equalTo('id', conversationId);
-      await this.rdbStore.delete(conversationPredicates);
+        // 删除对话记录
+        const conversationPredicates = new relationalStore.RdbPredicates('conversations');
+        conversationPredicates.equalTo('id', conversationId);
+        await this.rdbStore!.delete(conversationPredicates);
 
-      hilog.info(DOMAIN, TAG, 'Conversation deleted: %{public}s', conversationId);
+        hilog.info(DOMAIN, TAG, 'Conversation deleted successfully: %{public}s', conversationId);
+      });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete conversation: ${error}`);
@@ -696,31 +713,38 @@ export class DatabaseManager {
 
   /**
    * 更新对话消息计数
+   * 使用事务保证查询和更新的原子性
    */
   async updateConversationMessageCount(conversationId: string): Promise<void> {
-    if (!this.rdbStore) {
+    if (!this.rdbStore || !this.transactionManager) {
       throw new DatabaseError('Database not initialized');
     }
 
     try {
-      // 使用 COUNT 查询优化性能
-      const countSql = `SELECT COUNT(*) as message_count FROM ${Constants.CHAT_TABLE} WHERE conversation_id = ?`;
-      const resultSet = await this.rdbStore.querySql(countSql, [conversationId]);
-      
-      let messageCount = 0;
-      if (resultSet.goToFirstRow()) {
-        messageCount = resultSet.getLong(resultSet.getColumnIndex('message_count'));
-      }
-      resultSet.close();
+      await this.transactionManager.executeInTransaction(async () => {
+        // 在事务中查询消息数（这样可以避免在查询和更新之间消息被修改）
+        const countSql = `SELECT COUNT(*) as message_count FROM ${Constants.CHAT_TABLE} WHERE conversation_id = ?`;
+        const resultSet = await this.rdbStore!.querySql(countSql, [conversationId]);
 
-      const valueBucket: relationalStore.ValuesBucket = {
-        'message_count': messageCount,
-        'updated_at': Date.now()
-      };
+        let messageCount = 0;
+        if (resultSet.goToFirstRow()) {
+          messageCount = resultSet.getLong(resultSet.getColumnIndex('message_count'));
+        }
+        resultSet.close();
 
-      const predicates = new relationalStore.RdbPredicates('conversations');
-      predicates.equalTo('id', conversationId);
-      await this.rdbStore.update(valueBucket, predicates);
+        // 更新对话的消息计数
+        const valueBucket: relationalStore.ValuesBucket = {
+          'message_count': messageCount,
+          'updated_at': Date.now()
+        };
+
+        const predicates = new relationalStore.RdbPredicates('conversations');
+        predicates.equalTo('id', conversationId);
+        await this.rdbStore!.update(valueBucket, predicates);
+
+        hilog.info(DOMAIN, TAG, 'Conversation message count updated: conversationId=%{public}s, count=%{public}d',
+          conversationId, messageCount);
+      });
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to update conversation message count: %{public}s', String(error));
       throw new DatabaseError(`Failed to update conversation message count: ${error}`);

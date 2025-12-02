@@ -162,6 +162,15 @@ export class StreamProcessor {
         this.emitter.emit(StreamEventType.DATA, '</reasoning_content>');
         this.state.markReasoningEnded();
       }
+
+      // 检查是否有未分发的工具调用
+      const toolCalls = this.state.getToolCalls();
+      if (toolCalls.length > 0) {
+        const payload = toolCalls as import('./StreamEventEmitter').ToolCallData[];
+        this.emitter.emit(StreamEventType.TOOL_CALL, payload);
+        this.state.clearToolCalls();
+      }
+
       if (!this.state.isCompleted()) {
         this.state.markCompleted();
         this.emitter.emit(StreamEventType.COMPLETE, undefined);
@@ -245,13 +254,11 @@ export class StreamProcessor {
       }
 
       // 当 finish_reason 表示工具调用时，发送 TOOL_CALL 事件
-      if (response.choices[0].finish_reason === 'tool_calls') {
-        const toolCalls = this.state.getToolCalls();
-        if (toolCalls.length > 0) {
-          const payload = toolCalls as import('./StreamEventEmitter').ToolCallData[];
-          this.emitter.emit(StreamEventType.TOOL_CALL, payload);
-          this.state.clearToolCalls();
-        }
+      // 兼容性修复：有些模型（如 DeepSeek/Qwen）可能不返回 finish_reason='tool_calls'
+      // 而是直接在流结束时检查是否有完整的 tool_calls
+      if (response.choices[0].finish_reason === 'tool_calls' || 
+          (delta.tool_calls && delta.tool_calls.length > 0 && response.choices[0].finish_reason === 'stop')) {
+        // 这里的逻辑由 handleStreamComplete 或外部检查处理，这里只负责累积
       }
     }
   }

@@ -7,12 +7,15 @@
  * - 支持Markdown格式渲染
  * - 优化性能，缓存计算结果
  */
-
 import { ChatMessage, Citation } from '../services/DataModels';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { WebBrowserParam } from '../components/WebViewBrowser';
 import { SearchReferencesDialog, SearchReference } from './SearchReferencesDialog';
 import { MessageStyle } from './MessageStyle';
+
+interface SearchArgs {
+  query?: string;
+}
 
 @Component
 export struct MessageItem {
@@ -52,6 +55,18 @@ export struct MessageItem {
 
   private get isSearchError(): boolean {
     return typeof this.message.content === 'string' && this.message.content.startsWith('[搜索失败]');
+  }
+  // 获取工具调用描述
+  private getToolCallDescription(toolCall: import('../services/DataModels').ToolCall): string {
+    if (toolCall.function?.name === 'search_web') {
+      try {
+        const args = JSON.parse(toolCall.function.arguments || '{}') as SearchArgs;
+        return `正在搜索: ${args.query || '未知内容'}`;
+      } catch (e) {
+        return '正在搜索...';
+      }
+    }
+    return `调用工具: ${toolCall.function?.name}`;
   }
 
   // 更新搜索阶段
@@ -337,6 +352,55 @@ export struct MessageItem {
   }
 
   @Builder
+  ToolCallView() {
+    Column({ space: 8 }) {
+      ForEach(this.message.toolCalls || [], (toolCall: import('../services/DataModels').ToolCall, index: number) => {
+        Row({ space: 8 }) {
+          // 图标
+          if (toolCall.function?.name === 'search_web') {
+            Image($r('app.media.worldclock'))
+              .width(16)
+              .height(16)
+              .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+          } else {
+            Image($r('sys.symbol.square_grid_2x2'))
+              .width(16)
+              .height(16)
+              .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+          }
+
+          // 文本
+          Text(this.getToolCallDescription(toolCall))
+            .fontSize(14)
+            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          // 状态 (如果 content 为空，且是最后一个 toolCall，可能正在执行)
+          if (this.message.content.length === 0 && index === (this.message.toolCalls?.length || 0) - 1) {
+            LoadingProgress()
+              .width(16)
+              .height(16)
+              .color($r('sys.color.ohos_id_color_text_secondary'))
+          } else {
+            Image($r('sys.symbol.checkmark'))
+              .width(16)
+              .height(16)
+              .fillColor(Color.Green)
+          }
+        }
+        .width('100%')
+        .padding(10)
+        .backgroundColor($r('sys.color.ohos_id_color_sub_background'))
+        .borderRadius(8)
+      })
+    }
+    .width('100%')
+    .margin({ bottom: 8 })
+  }
+
+  @Builder
   AssistantMessage() {
     Column() {
       // 只显示模型名称（如果有）
@@ -351,8 +415,13 @@ export struct MessageItem {
         .justifyContent(FlexAlign.Start)
       }
 
-      // 原生简洁的搜索状态展示
-      if (this.currentSearchStage !== 'none') {
+      // 工具调用展示
+      if (this.hasToolCalls) {
+        this.ToolCallView()
+      }
+
+      // 原生简洁的搜索状态展示 (仅当没有工具调用时显示，避免重复)
+      if (this.currentSearchStage !== 'none' && !this.hasToolCalls) {
         Row({ space: 10 }) {
           if (this.currentSearchStage === 'searching') {
             // 搜索中

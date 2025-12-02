@@ -151,7 +151,8 @@ struct ModelSettings {
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature,
+      model.supportsWebSearch);
   }
 
   private cloneProvider(provider: AIProvider): AIProvider {
@@ -201,7 +202,7 @@ struct ModelSettings {
         version, String(updated));
       if (!updated) {
         AppStorage.SetOrCreate('settingsVersion', version);
-        
+
       }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to update settings version: %{public}s', String(error));
@@ -295,7 +296,7 @@ struct ModelSettings {
     try {
       const settings = await this.fetchSettings();
       if (!settings) {
-        
+
         this.providers = [];
         this.activeProviderId = '';
         this.activeModelId = '';
@@ -310,7 +311,7 @@ struct ModelSettings {
         this.activeProviderId = '';
         this.activeModelId = '';
         this.currentProviderIndex = 0;
-        
+
         return true;
       }
 
@@ -327,7 +328,7 @@ struct ModelSettings {
       this.activeProviderId = resolvedProvider.id;
       this.activeModelId = resolvedModelId;
 
-      
+
       return true;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to load settings: %{public}s', String(error));
@@ -608,10 +609,26 @@ struct ModelSettings {
             ForEach(this.providers, (provider: AIProvider, index: number) => {
               TabContent() {
                 if (this.currentProviderIndex === index) {
-                  this.ProviderContent(provider, index)
+                  Column() {
+                    this.ProviderContent(provider, index)
+                  }
+                  .transition({ type: TransitionType.All, scale: { x: 0.95, y: 0.95 }, opacity: 0 }) // 入场动画
+                  .shadow({
+                    radius: 8,
+                    color: '#1A000000',
+                    offsetX: 2,
+                    offsetY: 2
+                  })
                 } else {
                   // 非活动标签避免构建重内容，保持空占位
-                  Column().width('100%').height('100%').justifyContent(FlexAlign.Start)
+                  Column() {
+                    LoadingProgress()
+                      .width(48)
+                  }
+                  .width('100%')
+                  .height('100%')
+                  .justifyContent(FlexAlign.Center)
+                  .opacity(0.8)
                 }
               }
               .tabBar(provider.displayName)
@@ -652,7 +669,7 @@ struct ModelSettings {
 
   @Builder
   ProviderContent(provider: AIProvider, providerIndex: number) {
-    Flex({direction: FlexDirection.Column, justifyContent: FlexAlign.SpaceAround}) {
+    Flex({ direction: FlexDirection.Column, justifyContent: FlexAlign.SpaceAround }) {
       // 模型列表
       Column({ space: 16 }) {
         Row() {
