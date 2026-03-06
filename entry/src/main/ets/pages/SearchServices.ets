@@ -52,7 +52,7 @@ struct SearchServices {
   @State newServiceUsername: string = '';
   @State newServicePassword: string = '';
   @State newServiceSearchEngineId: string = '';
-  private uiContext: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+  private uiContext: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
   private configManager: SearchConfigManager = SearchConfigManager.getInstance();
 
   aboutToAppear(): void {

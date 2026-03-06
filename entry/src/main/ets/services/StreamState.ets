@@ -400,7 +400,11 @@ export class StreamState {
    * 获取状态历史（用于调试）
    */
   getHistory(): StreamStateData[] {
-    return [...this.history];
+    const historyCopy: StreamStateData[] = [];
+    for (let i = 0; i < this.history.length; i++) {
+      historyCopy.push(this.history[i]);
+    }
+    return historyCopy;
   }
 
   /**
@@ -412,11 +416,13 @@ export class StreamState {
   }
 
   /**
-   * 清理资源
+   * 清理资源（包括 emitter 的监听器）
    */
   dispose(): void {
     this.data = createInitialState();
     this.history = [];
+    // 关键：清理 emitter 的所有监听器，防止内存泄漏
+    this.emitter.dispose();
   }
 }
 

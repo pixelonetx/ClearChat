@@ -6,7 +6,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../../../common/Logger';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -15,8 +15,7 @@ import {
   BraveOptions
 } from '../SearchModels';
 
-const DOMAIN = 0x0005;
-const TAG = 'BraveSearchService';
+const logger = createLogger('BraveSearchService', LogDomain.SEARCH);
 
 export class BraveSearchService extends SearchService<BraveOptions> {
   private static instance: BraveSearchService;
@@ -37,7 +36,7 @@ export class BraveSearchService extends SearchService<BraveOptions> {
   }
   
   get description(): string {
-    return 'Brave 独立搜索引擎。注重隐私，无跟踪或画像。';
+    return 'Brave 独立搜索引擎。注重隐私，无跟踪或画像';
   }
   
   async search(
@@ -73,7 +72,7 @@ export class BraveSearchService extends SearchService<BraveOptions> {
       const webObj = dataObj['web'] as Record<string, Object | null>;
       
       const resultsArray = (webObj?.['results'] as Object[]) ?? [];
-      const items: SearchResultItem[] = resultsArray.map((item) => {
+      const items: SearchResultItem[] = resultsArray.map((item: Object): SearchResultItem => {
         const itemObj = item as Record<string, Object | string | null>;
         const resultItem: SearchResultItem = {
           title: (itemObj['title'] as string) ?? '',
@@ -92,53 +91,12 @@ export class BraveSearchService extends SearchService<BraveOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'Brave search failed: %{public}s', error.message);
+        logger.error('Brave search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
   }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
-  }
 }
+
 

@@ -14,11 +14,10 @@
  */
 
 import { relationalStore } from '@kit.ArkData';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DatabaseError } from '../components/Errors';
+import { DatabaseError } from '../common/ErrorHandler';
+import { createLogger, LogDomain } from '../common/Logger';
 
-const DOMAIN = 0x0000;
-const TAG = 'TransactionManager';
+const logger = createLogger('TransactionManager', LogDomain.DATABASE);
 
 /**
  * 事务管理器 - 负责管理数据库事务
@@ -46,7 +45,7 @@ export class TransactionManager {
     let transactionStarted = false;
 
     try {
-      hilog.info(DOMAIN, TAG, 'Starting transaction');
+      logger.info('Starting transaction');
 
       // 开始事务
       await this.rdbStore.beginTransaction();
@@ -57,7 +56,7 @@ export class TransactionManager {
 
       // 提交事务
       await this.rdbStore.commit();
-      hilog.info(DOMAIN, TAG, 'Transaction committed successfully');
+      logger.info('Transaction committed successfully');
 
       return result;
     } catch (error) {
@@ -65,15 +64,15 @@ export class TransactionManager {
       if (transactionStarted) {
         try {
           await this.rdbStore.rollBack();
-          hilog.info(DOMAIN, TAG, 'Transaction rolled back successfully');
+          logger.info('Transaction rolled back successfully');
         } catch (rollbackError) {
-          hilog.error(DOMAIN, TAG, 'Failed to rollback transaction: %{public}s', String(rollbackError));
+          logger.error('Failed to rollback transaction: %{public}s', String(rollbackError));
         }
       }
 
       // 包装错误并抛出
       const errorMessage = `Transaction execution failed: ${error}`;
-      hilog.error(DOMAIN, TAG, 'Transaction execution failed: %{public}s', String(error));
+      logger.error('Transaction execution failed: %{public}s', String(error));
       throw new DatabaseError(errorMessage);
     }
   }
@@ -103,7 +102,8 @@ export class TransactionManager {
     } catch (error) {
       // 重新抛出异常，由调用者处理
       if (error instanceof DatabaseError) {
-        throw error;
+        const dbError: DatabaseError = error as DatabaseError;
+        throw dbError;
       }
       throw new DatabaseError(`Operation failed: ${error}`);
     }

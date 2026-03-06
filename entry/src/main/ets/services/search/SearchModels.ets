@@ -6,7 +6,7 @@
  */
 
 /**
- * 搜索结果项
+ * 搜索结果�?
  */
 export interface SearchResultItem {
   // 结果标题
@@ -21,7 +21,7 @@ export interface SearchResultItem {
   // 唯一 ID（用于引用）
   id?: string;
   
-  // 索引号（用于引用）
+  // 索引号（用于引用�?
   index?: number;
   
   // 来源
@@ -35,7 +35,7 @@ export interface SearchResult {
   // AI 生成的答案摘要（如果提供商支持）
   answer?: string;
   
-  // 搜索结果项列表
+  // 搜索结果项列�?
   items: SearchResultItem[];
   
   // 原始响应（用于调试）
@@ -60,7 +60,7 @@ export interface SearchCommonOptions {
  * 搜索服务配置基类
  */
 export abstract class SearchServiceOptions {
-  // 服务ID（唯一标识）
+  // 服务ID（唯一标识�?
   id: string;
   
   // 服务类型
@@ -91,7 +91,7 @@ export abstract class SearchServiceOptions {
       case 'google_custom_search':
         return GoogleCustomSearchOptions.fromJson(json);
       default:
-        throw new Error(`未知的搜索服务类型: ${type}`);
+        throw new Error(`未知的搜索服务类�? ${type}`);
     }
   }
 }

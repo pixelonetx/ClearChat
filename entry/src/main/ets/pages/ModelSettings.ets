@@ -4,10 +4,10 @@ import { AppSettings, AIProvider, AIModel, ChatMessage } from '../services/DataM
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
-import { NativeDialogHelper } from '../components/NativeDialogHelper';
-import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
-import { ModelSettingsDialog } from '../components/ModelSettingsDialog';
-import { DatabaseError } from '../components/Errors';
+import { NativeDialogHelper } from '../components/dialogs/NativeDialogHelper';
+import { ProviderSettingsDialog } from '../components/settings/ProviderSettingsDialog';
+import { ModelSettingsDialog } from '../components/settings/ModelSettingsDialog';
+import { DatabaseError } from '../common/ErrorHandler';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN = 0x0000;
@@ -87,7 +87,7 @@ struct ModelSettings {
       const normalizedError = this.ensureError(error as ErrorInput);
       if (this.isDatabaseNotInitialized(normalizedError)) {
         try {
-          const context = getContext(this) as common.UIAbilityContext;
+          const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
           await this.databaseManager.initDatabase(context);
           return await this.databaseManager.getSettings();
         } catch (initError) {
@@ -194,7 +194,7 @@ struct ModelSettings {
       
       // 确保数据库已初始化
       if (!this.databaseManager.isInitialized()) {
-        const context = getContext(this) as common.UIAbilityContext;
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
         await this.databaseManager.initDatabase(context);
       }
       
@@ -212,11 +212,11 @@ struct ModelSettings {
   private notifySettingsUpdated() {
     try {
       const version = Date.now();
-      const updated = AppStorage.Set('settingsVersion', version);
+      const updated = AppStorage.set('settingsVersion', version);
       hilog.info(DOMAIN, TAG, 'ModelSettings: bump settingsVersion %{public}d updated existing key: %{public}s',
         version, String(updated));
       if (!updated) {
-        AppStorage.SetOrCreate('settingsVersion', version);
+        AppStorage.setOrCreate('settingsVersion', version);
 
       }
     } catch (error) {
@@ -766,6 +766,7 @@ struct ModelSettings {
               .onClick(() => {
                 const targetName = provider.displayName || provider.name || provider.id || '该服务商';
                 NativeDialogHelper.showDeleteConfirmDialog(
+                  this.getUIContext(),
                   targetName,
                   '此操作无法撤销，服务商及其模型配置将永久删除。',
                   () => {
@@ -876,8 +877,7 @@ struct ModelSettings {
             .flexShrink(0) // 防止按钮被压缩
             .onClick(async () => {
               // 显示删除确认对话框
-              NativeDialogHelper.showDeleteConfirmDialog(
-                `删除模型"${model.displayName}"`,
+              NativeDialogHelper.showDeleteConfirmDialog(                this.getUIContext(),                `删除模型"${model.displayName}"`,
                 '此操作无法撤销，模型配置将永久删除。',
                 async () => {
                   await this.deleteModel(providerIndex, modelIndex);

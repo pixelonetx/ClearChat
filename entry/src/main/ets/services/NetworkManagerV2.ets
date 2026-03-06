@@ -3,14 +3,14 @@
  * 
  *  改进版网络管理器 - 使用事件驱动架构
  * 
- * 主要改进：
+ * 主要改进�?
  * 1.  消除回调地狱 - 使用事件驱动
- * 2.  状态集中管理 - StreamState
+ * 2.  状态集中管�?- StreamState
  * 3.  SSE 逻辑分离 - StreamProcessor
  * 4.  错误处理优雅 - 统一的错误流
  * 5.  支持 Promise/async-await - StreamEventPromise
  * 
- * 使用示例：
+ * 使用示例�?
  * ```
  * const manager = new NetworkManagerV2();
  * const emitter = await manager.sendStreamChatRequestV2(
@@ -25,13 +25,13 @@
  *   console.error(error);
  * });
  * 
- * // 方式 2: Promise 链
+ * // 方式 2: Promise �?
  * const allData = await new StreamEventPromise(emitter).collectAllData();
  * ```
  */
 
 import { http } from '@kit.NetworkKit';
-import { Constants } from '../components/Constants';
+import { Constants } from '../common/Constants';
 import {
   ChatMessage,
   StreamMetadata,
@@ -43,8 +43,8 @@ import {
   ExtendedStreamResponse
 } from '../services/DataModels';
 import { AbortController } from '../interfaces/AbortController';
-import { NetworkError } from '../components/Errors';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { NetworkError } from '../common/ErrorHandler';
+import { createLogger, LogDomain } from '../common/Logger';
 import { 
   StreamEventEmitter, 
   StreamEventType, 
@@ -54,8 +54,7 @@ import {
 import { StreamState } from './StreamState';
 import { StreamProcessor, StreamProcessorOptions } from './StreamProcessor';
 
-const DOMAIN = 0x0000;
-const TAG = 'NetworkManagerV2';
+const logger = createLogger('NetworkManagerV2', LogDomain.NETWORK);
 
 /**
  * 消息内容接口
@@ -65,7 +64,7 @@ interface MessageContent {
 }
 
 /**
- * 选择项接口
+ * 选择项接�?
  */
 interface ChatChoice {
   message: MessageContent;
@@ -99,24 +98,24 @@ export interface StreamRequestConfig {
   // 请求超时（毫秒）
   requestTimeout?: number;
   
-  // 最大重试次数
+  // 最大重试次�?
   maxRetries?: number;
   
   // SSE 处理器选项
   processorOptions?: StreamProcessorOptions;
   
-  // 中止控制器
+  // 中止控制�?
   abortController?: AbortController;
   
   // 是否启用网络搜索
   enableWebSearch?: boolean;
   
-  // OpenAI 格式的工具定义数组
+  // OpenAI 格式的工具定义数�?
   tools?: object[];
 }
 
 /**
- * 超时状态容器
+ * 超时状态容�?
  */
 interface TimeoutState {
   id: number | null;
@@ -186,11 +185,11 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * 改进版流式聊天请求 - 返回事件发射器
+   * 改进版流式聊天请�?- 返回事件发射�?
    * 
-   * 使用事件驱动架构，完全消除回调地狱
+   * 使用事件驱动架构，完全消除回调地�?
    * 
-   * @returns StreamEventEmitter 事件发射器
+   * @returns StreamEventEmitter 事件发射�?
    */
   async sendStreamChatRequestV2(
     apiUrl: string,
@@ -199,13 +198,13 @@ export class NetworkManagerV2 {
     messages: ChatMessage[],
     config?: StreamRequestConfig
   ): Promise<StreamEventEmitter> {
-    // 创建事件发射器
+    // 创建事件发射�?
     const emitter = new StreamEventEmitter();
     
-    // 创建状态管理
+    // 创建状态管�?
     const state = new StreamState(emitter);
     
-    // 创建处理器
+    // 创建处理�?
     const processor = new StreamProcessor(
       state,
       emitter,
@@ -230,7 +229,7 @@ export class NetworkManagerV2 {
       processor,
       finalConfig
     ).catch((error: Error) => {
-      // 确保错误被发射
+      // 确保错误被发�?
       if (!state.isErrorDispatched()) {
         emitter.emit(StreamEventType.ERROR, error);
         state.markErrorDispatched();
@@ -274,8 +273,8 @@ export class NetworkManagerV2 {
         // 工具消息必须包含 tool_call_id
         if (msg.role === 'tool') {
           if (!msg.toolCallId) {
-            hilog.error(DOMAIN, TAG, 'Tool message missing toolCallId, this will cause API error');
-            throw new Error('工具调用消息缺少必需的 tool_call_id 字段');
+            logger.error( 'Tool message missing toolCallId, this will cause API error');
+            throw new Error('工具调用消息缺少必需�?tool_call_id 字段');
           }
           requestMsg.tool_call_id = msg.toolCallId;
         }
@@ -301,17 +300,17 @@ export class NetworkManagerV2 {
       // 3创建 HTTP 请求
       const httpRequest = http.createHttp();
       
-      // 使用对象包装 timeoutId，以便在闭包中修改
+      // 使用对象包装 timeoutId，以便在闭包中修�?
       const timeoutState: TimeoutState = { id: null };
 
       try {
-        // 4设置超时处理（可被每次 dataReceive 事件重置）
+        // 4设置超时处理（可被每�?dataReceive 事件重置�?
         const setupTimeout = (): number => {
           if (timeoutState.id !== null) {
             clearTimeout(timeoutState.id);
           }
           const newId = setTimeout(() => {
-            hilog.error(DOMAIN, TAG, 'Stream request timeout after %{public}d ms', config.requestTimeout ?? 30000);
+            logger.warn( 'Stream request timeout after %{public}d ms', config.requestTimeout ?? 30000);
             httpRequest.destroy();
             
             const error = new Error('请求超时');
@@ -337,8 +336,8 @@ export class NetworkManagerV2 {
           );
         }
 
-        // 6设置 HTTP 事件处理（非回调地狱方式）
-        // 注意：不能 await，因为这会一直等到 HTTP 响应完成
+        // 6设置 HTTP 事件处理（非回调地狱方式�?
+        // 注意：不�?await，因为这会一直等�?HTTP 响应完成
         this.setupHTTPEventHandlers(
           httpRequest,
           emitter,
@@ -366,7 +365,7 @@ export class NetworkManagerV2 {
         );
 
       } finally {
-        // 清理超时定时器
+        // 清理超时定时�?
         if (timeoutState.id !== null) {
           clearTimeout(timeoutState.id);
           timeoutState.id = null;
@@ -377,7 +376,7 @@ export class NetworkManagerV2 {
 
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Stream request failed: %{public}s', err.message);
+      logger.error( 'Stream request failed: %{public}s', err.message);
       
       if (!state.isErrorDispatched()) {
         emitter.emit(StreamEventType.ERROR, err);
@@ -418,7 +417,7 @@ export class NetworkManagerV2 {
     processor: StreamProcessor
   ): number {
     return setTimeout(() => {
-      hilog.error(DOMAIN, TAG, 'Stream request timeout after %{public}d ms', timeout);
+      logger.warn( 'Stream request timeout after %{public}d ms', timeout);
       httpRequest.destroy();
       
       const error = new Error('请求超时');
@@ -440,11 +439,11 @@ export class NetworkManagerV2 {
     processor: StreamProcessor
   ): void {
     abortController.signal.addEventListener('abort', () => {
-      hilog.info(DOMAIN, TAG, 'Request aborted by user');
+      logger.info( 'Request aborted by user');
       state.markUserAborted();
       httpRequest.destroy();
       
-      // 调用 onComplete 而不是 onError，保留已生成内容
+      // 调用 onComplete 而不�?onError，保留已生成内容
       if (!state.isCompleted()) {
         state.markCompleted();
         emitter.emit(StreamEventType.COMPLETE, undefined);
@@ -455,8 +454,8 @@ export class NetworkManagerV2 {
   /**
    * 设置 HTTP 事件处理
    * 
-   * 使用 Promise 包装，避免深层嵌套回调
-   * 每次收到数据时重置超时计时器，以支持长时间流式传输
+   * 使用 Promise 包装，避免深层嵌套回�?
+   * 每次收到数据时重置超时计时器，以支持长时间流式传�?
    */
   private setupHTTPEventHandlers(
     httpRequest: http.HttpRequest,
@@ -479,7 +478,7 @@ export class NetworkManagerV2 {
 
           const chunk = this.arrayBufferToString(data);
           if (chunk && chunk.length > 0) {
-            // 处理 SSE 数据（不再是回调地狱）
+            // 处理 SSE 数据（不再是回调地狱�?
             processor.processChunk(chunk);
           }
 
@@ -488,23 +487,23 @@ export class NetworkManagerV2 {
             errorBody += chunk;
           }
         } catch (error) {
-          hilog.error(DOMAIN, TAG, 'Error processing chunk: %{public}s', String(error));
-          emitter.emit(StreamEventType.WARNING, `处理数据块出错: ${error}`);
+          logger.error( 'Error processing chunk: %{public}s', String(error));
+          emitter.emit(StreamEventType.WARNING, `处理数据块出�? ${error}`);
         }
       });
 
       // 数据接收完成事件
       httpRequest.on('dataEnd', () => {
-        hilog.info(DOMAIN, TAG, 'HTTP stream data receive completed');
+        logger.info( 'HTTP stream data receive completed');
         
-        // 清理超时计时器
+        // 清理超时计时�?
         if (timeoutState && timeoutState.id !== null) {
           clearTimeout(timeoutState.id);
           timeoutState.id = null;
         }
         
         try {
-          // 处理缓冲区剩余数据
+          // 处理缓冲区剩余数�?
           processor.flush();
 
           // 如果没有接收到有效的 SSE 数据，尝试解析为 JSON
@@ -512,7 +511,7 @@ export class NetworkManagerV2 {
             processor.handleNormalJSONResponse(errorBody, false);
           }
         } catch (error) {
-          hilog.error(DOMAIN, TAG, 'Error in dataEnd handler: %{public}s', String(error));
+          logger.error( 'Error in dataEnd handler: %{public}s', String(error));
         }
 
         // 确保完成
@@ -562,13 +561,13 @@ export class NetworkManagerV2 {
       usingProtocol: http.HttpProtocol.HTTP1_1
     };
 
-    hilog.info(DOMAIN, TAG, 'Performing HTTP request to: %{public}s', url);
+    logger.info( 'Performing HTTP request to: %{public}s', url);
 
       return new Promise<number>((resolve, reject) => {
         httpRequest.requestInStream(url, options).then((responseCode: number) => {
           resolve(responseCode);
         }).catch((err: Error) => {
-        hilog.error(DOMAIN, TAG, 'HTTP request error: %{public}s', String(err));
+        logger.error( 'HTTP request error: %{public}s', String(err));
         reject(err);
       });
     });
@@ -603,7 +602,7 @@ export class NetworkManagerV2 {
       httpRequest.off('dataEnd');
       httpRequest.destroy();
     } catch (error) {
-      hilog.warn(DOMAIN, TAG, 'Failed to cleanup HTTP request: %{public}s', String(error));
+      logger.warn( 'Failed to cleanup HTTP request: %{public}s', String(error));
     }
   }
 
@@ -653,7 +652,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * 非流式聊天请求（用于标题生成、连接测试等场景）
+   * 非流式聊天请求（用于标题生成、连接测试等场景�?
    * 
    * @param apiUrl API 基础 URL
    * @param apiKey API 密钥
@@ -671,7 +670,7 @@ export class NetworkManagerV2 {
     const sanitizedModel = this.sanitizeIdentifier(modelName || '');
     const sanitizedApiKey = this.sanitizeApiKey(apiKey || '');
 
-    hilog.info(DOMAIN, TAG, 'Starting non-streaming chat request');
+    logger.info( 'Starting non-streaming chat request');
     
     // 验证输入
     this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
@@ -713,12 +712,12 @@ export class NetworkManagerV2 {
         readTimeout: 30000
       };
 
-      hilog.info(DOMAIN, TAG, 'Sending non-streaming request to: %{public}s', requestUrl);
+      logger.info( 'Sending non-streaming request to: %{public}s', requestUrl);
 
-      // 发送请求
+      // 发送请�?
       httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
         if (err) {
-          hilog.error(DOMAIN, TAG, 'HTTP request failed: %{public}s', String(err));
+          logger.error( 'HTTP request failed: %{public}s', String(err));
           httpRequest.destroy();
           const errorMessage = this.getNetworkErrorMessage(err);
           reject(new NetworkError(errorMessage));
@@ -743,7 +742,7 @@ export class NetworkManagerV2 {
             let errorMessage = `请求失败，状态码: ${data.responseCode}`;
             
             try {
-              hilog.error(DOMAIN, TAG, 'HTTP error response body: %{public}s', data.result as string);
+              logger.error( 'HTTP error response body: %{public}s', data.result as string);
               const errorData: ErrorResponse = JSON.parse(data.result as string);
               if (errorData.error && errorData.error.message) {
                 errorMessage = this.getApiErrorMessage(errorData.error.message, data.responseCode);
@@ -752,12 +751,12 @@ export class NetworkManagerV2 {
               errorMessage = this.getHttpErrorMessage(data.responseCode);
             }
 
-            hilog.error(DOMAIN, TAG, 'HTTP request failed with status: %{public}d', data.responseCode);
+            logger.error( 'HTTP request failed with status: %{public}d', data.responseCode);
             httpRequest.destroy();
             reject(new NetworkError(errorMessage));
           }
         } catch (parseError) {
-          hilog.error(DOMAIN, TAG, 'Failed to parse response: %{public}s', String(parseError));
+          logger.error( 'Failed to parse response: %{public}s', String(parseError));
           httpRequest.destroy();
           reject(new NetworkError(`响应解析失败: ${parseError}`));
         }
@@ -766,7 +765,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * 获取网络错误的用户友好消息
+   * 获取网络错误的用户友好消�?
    */
   private getNetworkErrorMessage(error: Error): string {
     const errorStr = error.message || String(error);
@@ -788,7 +787,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * 获取API错误的用户友好消息
+   * 获取API错误的用户友好消�?
    */
   private getApiErrorMessage(apiError: string, statusCode: number): string {
     if (statusCode === 401) {
@@ -808,7 +807,7 @@ export class NetworkManagerV2 {
   }
 
   /**
-   * 获取HTTP状态码对应的用户友好消息
+   * 获取HTTP状态码对应的用户友好消�?
    */
   private getHttpErrorMessage(statusCode: number): string {
     switch (statusCode) {
@@ -847,7 +846,7 @@ export class NetworkManagerV2 {
       await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage]);
       return true;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Connection test failed: %{public}s', String(error));
+      logger.error( 'Connection test failed: %{public}s', String(error));
       return false;
     }
   }

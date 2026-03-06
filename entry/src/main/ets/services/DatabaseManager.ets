@@ -1,35 +1,35 @@
 /**
- * DatabaseManager - 数据库管理服务
+ * DatabaseManager - 数据库管理服�?
  * 
- * 功能说明：
- * - 管理应用的关系型数据库操作
+ * 功能说明�?
+ * - 管理应用的关系型数据库操�?
  * - 提供对话、消息、设置、AI提供商等数据的CRUD操作
  * - 实现数据库版本管理和迁移
  * - 确保数据一致性和事务安全
  * 
  * 数据表结构：
- * - conversations: 对话记录表
- * - messages: 消息记录表
- * - settings: 应用设置表
+ * - conversations: 对话记录�?
+ * - messages: 消息记录�?
+ * - settings: 应用设置�?
  * - providers: AI提供商配置表
- * - models: AI模型配置表
+ * - models: AI模型配置�?
  * 
  * 特性：
- * - 单例模式确保数据库连接唯一性
+ * - 单例模式确保数据库连接唯一�?
  * - 支持数据库版本升级和结构迁移
  * - 提供完整的错误处理和日志记录
- * - 优化查询性能和内存使用
+ * - 优化查询性能和内存使�?
  */
 
 import { relationalStore } from '@kit.ArkData';
-import { Constants } from '../components/Constants';
+import { Constants } from '../common/Constants';
 import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel, Citation } from '../services/DataModels';
 import { Conversation } from '../services/ConversationModels';
-import { DatabaseError } from '../components/Errors';
+import { DatabaseError } from '../common/ErrorHandler';
 import { TransactionManager } from '../services/TransactionManager';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-const DOMAIN = 0x0000;
-const TAG = 'DatabaseManager';
+import { createLogger, LogDomain } from '../common/Logger';
+
+const logger = createLogger('DatabaseManager', LogDomain.DATABASE);
 
 interface ProviderModelRecord {
   id?: string;
@@ -74,9 +74,9 @@ export class DatabaseManager {
   }
 
   /**
-   * 初始化数据库连接和配置
-   * @param context 应用上下文
-   * @throws DatabaseError 数据库初始化失败时抛出
+   * 初始化数据库连接和配�?
+   * @param context 应用上下�?
+   * @throws DatabaseError 数据库初始化失败时抛�?
    */
   async initDatabase(context: Context): Promise<void> {
     if (this.initialized && this.rdbStore && this.transactionManager) {
@@ -86,7 +86,7 @@ export class DatabaseManager {
     const config: relationalStore.StoreConfig = {
       name: Constants.DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S2, // 提升安全级别
-      encrypt: true // 启用数据库加密
+      encrypt: true // 启用数据库加�?
     };
 
     try {
@@ -95,7 +95,7 @@ export class DatabaseManager {
       await this.createTables();
       this.initialized = true;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to initialize database: %{public}s', String(error));
+      logger.error( 'Failed to initialize database: %{public}s', String(error));
       throw new DatabaseError(`Failed to initialize database: ${error}`);
     }
   }
@@ -108,7 +108,7 @@ export class DatabaseManager {
   }
 
   /**
-   * 创建所有必要的数据表
+   * 创建所有必要的数据�?
    * @private
    * @throws DatabaseError 表创建失败时抛出
    */
@@ -117,7 +117,7 @@ export class DatabaseManager {
       throw new DatabaseError('Database not initialized');
     }
 
-    // 创建聊天消息表
+    // 创建聊天消息�?
     const createChatTable = `
       CREATE TABLE IF NOT EXISTS ${Constants.CHAT_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +135,7 @@ export class DatabaseManager {
       )
     `;
 
-    // 创建对话表
+    // 创建对话�?
     const createConversationTable = `
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
@@ -147,7 +147,7 @@ export class DatabaseManager {
       )
     `;
 
-    // 创建设置表
+    // 创建设置�?
     const createSettingsTable = `
       CREATE TABLE IF NOT EXISTS ${Constants.SETTINGS_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,21 +178,21 @@ export class DatabaseManager {
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
 
-      // 兼容旧版本表结构：补充 messages.citations_json 列
+      // 兼容旧版本表结构：补�?messages.citations_json �?
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN citations_json TEXT`);
       } catch (e) {
-        // 若已存在则忽略
+        // 若已存在则忽�?
       }
 
-      // 兼容旧版本表结构：补充 messages.metadata 列（用于工具调用）
+      // 兼容旧版本表结构：补�?messages.metadata 列（用于工具调用�?
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN metadata TEXT`);
       } catch (e3) {
-        // 若已存在则忽略
+        // 若已存在则忽�?
       }
 
-      // 兼容旧版本设置表结构：补充 settings.enable_web_search 列
+      // 兼容旧版本设置表结构：补�?settings.enable_web_search �?
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.SETTINGS_TABLE} ADD COLUMN enable_web_search INTEGER DEFAULT 0`);
       } catch (e2) {
@@ -207,7 +207,7 @@ export class DatabaseManager {
         await this.rdbStore.executeSql(indexSql);
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to create tables: %{public}s', String(error));
+      logger.error( 'Failed to create tables: %{public}s', String(error));
       throw new DatabaseError(`Failed to create tables: ${error}`);
     }
   }
@@ -238,7 +238,7 @@ export class DatabaseManager {
       const rowId = await this.rdbStore.insert(Constants.CHAT_TABLE, valueBucket);
       return rowId;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to insert chat message: %{public}s', String(error));
+      logger.error( 'Failed to insert chat message: %{public}s', String(error));
       throw new DatabaseError(`Failed to insert chat message: ${error}`);
     }
   }
@@ -264,7 +264,7 @@ export class DatabaseManager {
         throw new DatabaseError(`No message found with ID: ${messageId}`);
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to update chat message: %{public}s', String(error));
+      logger.error( 'Failed to update chat message: %{public}s', String(error));
       throw new DatabaseError(`Failed to update chat message: ${error}`);
     }
   }
@@ -314,7 +314,7 @@ export class DatabaseManager {
         throw new DatabaseError(`No message found with ID: ${messageId}`);
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to update chat message metadata: %{public}s', String(error));
+      logger.error( 'Failed to update chat message metadata: %{public}s', String(error));
       throw new DatabaseError(`Failed to update chat message metadata: ${error}`);
     }
   }
@@ -329,9 +329,9 @@ export class DatabaseManager {
 
     const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
     predicates.equalTo('conversation_id', conversationId)
-      .notEqualTo('role', 'tool')  // 过滤掉tool消息，不加载到前端显示
+      .notEqualTo('role', 'tool')  // 过滤掉tool消息，不加载到前端显�?
       .orderByAsc('timestamp')
-      .orderByAsc('id')  // 补充：按ID作为次级排序键，确保时间戳相同时按插入顺序排列
+      .orderByAsc('id')  // 补充：按ID作为次级排序键，确保时间戳相同时按插入顺序排�?
       .limitAs(limit);
 
     try {
@@ -396,7 +396,7 @@ export class DatabaseManager {
       resultSet.close();
       return messages;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to get chat messages: %{public}s', String(error));
+      logger.error( 'Failed to get chat messages: %{public}s', String(error));
       throw new DatabaseError(`Failed to get chat messages: ${error}`);
     }
   }
@@ -415,7 +415,9 @@ export class DatabaseManager {
     if (conversationIds && conversationIds.length > 0) {
       const placeholders = conversationIds.map(() => '?').join(', ');
       sql += ` WHERE conversation_id IN (${placeholders})`;
-      params.push(...conversationIds);
+      for (let i = 0; i < conversationIds.length; i++) {
+        params.push(conversationIds[i]);
+      }
     }
 
     sql += ' GROUP BY conversation_id';
@@ -438,7 +440,7 @@ export class DatabaseManager {
       resultSet.close();
       return counts;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to query conversation message counts: %{public}s', String(error));
+      logger.error( 'Failed to query conversation message counts: %{public}s', String(error));
       throw new DatabaseError(`Failed to query conversation message counts: ${error}`);
     }
   }
@@ -457,7 +459,7 @@ export class DatabaseManager {
     try {
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to clear chat history: %{public}s', String(error));
+      logger.error( 'Failed to clear chat history: %{public}s', String(error));
       throw new DatabaseError(`Failed to clear chat history: ${error}`);
     }
   }
@@ -481,7 +483,7 @@ export class DatabaseManager {
   // }
 
   /**
-   * 清理所有tool类型的消息（修复历史数据）
+   * 清理所有tool类型的消息（修复历史数据�?
    * 这些消息不应该被保存到数据库，仅在内存中使用
    */
   async cleanupToolMessages(): Promise<number> {
@@ -496,7 +498,7 @@ export class DatabaseManager {
       const deletedCount = await this.rdbStore.delete(predicates);
       return deletedCount;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(error));
+      logger.error( 'Failed to cleanup tool messages: %{public}s', String(error));
       throw new DatabaseError(`Failed to cleanup tool messages: ${error}`);
     }
   }
@@ -515,7 +517,7 @@ export class DatabaseManager {
     try {
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to delete message: %{public}s', String(error));
+      logger.error( 'Failed to delete message: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete message: ${error}`);
     }
   }
@@ -524,7 +526,7 @@ export class DatabaseManager {
    * 保存应用设置
    */
   async saveSettings(settings: AppSettings): Promise<void> {
-    // 如果数据库未初始化，抛出错误让调用者处理
+    // 如果数据库未初始化，抛出错误让调用者处�?
     if (!this.rdbStore) {
       throw new DatabaseError('Database not initialized. Please call initDatabase() first.');
     }
@@ -540,7 +542,7 @@ export class DatabaseManager {
     };
 
     try {
-      // 检查是否存在记录
+      // 检查是否存在记�?
       const predicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
       const resultSet = await this.rdbStore.query(predicates, ['id']);
       const hasExisting = resultSet.rowCount > 0;
@@ -550,14 +552,14 @@ export class DatabaseManager {
         // 更新现有记录
         const updatePredicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
         const updated = await this.rdbStore.update(valueBucket, updatePredicates);
-        hilog.info(DOMAIN, TAG, 'Settings updated: %{public}d rows affected', updated);
+        logger.info( 'Settings updated: %{public}d rows affected', updated);
       } else {
-        // 插入新记录
+        // 插入新记�?
         const rowId = await this.rdbStore.insert(Constants.SETTINGS_TABLE, valueBucket);
-        hilog.info(DOMAIN, TAG, 'Settings inserted with rowId: %{public}d', rowId);
+        logger.info( 'Settings inserted with rowId: %{public}d', rowId);
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to save settings: %{public}s', String(error));
+      logger.error( 'Failed to save settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to save settings: ${error}`);
     }
   }
@@ -590,7 +592,7 @@ export class DatabaseManager {
         const enableWebSearchIndex = resultSet.getColumnIndex('enable_web_search');
 
         if (providersDataIndex < 0) {
-          hilog.warn(DOMAIN, TAG, 'Settings record missing providers_data column; using legacy configuration');
+          logger.warn( 'Settings record missing providers_data column; using legacy configuration');
           resultSet.close();
           return null;
         }
@@ -634,7 +636,7 @@ export class DatabaseManager {
           resolvedSettings.apiUrl = activeProvider.apiUrl;
           resolvedSettings.apiKey = activeProvider.apiKey;
         } else {
-          // 没有提供商时，清空激活的 ID 和配置
+          // 没有提供商时，清空激活的 ID 和配�?
           resolvedSettings.activeProviderId = '';
           resolvedSettings.activeModelId = '';
           resolvedSettings.apiUrl = '';
@@ -642,7 +644,7 @@ export class DatabaseManager {
           resolvedSettings.modelName = '';
         }
 
-        // 读取 enable_web_search（若缺失则默认为 false）
+        // 读取 enable_web_search（若缺失则默认为 false�?
         if (enableWebSearchIndex >= 0 && !resultSet.isColumnNull(enableWebSearchIndex)) {
           const flag = resultSet.getLong(enableWebSearchIndex);
           resolvedSettings.enableWebSearch = flag === 1;
@@ -656,7 +658,7 @@ export class DatabaseManager {
       resultSet.close();
       return settings;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to get settings: %{public}s', String(error));
+      logger.error( 'Failed to get settings: %{public}s', String(error));
       throw new DatabaseError(`Failed to get settings: ${error}`);
     }
   }
@@ -699,14 +701,14 @@ export class DatabaseManager {
       resultSet.close();
       return conversations;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to get conversations: %{public}s', String(error));
+      logger.error( 'Failed to get conversations: %{public}s', String(error));
       throw new DatabaseError(`Failed to get conversations: ${error}`);
     }
   }
 
   /**
-   * 删除对话及其所有消息
-   * 使用事务保证原子性
+   * 删除对话及其所有消�?
+   * 使用事务保证原子�?
    */
   async deleteConversation(conversationId: string): Promise<void> {
     if (!this.rdbStore || !this.transactionManager) {
@@ -715,7 +717,7 @@ export class DatabaseManager {
 
     try {
       await this.transactionManager.executeInTransaction(async () => {
-        // 删除所有相关消息
+        // 删除所有相关消�?
         const messagePredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
         messagePredicates.equalTo('conversation_id', conversationId);
         await this.rdbStore!.delete(messagePredicates);
@@ -725,17 +727,17 @@ export class DatabaseManager {
         conversationPredicates.equalTo('id', conversationId);
         await this.rdbStore!.delete(conversationPredicates);
 
-        hilog.info(DOMAIN, TAG, 'Conversation deleted successfully: %{public}s', conversationId);
+        logger.info( 'Conversation deleted successfully: %{public}s', conversationId);
       });
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to delete conversation: %{public}s', String(error));
+      logger.error( 'Failed to delete conversation: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete conversation: ${error}`);
     }
   }
 
   /**
    * 更新对话消息计数
-   * 使用事务保证查询和更新的原子性
+   * 使用事务保证查询和更新的原子�?
    */
   async updateConversationMessageCount(conversationId: string): Promise<void> {
     if (!this.rdbStore || !this.transactionManager) {
@@ -754,7 +756,7 @@ export class DatabaseManager {
         }
         resultSet.close();
 
-        // 更新对话的消息计数
+        // 更新对话的消息计�?
         const valueBucket: relationalStore.ValuesBucket = {
           'message_count': messageCount,
           'updated_at': Date.now()
@@ -764,17 +766,17 @@ export class DatabaseManager {
         predicates.equalTo('id', conversationId);
         await this.rdbStore!.update(valueBucket, predicates);
 
-        hilog.info(DOMAIN, TAG, 'Conversation message count updated: conversationId=%{public}s, count=%{public}d',
+        logger.info( 'Conversation message count updated: conversationId=%{public}s, count=%{public}d',
           conversationId, messageCount);
       });
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to update conversation message count: %{public}s', String(error));
+      logger.error( 'Failed to update conversation message count: %{public}s', String(error));
       throw new DatabaseError(`Failed to update conversation message count: ${error}`);
     }
   }
 
   /**
-   * 创建新对话
+   * 创建新对�?
    */
   async createConversation(title: string): Promise<Conversation> {
     if (!this.rdbStore) {
@@ -802,7 +804,7 @@ export class DatabaseManager {
       await this.rdbStore.insert('conversations', valueBucket);
       return conversation;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to create conversation: %{public}s', String(error));
+      logger.error( 'Failed to create conversation: %{public}s', String(error));
       throw new DatabaseError(`Failed to create conversation: ${error}`);
     }
   }
@@ -826,7 +828,7 @@ export class DatabaseManager {
     try {
       await this.rdbStore.update(valueBucket, predicates);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to update conversation title: %{public}s', String(error));
+      logger.error( 'Failed to update conversation title: %{public}s', String(error));
       throw new DatabaseError(`Failed to update conversation title: ${error}`);
     }
   }
@@ -851,7 +853,7 @@ export class DatabaseManager {
       }
       parsedValue = parsed;
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to parse providers data: %{public}s', String(error));
+      logger.error( 'Failed to parse providers data: %{public}s', String(error));
       return [];
     }
 
@@ -922,7 +924,7 @@ export class DatabaseManager {
     const apiUrl = typeof apiUrlSource === 'string' && apiUrlSource.trim().length > 0 ? apiUrlSource : '';
     const apiKey = typeof apiKeySource === 'string' ? apiKeySource : '';
 
-    // 只要求 id 和 name 不为空即可，允许不完整的服务商配置（如用户还未填完 apiUrl）
+    // 只要�?id �?name 不为空即可，允许不完整的服务商配置（如用户还未填�?apiUrl�?
     if (!id || !name) {
       return null;
     }

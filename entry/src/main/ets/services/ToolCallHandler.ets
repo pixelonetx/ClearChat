@@ -6,14 +6,13 @@
  * 独立的模块便于测试和重用
  */
 
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../common/Logger';
 import { SearchToolService } from './search/SearchToolService';
 import { SearchResult } from './search/SearchModels';
 import { ChatMessage } from './DataModels';
 import { DatabaseManager } from './DatabaseManager';
 
-const DOMAIN = 0xFF00;
-const TAG = 'ToolCallHandler';
+const logger = createLogger('ToolCallHandler', LogDomain.CHAT);
 
 /**
  * 工具调用数据
@@ -33,6 +32,27 @@ export interface SearchToolArgs {
 }
 
 /**
+ * 工具调用元数据
+ */
+export interface ToolCallMetadata {
+  query?: string;
+  resultCount?: number;
+  executionTime?: number;
+}
+
+/**
+ * 工具结果消息的元数据结构
+ */
+interface ToolResultMessageMetadata {
+  tool_call_id: string;
+  tool_name: string;
+  status: 'success' | 'error';
+  query?: string;
+  resultCount?: number;
+  executionTime?: number;
+}
+
+/**
  * 工具调用执行结果
  */
 export interface ToolCallResult {
@@ -40,7 +60,7 @@ export interface ToolCallResult {
   toolName: string;
   status: 'success' | 'error';
   result: string;
-  metadata?: object;
+  metadata?: ToolCallMetadata;
 }
 
 export class ToolCallHandler {
@@ -196,12 +216,25 @@ export class ToolCallHandler {
       { conversationId: conversationId, timestamp: Date.now() }
     );
 
-    message.metadata = JSON.stringify({
+    const metadataObj: ToolResultMessageMetadata = {
       tool_call_id: toolCallResult.toolCallId,
       tool_name: toolCallResult.toolName,
-      status: toolCallResult.status,
-      ...toolCallResult.metadata
-    });
+      status: toolCallResult.status
+    };
+    
+    if (toolCallResult.metadata) {
+      if (toolCallResult.metadata.query !== undefined) {
+        metadataObj.query = toolCallResult.metadata.query;
+      }
+      if (toolCallResult.metadata.resultCount !== undefined) {
+        metadataObj.resultCount = toolCallResult.metadata.resultCount;
+      }
+      if (toolCallResult.metadata.executionTime !== undefined) {
+        metadataObj.executionTime = toolCallResult.metadata.executionTime;
+      }
+    }
+    
+    message.metadata = JSON.stringify(metadataObj);
 
     return message;
   }

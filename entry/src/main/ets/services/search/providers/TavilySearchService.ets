@@ -6,7 +6,6 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -14,9 +13,9 @@ import {
   SearchCommonOptions,
   TavilyOptions
 } from '../SearchModels';
+import { createLogger, LogDomain } from '../../../common/Logger';
 
-const DOMAIN = 0x0002;
-const TAG = 'TavilySearchService';
+const logger = createLogger('TavilySearchService', LogDomain.SEARCH);
 
 export class TavilySearchService extends SearchService<TavilyOptions> {
   private static instance: TavilySearchService;
@@ -37,7 +36,7 @@ export class TavilySearchService extends SearchService<TavilyOptions> {
   }
   
   get description(): string {
-    return '为大型语言模型（LLMs）优化的 AI 搜索 API，提供高质量、相关的搜索结果。';
+    return '为大型语言模型（LLMs）优化的 AI 搜索 API，提供高质量、相关的搜索结果';
   }
   
   async search(
@@ -95,53 +94,12 @@ export class TavilySearchService extends SearchService<TavilyOptions> {
       return resultObj;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'Tavily search failed: %{public}s', error.message);
+        logger.error( 'Tavily search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
   }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
-  }
 }
+
 

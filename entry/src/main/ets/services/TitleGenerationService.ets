@@ -15,9 +15,9 @@
 
 import { ChatMessage } from '../services/DataModels';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-const DOMAIN = 0x0000;
-const TAG = 'TitleGenerationService';
+import { createLogger, LogDomain } from '../common/Logger';
+
+const logger = createLogger('TitleGenerationService', LogDomain.APP);
 
 export class TitleGenerationService {
   private networkManager: NetworkManagerV2;
@@ -60,7 +60,7 @@ export class TitleGenerationService {
       1. 重点关注用户的核心问题和AI的回复内容
       2. 标题要准确概括对话主题，不超过15个字
       3. 不要包含引号或特殊符号
-      4. 避免使用"你好"、"问候"等简单词汇
+      4. 避免使用"你好"、"问答"等简单词汇
       5. 如果用户问题简短但AI回复详细，以问题的核心内容为主
       6. 直接返回标题，不要其他文字
       标题：`;
@@ -88,7 +88,7 @@ export class TitleGenerationService {
         return this.getFallbackTitle(contextMessages);
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Title generation failed: %{public}s', String(error));
+      logger.error('Title generation failed: %{public}s', String(error));
       return this.getFallbackTitle(messages);
     }
   }
@@ -142,12 +142,12 @@ export class TitleGenerationService {
    * @returns boolean 是否为通用标题
    */
   private isGenericTitle(title: string): boolean {
-    const genericTitles = [
-      '你好', '问候', '聊天', '对话', '交流', 'hello', 'hi',
+    const genericTitles: string[] = [
+      '你好', '问答', '聊天', '对话', '交流', 'hello', 'hi',
       '新对话', '开始', '咨询', '询问'
     ];
 
-    return genericTitles.some(generic =>
+    return genericTitles.some((generic: string): boolean =>
     title.toLowerCase().includes(generic.toLowerCase())
     );
   }

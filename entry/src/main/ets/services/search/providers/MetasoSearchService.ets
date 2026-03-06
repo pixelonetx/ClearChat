@@ -6,7 +6,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../../../common/Logger';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -15,8 +15,7 @@ import {
   MetasoOptions
 } from '../SearchModels';
 
-const DOMAIN = 0x0006;
-const TAG = 'MetasoSearchService';
+const logger = createLogger('MetasoSearchService', LogDomain.SEARCH);
 
 export class MetasoSearchService extends SearchService<MetasoOptions> {
   private static instance: MetasoSearchService;
@@ -37,7 +36,7 @@ export class MetasoSearchService extends SearchService<MetasoOptions> {
   }
   
   get description(): string {
-    return '秘塔中文搜索引擎。面向中文内容优化并提供 AI 能力。';
+    return '秘塔中文搜索引擎。面向中文内容优化并提供 AI 能力';
   }
   
   async search(
@@ -77,7 +76,7 @@ export class MetasoSearchService extends SearchService<MetasoOptions> {
       const dataObj = data as Record<string, Object | null>;
       
       const resultsArray = (dataObj['webpages'] as Object[]) ?? [];
-      const items: SearchResultItem[] = resultsArray.map((item) => {
+      const items: SearchResultItem[] = resultsArray.map((item: Object): SearchResultItem => {
         const itemObj = item as Record<string, Object | string | null>;
         const resultItem: SearchResultItem = {
           title: (itemObj['title'] as string) ?? '',
@@ -96,53 +95,12 @@ export class MetasoSearchService extends SearchService<MetasoOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'Metaso search failed: %{public}s', error.message);
+        logger.error('Metaso search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
   }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
-  }
 }
+
 
