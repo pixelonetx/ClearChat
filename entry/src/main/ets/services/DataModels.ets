@@ -143,7 +143,7 @@ export class AIModel {
   displayName: string;
   maxTokens: number;
   temperature: number;
-  /** 该模型是否支持内置联网搜索功能（如阿里云通义千问） */
+  /** 该模型是否支持联网搜索功能（已废弃，统一使用工具调用） */
   supportsWebSearch: boolean;
 
   constructor(id: string, name: string, displayName: string, maxTokens: number = 4096, temperature: number = 0.7, supportsWebSearch: boolean = false) {
@@ -191,7 +191,7 @@ export class AppSettings {
   providers: AIProvider[];
   activeProviderId: string;
   activeModelId: string;
-  /** 是否启用联网搜索（对支持的提供商生效，如阿里云通义千问） */
+  /** 是否启用联网搜索（通过工具调用实现） */
   enableWebSearch?: boolean;
 
   constructor(apiUrl: string = '', apiKey: string = '', modelName: string = '') {
@@ -232,7 +232,7 @@ export interface ChatRequestBody {
   stream: boolean;
   max_tokens: number;
   temperature: number;
-  // 供应商特定扩展字段（例如阿里云通义千问的联网搜索）
+  // 供应商特定扩展字段（已废弃，保留用于向后兼容）
   enable_search?: boolean;
   // OpenAI 格式的工具定义（支持 function calling）
   tools?: object[];

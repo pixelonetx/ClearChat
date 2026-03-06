@@ -11,6 +11,7 @@ import { Context } from '@ohos.abilityAccessCtrl';
 import {
   SearchCommonOptions, SearchServiceOptions
 } from './SearchModels';
+import { SearchServiceFactory } from './SearchServiceFactory';
 
 const DOMAIN = 0x0009;
 const TAG = 'SearchConfigManager';
@@ -285,8 +286,7 @@ export class SearchConfigManager {
         return false;
       }
       
-      const searchModule = await import('./SearchServiceFactory');
-      const SearchServiceFactory = searchModule.SearchServiceFactory;
+      // 直接使用静态导入的工厂类
       const searchService = SearchServiceFactory.getService(service);
       
       const result = await searchService.search('test', { resultSize: 1, timeout: 5000 }, service);

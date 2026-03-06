@@ -26,7 +26,7 @@
     },
     {
       "name": "WebBrowser",
-      "pageSourceFile": "src/main/ets/components/WebViewBrowser.ets",
+      "pageSourceFile": "src/main/ets/components/utils/WebViewBrowser.ets",
       "buildFunction": "WebViewBrowserBuilder",
       "data": {
         "description" : "internal webview browser"

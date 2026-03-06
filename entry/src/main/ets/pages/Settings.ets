@@ -2,10 +2,10 @@ import { Prompt } from '@kit.ArkUI';
 import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { AppSettings } from '../services/DataModels';
 import { BrowserHelper } from '../services/BrowserHelper';
-import { ClipboardManager } from '../components/ClipboardManager';
-import { AboutSheetBuilder } from '../components/AboutSheet';
+import { ClipboardManager } from '../components/utils/ClipboardManager';
+import { AboutSheetBuilder } from '../components/settings/AboutSheet';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { WebBrowserParam } from '../components/WebViewBrowser';
+import { WebBrowserParam } from '../components/utils/WebViewBrowser';
 import { ThemeMode, AppPreferences } from '../services/AppPreferences';
 const DOMAIN = 0x0000;
 const TAG = 'Settings';
@@ -34,7 +34,7 @@ struct Settings {
   // 主题模式
   @StorageLink('themeMode') currentThemeMode: number = ThemeMode.AUTO;
   
-  private uiContent: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+  private uiContent: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
 
   aboutToAppear(): void {
     // 不需要额外初始化，AppStorage 已在 EntryAbility 中设置
@@ -343,7 +343,7 @@ struct Settings {
   private openUrlExternalWithConfirm(url: string) {
     const useUrl = url;
 
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: '打开外部链接',
       message: `即将在系统浏览器中打开${useUrl}，是否继续？`,
       primaryButton: {
@@ -362,7 +362,7 @@ struct Settings {
   }
 
   private openUrlInBrowser(url: string) {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
 
     BrowserHelper.openUrl(context, url)
       .then((success: boolean) => {

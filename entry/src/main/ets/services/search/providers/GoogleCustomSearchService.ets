@@ -6,7 +6,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../../../common/Logger';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -15,8 +15,7 @@ import {
   GoogleCustomSearchOptions
 } from '../SearchModels';
 
-const DOMAIN = 0x0008;
-const TAG = 'GoogleCustomSearchService';
+const logger = createLogger('GoogleCustomSearchService', LogDomain.SEARCH);
 
 export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchOptions> {
   private static instance: GoogleCustomSearchService;
@@ -37,7 +36,7 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
   }
   
   get description(): string {
-    return 'Google 自定义搜索 API。提供精准的搜索结果。';
+    return 'Google 自定义搜索 API。提供精准的搜索结果';
   }
   
   async search(
@@ -71,7 +70,7 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
       const dataObj = data as Record<string, Object | null>;
       
       const resultsArray = (dataObj['items'] as Object[]) ?? [];
-      const items: SearchResultItem[] = resultsArray.map((item) => {
+      const items: SearchResultItem[] = resultsArray.map((item: Object): SearchResultItem => {
         const itemObj = item as Record<string, Object | string | null>;
         const resultItem: SearchResultItem = {
           title: (itemObj['title'] as string) ?? '',
@@ -90,53 +89,12 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'Google Custom Search failed: %{public}s', error.message);
+        logger.error('Google Custom Search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
   }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
-  }
 }
+
 

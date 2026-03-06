@@ -11,15 +11,20 @@ import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
 import { StreamEventEmitter, StreamEventType, EventPayload } from '../services/StreamEventEmitter';
 import { TitleGenerationService } from '../services/TitleGenerationService';
-import { ClipboardManager } from '../components/ClipboardManager';
+import { ClipboardManager } from '../components/utils/ClipboardManager';
 import { BrowserHelper } from '../services/BrowserHelper';
-import { NativeDialogHelper } from '../components/NativeDialogHelper';
-import { MessageItem } from '../components/MessageItem';
-import { RenameConversationDialog } from '../components/RenameConversationDialog';
-import { ModelSelectorSheet } from '../components/ModelSelectorDialog';
+import { NativeDialogHelper } from '../components/dialogs/NativeDialogHelper';
+import { MessageItem } from '../components/chat/MessageItem';
+import { RenameConversationDialog } from '../components/dialogs/RenameConversationDialog';
+import { ModelSelectorSheet } from '../components/dialogs/ModelSelectorDialog';
 import { AbortController, createAbortController } from '../interfaces/AbortController';
 import { SearchToolService } from '../services/search/SearchToolService';
 import { SearchConfigManager } from '../services/search/SearchConfigManager';
+import { cloneChatMessage, getFriendlyErrorMessage, containsSuspiciousContent, shouldGenerateTitle } from '../viewmodels/ChatUtils';
+import { ChatSidebar, ChatSidebarConfig } from '../components/chat/ChatSidebar';
+import { MessageList, MessageListConfig } from '../components/chat/MessageList';
+import { throttle, debounce } from '../common/NetworkUtils';
+import { ChatViewModel } from '../viewmodels/ChatViewModel';
 
 const DOMAIN = 0x0000;
 const TAG = 'Chat';
@@ -40,19 +45,6 @@ interface StreamingMessageResult {
 interface SearchToolArgs {
   query: string;
   resultSize?: number;
-}
-
-interface MaybeStringifiable {
-  toString?: () => string;
-}
-
-interface ResponseInfo {
-  status?: number;
-}
-
-interface ExtendedError extends Error {
-  code?: string | number;
-  response?: ResponseInfo;
 }
 
 class ToastOptions {
@@ -83,23 +75,22 @@ struct Chat {
   @Provide('NavPathStack')
   pathStack: NavPathStack = new NavPathStack();
   // 常量定义
-  private static readonly SIDEBAR_WIDTH = 300;
   private static readonly ANIMATION_DURATION = 300;
-  private static readonly DEBOUNCE_DELAY = 300;
+  
+  // ViewModel 实例
+  private viewModel: ChatViewModel = new ChatViewModel();
+  
   // 状态管理
   @StorageProp('bottomRectHeight') bottomRectHeight: number = 0;
   @StorageProp('topRectHeight') topRectHeight: number = 0;
+  @StorageProp('keyboardHeight') keyboardHeight: number = 0;
   @StorageProp('settingsVersion') settingsVersion: number = 0;
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
   @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm';
   // UI 状态
   @State showControlButton: boolean = true;
   @State showSideBar: boolean = false;
-  @State isSidebarVisible: boolean = false;
-  @State sidebarOffset: number = -Chat.SIDEBAR_WIDTH;
-  @State backgroundBlurRadius: number = 0;
   @State showModelSelectorSheet: boolean = false;
-  @State customPopup: boolean = false;
   // 数据状态
   @State messages: ChatMessage[] = [];
   @State
@@ -108,22 +99,17 @@ struct Chat {
   @State currentConversation: Conversation | null = null;
   @State inputText: string = '';
   // 缓存已分组的对话数据，避免重复计算
-  @State private cachedGroupedConversations: Record<string, Conversation[]> | null = null;
+  @State private cachedGroupedConversations: Record<string, Conversation[]> = {};
   @State private cachedGroupedKeys: string[] = [];
   // 逻辑时间戳：确保消息顺序正确，即使系统时间不准确
   private logicalTimestamp: number = Date.now();
   // 应用状态
   @State isLoading: boolean = false;
-  @State isGenerating: boolean = false; // 新增：跟踪是否正在生成内容
+  @State isGenerating: boolean = false; // 跟踪是否正在生成内容
   @State isInitialized: boolean = false;
   @State hasSettings: boolean = false;
-  @State ctrlFlag: boolean = false;
   @State enableWebSearch: boolean = false; // 联网搜索开关（统一控制）
-  @State isAliyunActive: boolean = false; // 是否识别为阿里云（用于驱动UI和请求选项）
-  // 移除 currentModelSupportsWebSearchFlag，不再需要显隐控制
-  @State isSearching: boolean = false; // 是否正在执行搜索
-  @State searchQuery: string = ''; // 当前搜索查询
-  @State searchResults: string = ''; // 搜索结果摘要
+  private ctrlFlag: boolean = false; // Ctrl键状态，用于Ctrl+Enter换行
   // 滚动按钮相关状态
   @State showScrollToBottomButton: boolean = false; // 是否显示"滚动到底部"按钮
   @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
@@ -142,6 +128,10 @@ struct Chat {
   private currentAbortController: AbortController | null = null; // 新增：用于中断请求
   private shouldAbortRequest: boolean = false; // 中断请求标志
   private userAbortedGeneration: boolean = false; // 用户主动停止标记
+
+  // 防抖/节流优化包装函数
+  private throttledScrollToBottom: () => void = throttle(() => this.doScrollToBottom(), 100);
+  private debouncedUpdateBreakpoint: () => void = debounce(() => this.doUpdateBreakpoint(), 200);
 
   private notifyMessagesUpdated(): void {
     // 更新数据源引用与刷新（数组引用经常被替换）
@@ -164,29 +154,13 @@ struct Chat {
     return this.logicalTimestamp;
   }
 
-  private cloneChatMessage(message: ChatMessage): ChatMessage {
-    const clone = new ChatMessage(message.content, message.role, {
-      conversationId: message.conversationId,
-      modelName: message.modelName,
-      providerName: message.providerName,
-      timestamp: message.timestamp,
-      providerMessageId: message.providerMessageId,
-      providerCreatedAt: message.providerCreatedAt,
-      systemFingerprint: message.systemFingerprint,
-      toolCallId: message.toolCallId, // 复制工具调用 ID (用于 tool 消息)
-      toolCalls: message.toolCalls    // 复制工具调用列表 (用于 assistant 消息)
-    });
-    clone.id = message.id;
-    return clone;
-  }
-
   private replaceMessageAt(index: number, updater: (message: ChatMessage) => void): void {
     const target = this.messages[index];
     if (!target) {
       return;
     }
 
-    const cloned = this.cloneChatMessage(target);
+    const cloned = cloneChatMessage(target);
     updater(cloned);
 
     const nextMessages = [...this.messages];
@@ -201,111 +175,31 @@ struct Chat {
     return this.messages.length - 1;
   }
 
-  /**
-   * 将错误信息转换为用户友好的提示消息
-   * @param error 原始错误对象
-   * @returns 用户友好的错误消息
-   */
-  private getFriendlySendErrorMessage(error: Error): string {
-    if (!error) {
-      return '发送消息失败';
-    }
-
-    let rawMessage = (error.message ?? '').trim();
-
-    if (!rawMessage) {
-      const stringifiable = error as MaybeStringifiable;
-      if (stringifiable.toString) {
-        rawMessage = stringifiable.toString().trim();
-      }
-    }
-
-    // 如果 toString() 返回的是 [object Object]，说明错误对象无法序列化
-    // 这时尝试获取错误的其他属性
-    if (!rawMessage || rawMessage === '[object Object]') {
-      const extendedError = error as ExtendedError;
-      if (extendedError.name) {
-        rawMessage = extendedError.name;
-      } else if (extendedError.code) {
-        rawMessage = `错误代码: ${extendedError.code}`;
-      } else if (extendedError.response?.status) {
-        rawMessage = `HTTP ${extendedError.response.status}`;
-      }
-    }
-
-    if (!rawMessage || rawMessage === '[object Object]') {
-      return '发送消息失败';
-    }
-
-    const normalized = rawMessage.toLowerCase();
-
-    // 超时错误
-    if (normalized.includes('timeout') || rawMessage.includes('超时')) {
-      return '请求超时，请稍后重试';
-    }
-
-    // 网络连接错误
-    if (normalized.includes('network') || normalized.includes('connection') || normalized.includes('fetch') ||
-    rawMessage.includes('网络')) {
-      return '网络连接失败，请检查网络设置';
-    }
-
-    // 认证授权错误
-    if (normalized.includes('unauthorized') || normalized.includes('forbidden') ||
-    normalized.includes('invalid api key') || normalized.includes('401') || normalized.includes('403') ||
-    rawMessage.includes('授权') || rawMessage.includes('认证')) {
-      return 'API密钥无效，请检查设置';
-    }
-
-    // 频率限制错误
-    if (normalized.includes('rate limit') || normalized.includes('too many')) {
-      return '请求过于频繁，请稍后再试';
-    }
-
-    // 模型相关错误
-    if (normalized.includes('model') &&
-      (normalized.includes('not found') || normalized.includes('does not exist') || normalized.includes('unknown'))) {
-      return '模型不可用，请检查模型ID';
-    }
-
-    // HTTP状态码错误
-    if (normalized.startsWith('http ') || rawMessage.startsWith('HTTP') || /http\s\d+/.test(normalized)) {
-      return `服务返回错误：${rawMessage}`;
-    }
-
-    // SSL证书错误
-    if (normalized.includes('ssl') || normalized.includes('certificate')) {
-      return 'SSL连接失败，请检查网络或证书配置';
-    }
-
-    // 内容过滤错误
-    if (normalized.includes('content_filter') || normalized.includes('content policy') ||
-    rawMessage.includes('内容过滤') || rawMessage.includes('违规')) {
-      return '消息内容不符合规范，请修改后重试';
-    }
-
-    // 配额不足错误
-    if (normalized.includes('quota') || normalized.includes('insufficient') ||
-    rawMessage.includes('配额') || rawMessage.includes('余额')) {
-      return 'API配额不足，请检查账户余额';
-    }
-
-    // 服务不可用错误
-    if (normalized.includes('service unavailable') || normalized.includes('502') ||
-    normalized.includes('503') || rawMessage.includes('服务不可用')) {
-      return 'AI服务暂时不可用，请稍后重试';
-    }
-
-    return `发送失败：${rawMessage}`;
-  }
-
   build() {
     NavDestination() {
       SideBarContainer(SideBarContainerType.AUTO) {
-        this.SidebarContent()
-        // Column() {
-        //   this.SidebarContent()
-        // }
+        // 使用独立的 ChatSidebar 组件
+        ChatSidebar({
+          conversations: this.conversations,
+          currentConversation: this.currentConversation,
+          groupedConversations: this.cachedGroupedConversations,
+          groupedKeys: this.cachedGroupedKeys,
+          showSideBar: this.showSideBar,
+          showControlButton: this.showControlButton,
+          config: {
+            topRectHeight: this.topRectHeight,
+            bottomRectHeight: this.bottomRectHeight
+          } as ChatSidebarConfig,
+          onCreateConversation: (): void => { this.createNewConversation(); },
+          onSelectConversation: (conversation: Conversation): void => { this.selectConversation(conversation); },
+          onRenameConversation: (conversation: Conversation): void => { this.showRenameDialog(conversation); },
+          onDeleteConversation: (conversation: Conversation): void => { this.deleteConversation(conversation); },
+          onOpenSettings: (): void => {
+            this.pathStack.pushPathByName("Settings", null);
+            this.hideKeyboard();
+          },
+          onHideSidebar: (): void => { this.hideSidebar(); }
+        })
 
         // 主内容区域
         Column() {
@@ -320,12 +214,12 @@ struct Chat {
                     .fillColor($r('sys.color.ohos_id_color_text_primary'))
                 }
                 .type(ButtonType.Circle)
-                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
+                .backgroundColor(Color.Transparent)
                 .size({ width: 40, height: 40 })
                 .visibility(this.showControlButton ? Visibility.Visible : Visibility.Hidden)
                 .onClick(() => {
                   this.showControlButton = !this.showControlButton
-                  animateTo({
+                  this.getUIContext().animateTo({
                     duration: 500,
                     curve: Curve.FastOutSlowIn
                   }, () => {
@@ -349,7 +243,7 @@ struct Chat {
                 }
                 .type(ButtonType.Circle)
                 .size({ width: 40, height: 40 })
-                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
+                .backgroundColor(Color.Transparent)
                 .onClick(() => {
                   this.createNewConversation();
                 })
@@ -362,23 +256,13 @@ struct Chat {
                 }
                 .type(ButtonType.Circle)
                 .size({ width: 40, height: 40 })
-                .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
-                .onClick(() => {
-                  this.customPopup = !this.customPopup;
-                })
+                .backgroundColor(Color.Transparent)
                 .bindMenu([
                   {
                     value: '切换模型',
                     icon: $r('app.media.reverse_order'),
                     action: () => {
                       this.switchModel();
-                    }
-                  },
-                  {
-                    value: '更多',
-                    icon: $r('app.media.more_fill'),
-                    enabled: false,
-                    action: () => {
                     }
                   }
                 ])
@@ -412,127 +296,27 @@ struct Chat {
                 .height('100%')
                 .justifyContent(FlexAlign.Center)
               } else {
-                // 消息列表
-                Column() {
-                  if (this.messages.length === 0) {
-                    // 空状态
-                    Column() {
-                      Text('有什么可以帮忙的？')
-                        .fontSize(22)
-                        .margin({ top: 16 })
-
-                      if (!this.hasSettings) {
-                        Button('配置API设置')
-                          .buttonStyle(ButtonStyleMode.NORMAL)
-                          .padding({ left: 20, right: 20 })
-                          .margin({ top: 16 })
-                          .onClick(() => {
-                            this.pathStack.pushPathByName("ModelSettings", null);
-                            this.hideKeyboard();
-                          })
-                      }
-                    }
-                    .width('100%')
-                    .layoutWeight(1)
-                    .justifyContent(FlexAlign.Center)
-                  } else {
-
-                    Stack() {
-                      // 消息列表（使用 LazyForEach 虚拟化以提升性能）
-                      Scroll(this.scroller) {
-                        Column() {
-                          LazyForEach(this.messageDataSource, (message: ChatMessage, index: number) => {
-                            MessageItem({
-                              message: message,
-                              onCopy: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
-                              onEdit: (msg: ChatMessage): void => {
-                                this.editMessage(msg);
-                              },
-                              onDelete: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
-                              onRegenerate: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg)
-                            })
-                          }, (message: ChatMessage, index: number) => {
-                            // 稳定的 key 生成策略，减少重建和提升滚动性能
-                            if (message.id !== undefined) {
-                              return `saved_${message.id}_${message.content.length}`;
-                            } else {
-                              return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp %
-                                10000}`;
-                            }
-                          })
-                        }
-                        .padding({
-                          left: 16,
-                          right: 16,
-                          top: 16,
-                          bottom: 16
-                        })
-                        .width('100%')
-                        .alignItems(HorizontalAlign.Center)
-                        .justifyContent(FlexAlign.Start)
-                      }
-                      .friction(0.8) // 摩擦系数（0-1，值越小惯性越强）
-                      .edgeEffect(EdgeEffect.Spring) // 边缘弹性效果
-                      .onScrollEdge((side: Edge) => {
-                        // 只关心底部边缘事件
-                        // 这是判断用户是否在列表底部的最可靠方式
-                        if (side === Edge.Bottom) {
-                          // 用户已滑到底部，隐藏"滚动到底部"按钮
-                          this.showScrollToBottomButton = false;
-                          this.shouldAutoScroll = true;
-                        }
-                      })
-                      .onScroll((xOffset: number, yOffset: number) => {
-                        // 当用户离开底部时（向上滑），显示按钮
-                        // yOffset > 0 表示向上滑（内容向上移动，露出顶部）
-                        if (yOffset > 0 && !this.showScrollToBottomButton) {
-                          // 用户向上滑，显示按钮
-                          this.showScrollToBottomButton = true;
-                          this.shouldAutoScroll = false;
-                        }
-                      })
-                      .layoutWeight(1)
-                      .scrollable(ScrollDirection.Vertical)
-                      .scrollBar(BarState.Off)
-                      .width('100%')
-                      .align(Alignment.TopStart)
-                      .onClick(() => {
-                        this.hideKeyboard(); // 点击消息列表区域时隐藏键盘
-                      })
-
-                      // "滚动到底部"按钮 - 浮在消息列表上方
-                      if (this.showScrollToBottomButton) {
-                        Button('↓')
-                          .fontSize(16)
-                          .fontColor($r('app.color.text_color'))
-                          .type(ButtonType.Circle)
-                          // .backgroundColor($r('app.color.start_window_background'))
-                          .backgroundColor(Color.Transparent)
-                          .size({ height: 40, width: 40 })
-                          .padding({ left: 6, right: 6 })
-                          .backgroundBlurStyle(BlurStyle.Thin, {
-                            colorMode: ThemeColorMode.LIGHT, // 适配浅色主题
-                            adaptiveColor: AdaptiveColor.DEFAULT,
-                            scale: 1.0 // 模糊缩放比例
-                          })
-                          .onClick(() => {
-                            // 直接滚动，不经过scrollToBottom()的检查
-                            if (this.scroller) {
-                              this.scroller.scrollEdge(Edge.Bottom);
-                            }
-                            // 滚动后隐藏按钮并启用自动跟随
-                            this.shouldAutoScroll = true;
-                            this.showScrollToBottomButton = false;
-                          })
-                          .margin({ bottom: 16 })
-                          .zIndex(5)
-                      }
-                    }
-                    .alignContent(Alignment.Bottom)
+                // 消息列表 - 使用独立的 MessageList 组件
+                MessageList({
+                  messageDataSource: this.messageDataSource,
+                  messages: this.messages,
+                  showScrollToBottomButton: this.showScrollToBottomButton,
+                  shouldAutoScroll: this.shouldAutoScroll,
+                  scroller: this.scroller,
+                  config: {
+                    hasSettings: this.hasSettings,
+                    isInitialized: this.isInitialized
+                  } as MessageListConfig,
+                  onCopyMessage: (msg: ChatMessage): Promise<void> => this.copyMessage(msg),
+                  onEditMessage: (msg: ChatMessage): void => { this.editMessage(msg); },
+                  onDeleteMessage: (msg: ChatMessage): Promise<void> => this.deleteMessage(msg),
+                  onRegenerateMessage: (msg: ChatMessage): Promise<void> => this.regenerateMessage(msg),
+                  onHideKeyboard: (): void => { this.hideKeyboard(); },
+                  onOpenModelSettings: (): void => {
+                    this.pathStack.pushPathByName("ModelSettings", null);
+                    this.hideKeyboard();
                   }
-                }
-                .layoutWeight(1)
-                .width('100%')
+                })
               }
 
               // 输入
@@ -613,12 +397,11 @@ struct Chat {
                     }
                   })
                 }
-                .margin({ bottom: 12 }) //bottom: this.getUIContext().px2vp(this.bottomRectHeight)
+                .margin({ bottom: 12 })
                 .justifyContent(FlexAlign.SpaceBetween) // 关键属性：两端对齐
                 .width('100%') // 必须设置宽度为 100% 才能生效
               }
               .backgroundColor($r('app.color.input_area_color'))
-              // .borderWidth({top:1})
               .borderColor($r('app.color.text_secondary'))
               .borderRadius({ topLeft: 20, topRight: 20 })
               .width('100%')
@@ -626,7 +409,8 @@ struct Chat {
                 left: 2,
                 right: 2,
                 top: 6,
-                bottom: 4
+                // 键盘未弹出时添加导航栏高度，键盘弹出时不添加（避免重复避让）
+                bottom: 4 + (this.keyboardHeight > 0 ? 0 : this.getUIContext().px2vp(this.bottomRectHeight))
               })
               .alignItems(HorizontalAlign.End)
 
@@ -644,8 +428,8 @@ struct Chat {
                 .zIndex(10)
                 .backgroundColor('rgba(0, 0, 0, 0.3)') // 仅半透明阴影，无模糊
                 .onAppear(() => {
-                  hilog.error(DOMAIN, TAG,
-                    '[OVERLAY error] Rendering overlay - showSideBar=%{public}s, currentBreakPoint=%{public}s',
+                  hilog.debug(DOMAIN, TAG,
+                    '[OVERLAY] Rendering overlay - showSideBar=%{public}s, currentBreakPoint=%{public}s',
                     String(this.showSideBar), String(this.currentBreakPoint));
                 })
                 .gesture(
@@ -658,13 +442,13 @@ struct Chat {
                       
                     })
                     .onActionUpdate((event: PanUpdateEvent) => {
-                      hilog.error(DOMAIN, TAG, '[GESTURE error] Pan gesture - offsetX=%{public}s',
+                      hilog.debug(DOMAIN, TAG, '[GESTURE] Pan gesture - offsetX=%{public}s',
                         String(event.offsetX));
                       // 向左滑超过阈值，关闭侧栏
                       const closeThreshold = -30; // 增加阈值，减少误触
                       if (event.offsetX < closeThreshold) {
                         
-                        animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
+                        this.getUIContext().animateTo({ duration: 250, curve: Curve.FastOutSlowIn }, () => {
                           this.showSideBar = false;
                           this.showControlButton = true;
                         })
@@ -677,7 +461,7 @@ struct Chat {
                 .onClick(() => {
                   
                   if (this.showSideBar && (this.currentBreakPoint === 'sm' || this.currentBreakPoint === 'xs')) {
-                    animateTo({
+                    this.getUIContext().animateTo({
                       duration: Chat.ANIMATION_DURATION,
                       curve: Curve.FastOutSlowIn
                     }, () => {
@@ -699,7 +483,7 @@ struct Chat {
         })
           .onActionUpdate((event: PanUpdateEvent) => {
             if (event.offsetX > 30) { // 向右滑动阈值
-              animateTo({ duration: 250 }, () => {
+              this.getUIContext().animateTo({ duration: 250 }, () => {
                 this.showControlButton = false;
                 this.showSideBar = true;
               });
@@ -742,6 +526,9 @@ struct Chat {
     this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
 
+    // 同步状态到 ViewModel
+    this.syncStateToViewModel();
+
     // 添加断点检测逻辑
     this.updateBreakpoint();
     // 监听窗口尺寸变化
@@ -763,7 +550,7 @@ struct Chat {
 
     // 页面显示时，若检测到刷新版本变化，则强制重新加载对话/消息
     if (latestVersion !== this.handledReloadVersion) {
-      hilog.error(DOMAIN, TAG,
+      hilog.info(DOMAIN, TAG,
         'Chat: onPageShow detected conversationsReloadVersion change -> %{public}d (handled=%{public}d)', latestVersion,
         this.handledReloadVersion);
       this.currentConversation = null;
@@ -777,7 +564,7 @@ struct Chat {
 
     if (this.isInitialized) {
       // 如果不是因为清空数据，则按原逻辑检查设置版本
-      hilog.error(DOMAIN, TAG, 'Chat: onPageShow triggered, reloading chat state due to settings version.');
+      hilog.debug(DOMAIN, TAG, 'Chat: onPageShow triggered, reloading chat state due to settings version.');
       await this.reloadChatState('onPageShow');
     }
   }
@@ -817,7 +604,7 @@ struct Chat {
       const storedReloadVersion: number | undefined =
         AppStorage.get('conversationsReloadVersion') as (number | undefined);
       if (typeof storedReloadVersion !== 'number' || Number.isNaN(storedReloadVersion)) {
-        AppStorage.SetOrCreate('conversationsReloadVersion', 0);
+        AppStorage.setOrCreate('conversationsReloadVersion', 0);
       }
 
       // 加载设置
@@ -840,27 +627,38 @@ struct Chat {
     }
   }
 
-  async loadSettings() {
+  /**
+   * 同步页面状态到 ViewModel
+   * 用于保持 MVVM 架构中 View 和 ViewModel 的状态一致性
+   */
+  private syncStateToViewModel(): void {
+    this.viewModel.setCurrentSettings(this.currentSettings);
+    this.viewModel.setCurrentConversation(this.currentConversation);
+    this.viewModel.setMessages(this.messages);
+  }
+  // 加载设置 - 委托给 ViewModel
+  async loadSettings(): Promise<void> {
     try {
-      const settings = await this.databaseManager.getSettings();
+      await this.viewModel.loadSettings();
+      const settings = this.viewModel.currentSettings;
       this.currentSettings = settings;
 
       if (!settings) {
         this.hasSettings = false;
-        hilog.error(DOMAIN, TAG, 'No settings configured yet.');
+        hilog.info(DOMAIN, TAG, 'No settings configured yet.');
         return;
       }
 
-      hilog.error(DOMAIN, TAG, 'Loaded settings with provider count: %{public}s', String(settings.providers.length));
+      hilog.info(DOMAIN, TAG, 'Loaded settings with provider count: %{public}s', String(settings.providers.length));
 
-      const activeProvider = settings.providers.find(provider => provider.id === settings.activeProviderId);
+      const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId);
       if (!activeProvider) {
         hilog.warn(DOMAIN, TAG, 'Active provider not found in settings, marking configuration as incomplete.');
         this.hasSettings = false;
         return;
       }
 
-      const activeModel = activeProvider.models.find(model => model.id === settings.activeModelId);
+      const activeModel = activeProvider.models.find((model) => model.id === settings.activeModelId);
       if (!activeModel) {
         hilog.warn(DOMAIN, TAG, 'Active model not found for current provider, marking configuration as incomplete.');
         this.hasSettings = false;
@@ -871,26 +669,14 @@ struct Chat {
       this.hasSettings = providerConfigured && activeModel.name.trim().length > 0;
 
       if (this.hasSettings) {
-        settings.apiUrl = activeProvider.apiUrl;
-        settings.apiKey = activeProvider.apiKey;
-        settings.modelName = activeModel.name;
-        this.currentSettings = settings;
-        // 同步联网搜索开关到页面状态
         this.enableWebSearch = !!settings.enableWebSearch;
-        // 联动识别阿里云开关
-        this.isAliyunActive = this.isAliyunProviderActive();
-        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
-        hilog.error(DOMAIN, TAG, 'Active provider resolved', {
-          providerId: activeProvider.id,
-          providerName: activeProvider.displayName,
-          modelId: activeModel.id,
-          modelName: activeModel.name
-        });
-      } else {
-        
+        hilog.info(DOMAIN, TAG, 'Active provider resolved: %{public}s / %{public}s',
+          String(activeProvider.displayName), String(activeModel.name));
       }
-    } catch (error) {
       
+      this.syncStateToViewModel();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Load settings failed: %{public}s', String(error));
       this.hasSettings = false;
     }
   }
@@ -902,7 +688,7 @@ struct Chat {
     if (!this.pendingSettingsReload) {
       this.pendingSettingsReload = this.performSettingsReload(reason);
     } else {
-      hilog.error(DOMAIN, TAG,
+      hilog.warn(DOMAIN, TAG,
         'Chat: settings reload already in progress, updated targetVersion=%{public}d, reason=%{public}s',
         this.requestedSettingsVersion, String(reason));
     }
@@ -920,7 +706,7 @@ struct Chat {
       while (true) {
         attempt += 1;
         const targetVersion = this.requestedSettingsVersion;
-        hilog.error(DOMAIN, TAG,
+        hilog.info(DOMAIN, TAG,
           'Chat: reloadChatState start [reason=%{public}s] attempt=%{public}d targetVersion=%{public}d',
           String(initialReason), attempt, targetVersion);
         await this.loadSettings();
@@ -928,7 +714,7 @@ struct Chat {
 
         if (this.conversations.length === 0) {
           // 修复：如果没有对话，创建一个空对话，确保 currentConversation 不为空
-          hilog.error(DOMAIN, TAG, 'No conversations after reload, creating empty conversation');
+          hilog.info(DOMAIN, TAG, 'No conversations after reload, creating empty conversation');
           try {
             const emptyConversation = await this.databaseManager.createConversation('新对话');
             this.currentConversation = emptyConversation;
@@ -945,10 +731,6 @@ struct Chat {
           await this.loadChatHistory();
         }
 
-        // 每次设置刷新后，同步更新阿里云识别状态
-        this.isAliyunActive = this.isAliyunProviderActive();
-        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
-
         this.previousSettingsVersion = targetVersion;
         this.logSettingsVersionState('Chat: reloadChatState completed');
 
@@ -956,7 +738,7 @@ struct Chat {
           break;
         }
 
-        hilog.error(DOMAIN, TAG,
+        hilog.debug(DOMAIN, TAG,
           'Chat: detected newer settings reload request during execution, repeating with latest targetVersion');
       }
     } catch (error) {
@@ -980,7 +762,7 @@ struct Chat {
       return;
     }
 
-    hilog.error(DOMAIN, TAG, 'Chat: detected settingsVersion change -> %{public}s', String(currentVersion));
+    hilog.info(DOMAIN, TAG, 'Chat: detected settingsVersion change -> %{public}s', String(currentVersion));
     this.reloadChatState('settingsVersion change', currentVersion).catch((error: Error) => {
       hilog.error(DOMAIN, TAG, 'Failed to refresh chat after settings change: %{public}s', String(error));
     });
@@ -995,19 +777,19 @@ struct Chat {
 
   private logSettingsVersionState(prefix: string) {
     const current = this.normalizeSettingsVersion(this.settingsVersion);
-    hilog.error(DOMAIN, TAG, '%{public}s; currentVersion=%{public}d, previousVersion=%{public}d', String(prefix),
+    hilog.debug(DOMAIN, TAG, '%{public}s; currentVersion=%{public}d, previousVersion=%{public}d', String(prefix),
       current, this.previousSettingsVersion);
   }
 
   private async waitForLatestSettings(reason: string): Promise<void> {
     if (this.pendingSettingsReload) {
-      hilog.error(DOMAIN, TAG, 'Chat: awaiting pending settings reload before %{public}s', String(reason));
+      hilog.debug(DOMAIN, TAG, 'Chat: awaiting pending settings reload before %{public}s', String(reason));
       await this.pendingSettingsReload;
     }
 
     const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
     if (currentVersion !== this.previousSettingsVersion) {
-      hilog.error(DOMAIN, TAG,
+      hilog.info(DOMAIN, TAG,
         'Chat: settings version mismatch detected during %{public}s, triggering reload to %{public}d', String(reason),
         currentVersion);
       await this.reloadChatState(reason, currentVersion);
@@ -1048,11 +830,14 @@ struct Chat {
     }
   }
 
-  async loadConversations() {
+  // 加载对话列表 - 委托给 ViewModel
+  async loadConversations(): Promise<void> {
     try {
-      this.conversations = await this.databaseManager.getAllConversations();
+      await this.viewModel.loadConversations();
+      this.conversations = this.viewModel.conversations;
+      this.updateGroupedConversations();
     } catch (error) {
-      
+      hilog.error(DOMAIN, TAG, 'Load conversations failed: %{public}s', String(error));
       this.showToast('加载对话列表失败');
     }
   }
@@ -1067,16 +852,16 @@ struct Chat {
 
         // 设置最近使用的对话为当前对话
         this.currentConversation = sortedConversations[0];
-        hilog.error(DOMAIN, TAG, 'Restored last conversation: %{public}s %{public}s',
+        hilog.info(DOMAIN, TAG, 'Restored last conversation: %{public}s %{public}s',
           String(this.currentConversation.id), String(this.currentConversation.title));
       } else {
         // 修复：如果没有对话，创建一个空对话，而不是设置为 null
         // 这样用户第一次发送消息时就有一个现成的 conversationId
-        hilog.error(DOMAIN, TAG, 'No conversations found, creating empty conversation for initial state');
+        hilog.info(DOMAIN, TAG, 'No conversations found, creating empty conversation for initial state');
         const emptyConversation = await this.databaseManager.createConversation('新对话');
         this.currentConversation = emptyConversation;
         this.conversations.push(emptyConversation);
-        hilog.error(DOMAIN, TAG, 'Created empty conversation: %{public}s %{public}s',
+        hilog.info(DOMAIN, TAG, 'Created empty conversation: %{public}s %{public}s',
           String(emptyConversation.id), String(emptyConversation.title));
       }
     } catch (error) {
@@ -1085,130 +870,80 @@ struct Chat {
     }
   }
 
-  /**
-   * 查找空对话（没有消息的对话）
-   * @returns 返回第一个找到的空对话，如果没有则返回null
-   */
-  async findEmptyConversation(): Promise<Conversation | null> {
-    try {
-      const conversationIds = this.conversations.map(conversation => conversation.id);
-      const messageCounts = await this.databaseManager.getConversationMessageCounts(conversationIds);
-
-      for (const conversation of this.conversations) {
-        const count = messageCounts[conversation.id] ?? 0;
-        if (count === 0) {
-          hilog.error(DOMAIN, TAG, 'Found empty conversation: %{public}s %{public}s', String(conversation.id),
-            String(conversation.title));
-          return conversation;
-        }
-      }
-      hilog.error(DOMAIN, TAG, 'No empty conversations found');
-      return null;
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to find empty conversation: %{public}s', String(error));
-      return null;
-    }
-  }
-
-  // showSidebar() {
-  //   // 显示侧栏时隐藏键盘
-  //   this.hideKeyboard();
-  //
-  //   this.isSidebarVisible = true;
-  //   animateTo({
-  //     duration: 300,
-  //     curve: Curve.FastOutSlowIn
-  //   }, () => {
-  //     this.sidebarOffset = 0;
-  //     this.backgroundBlurRadius = 15; // 增加模糊强度
-  //   });
-  // }
-
   hideSidebar() {
     // 关闭侧边栏时隐藏键盘
     this.hideKeyboard();
-
-    animateTo({
-      duration: Chat.ANIMATION_DURATION,
-      curve: Curve.EaseInOut
-    }, () => {
-      this.sidebarOffset = -Chat.SIDEBAR_WIDTH;
-      this.backgroundBlurRadius = 0; // 侧边栏隐藏时无模糊
-    });
-
-    setTimeout(() => {
-      this.isSidebarVisible = false;
-    }, 300);
   }
 
-  async createNewConversation() {
-    // 创建新对话时隐藏键盘
+  // 创建新对话 - 委托给 ViewModel
+  async createNewConversation(): Promise<void> {
     this.hideKeyboard();
-    // 如果正在发送消息，不允许创建新对话
+    
     if (this.isLoading) {
       this.showToast('请等待当前消息发送完成');
       return;
     }
 
-    // 检查是否存在空对话
-    const emptyConversation = await this.findEmptyConversation();
-    if (emptyConversation) {
-      // 如果存在空对话，切换到该对话而不是创建新的
-      this.showToast('已有空对话，已为您切换');
-      await this.selectConversation(emptyConversation);
-      return;
-    }
-
     try {
-      
-      const newConversation = await this.databaseManager.createConversation('新对话');
-      
+      // 检查是否存在空对话
+      const emptyConversation = await this.viewModel.findEmptyConversation();
+      if (emptyConversation) {
+        this.showToast('已有空对话，已为您切换');
+        await this.selectConversation(emptyConversation);
+        return;
+      }
 
-      this.currentConversation = newConversation;
-      this.messages = [];
+      // 委托给 ViewModel 创建
+      const newConversation = await this.viewModel.createNewConversation();
+      
+      // 同步状态
+      this.currentConversation = this.viewModel.currentConversation;
+      this.conversations = this.viewModel.conversations;
+      this.messages = this.viewModel.messages;
       this.notifyMessagesUpdated();
-
-      // 等待数据库操作完成
-      await this.loadConversations();
+      this.updateGroupedConversations();
 
       this.hideSidebar();
       this.showToast('已创建新对话');
-
-      // 确保加载状态被重置
       this.isLoading = false;
-
-      
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to create new conversation: %{public}s', String(error));
       this.showToast('创建对话失败');
-
-      // 确保加载状态被重置
       this.isLoading = false;
     }
   }
 
-  async selectConversation(conversation: Conversation) {
-    // 选择对话时隐藏键盘
+  // 选择对话 - 委托给 ViewModel
+  async selectConversation(conversation: Conversation): Promise<void> {
     this.hideKeyboard();
-    // 如果正在发送消息，不允许切换对话
+    
     if (this.isLoading) {
       this.showToast('请等待当前消息发送完成');
       return;
     }
 
     try {
-      this.currentConversation = conversation;
-      await this.loadChatHistory();
-      // loadChatHistory 中已经同步逻辑时间戳，这里不需要额外处理
+      // 委托给 ViewModel
+      await this.viewModel.selectConversation(conversation);
+      
+      // 同步状态
+      this.currentConversation = this.viewModel.currentConversation;
+      this.messages = this.viewModel.messages;
+      this.notifyMessagesUpdated();
+      
+      // 同步逻辑时间戳
+      if (this.messages.length > 0) {
+        const maxTimestamp = Math.max(...this.messages.map(m => m.timestamp));
+        if (maxTimestamp > this.logicalTimestamp) {
+          this.logicalTimestamp = maxTimestamp;
+        }
+      }
+      
       this.hideSidebar();
-
-      // 确保加载状态被重置
       this.isLoading = false;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to select conversation: %{public}s', String(error));
       this.showToast('切换对话失败');
-
-      // 确保加载状态被重置
       this.isLoading = false;
     }
   }
@@ -1218,6 +953,7 @@ struct Chat {
    */
   showDeleteConversationDialog(conversationId: string, conversationTitle: string) {
     NativeDialogHelper.showDeleteConfirmDialog(
+      this.getUIContext(),
       conversationTitle,
       '此操作无法撤销，所有聊天记录将永久丢失。',
       () => {
@@ -1233,37 +969,18 @@ struct Chat {
     );
   }
 
-  async deleteConversation(conversation: Conversation) {
+  // 删除对话 - 委托给 ViewModel
+  async deleteConversation(conversation: Conversation): Promise<void> {
     try {
-      // 数据库操作已在 deleteConversation 中使用事务保护
-      await this.databaseManager.deleteConversation(conversation.id);
-
-      // 删除成功后，在事务内进行的数据更新是安全的
-      const updatedConversations = await this.databaseManager.getAllConversations();
-      this.conversations = updatedConversations;
-
-      if (this.currentConversation?.id === conversation.id) {
-        if (updatedConversations.length > 0) {
-          this.currentConversation = updatedConversations[0];
-          this.messages = await this.databaseManager.getChatMessages(this.currentConversation.id);
-          this.notifyMessagesUpdated();
-        } else {
-          // 修复：删除最后一个对话后，创建一个新的空对话，而不是设置为 null
-          hilog.error(DOMAIN, TAG, 'Last conversation deleted, creating new empty conversation');
-          try {
-            const emptyConversation = await this.databaseManager.createConversation('新对话');
-            this.currentConversation = emptyConversation;
-            this.conversations = [emptyConversation];
-            this.messages = [];
-            this.notifyMessagesUpdated();
-          } catch (createError) {
-            hilog.error(DOMAIN, TAG, 'Failed to create conversation after deletion: %{public}s', String(createError));
-            this.currentConversation = null;
-            this.messages = [];
-            this.notifyMessagesUpdated();
-          }
-        }
-      }
+      // 委托给 ViewModel
+      await this.viewModel.deleteConversation(conversation.id);
+      
+      // 同步状态
+      this.conversations = this.viewModel.conversations;
+      this.currentConversation = this.viewModel.currentConversation;
+      this.messages = this.viewModel.messages;
+      this.notifyMessagesUpdated();
+      this.updateGroupedConversations();
 
       this.showToast('对话已删除');
     } catch (error) {
@@ -1318,10 +1035,6 @@ struct Chat {
 
         // 保存到数据库
         await this.databaseManager.saveSettings(this.currentSettings);
-
-        // 切换模型后，立即刷新是否为阿里云状态
-        this.isAliyunActive = this.isAliyunProviderActive();
-        // 移除 currentModelSupportsWebSearchFlag 更新，不再需要
 
         this.showToast(`已切换到${provider.displayName}的${model.displayName}`, 2000);
       }
@@ -1387,115 +1100,11 @@ struct Chat {
     };
   }
 
-  // 判断当前是否是阿里云通义千问提供商
+
   // 兼容“快速配置”中使用中文展示名、未设置 activeProviderId、或仅依赖 apiUrl 的场景
-  private isAliyunProviderActive(): boolean {
-    const settings = this.currentSettings;
-    if (!settings) {
-      return false;
-    }
 
-    // 归一化判断函数：支持中英文关键词与 URL 特征
-    const isAliyunLike = (name: string | undefined, url: string | undefined): boolean => {
-      const n = (name || '').toLowerCase();
-      const u = (url || '').toLowerCase();
-      // 名称关键字（中英文）
-      const nameHit = n.includes('aliyun') || n.includes('dashscope') || n.includes('qwen') || n.includes('tongyi')
-        || (name || '').includes('阿里云') || (name || '').includes('通义') || (name || '').includes('千问');
-      // URL 关键字
-      const urlHit = u.includes('dashscope.aliyuncs.com') || u.includes('/compatible-mode/v1')
-        || u.includes('aliyun') || u.includes('dashscope') || u.includes('qwen');
-      return nameHit || urlHit;
-    };
 
-    // 优先：按 activeProviderId 命中
-    let provider = settings.providers.find(p => p.id === settings.activeProviderId);
-    if (provider) {
-      // 进一步结合模型名辅助判断
-      const activeModel = provider.models.find(m => m.id === settings.activeModelId) ?? provider.models[0];
-      const modelName = activeModel ? `${activeModel.name} ${activeModel.displayName}` : '';
-      if (isAliyunLike(provider.name || provider.displayName, provider.apiUrl) || isAliyunLike(modelName, '')) {
-        return true;
-      }
-    }
 
-    // 其次：根据当前 settings.apiUrl 反推（用户可能未正确设置 activeProviderId）
-    if (settings.apiUrl && isAliyunLike('', settings.apiUrl)) {
-      return true;
-    }
-
-    // 再次：扫描所有 provider，找到名称或 URL 命中的，并且该 provider 当前被标记为激活
-    const anyActiveAliyun = settings.providers.some(p => {
-      const hit = isAliyunLike(p.name || p.displayName, p.apiUrl);
-      return hit && (p.id === settings.activeProviderId || p.isActive === true);
-    });
-    if (anyActiveAliyun) {
-      return true;
-    }
-
-    return false;
-  }
-
-  // 移除 isCurrentModelSupportsWebSearch 方法，不再需要显隐控制
-
-  // 判断是否应该生成标题
-  private shouldGenerateTitle(): boolean {
-    // 如果已经有自定义标题，不再生成
-    if (!this.currentConversation || this.currentConversation.title !== '新对话') {
-      return false;
-    }
-
-    // 至少需要4条消息（2轮对话）才考虑生成标题
-    if (this.messages.length < 4) {
-      return false;
-    }
-
-    // 缓存消息统计以避免重复计算
-    let userMessageCount = 0;
-    let aiMessageCount = 0;
-    let totalUserChars = 0;
-    let totalAiChars = 0;
-    let firstUserMessage: string | undefined;
-
-    // 单次遍历计算所有统计信息
-    for (const msg of this.messages) {
-      if (msg.role === 'user') {
-        userMessageCount++;
-        totalUserChars += msg.content.length;
-        if (!firstUserMessage) {
-          firstUserMessage = msg.content.toLowerCase().trim();
-        }
-      } else if (msg.role === 'assistant') {
-        aiMessageCount++;
-        totalAiChars += msg.content.length;
-      }
-    }
-
-    // 检查是否包含常见的简单问候语
-    const greetings = ['你好', 'hello', 'hi', '您好', '在吗', '在不在', '早上好', '晚上好', '下午好'];
-
-    // 如果第一条消息是简单问候语
-    if (firstUserMessage && greetings.some(greeting =>
-    firstUserMessage!.includes(greeting.toLowerCase()) && firstUserMessage!.length <= 10)) {
-
-      // 即使是问候语开头，如果AI回复很长，说明可能有有意义的对话
-      if (totalAiChars >= 50) {
-        return true;
-      }
-
-      // 对于简单问候语开头的对话，需要至少6条消息和更多内容
-      return this.messages.length >= 6 && (totalUserChars >= 20 || totalAiChars >= 100);
-    }
-
-    // 对于非问候语开头的对话，综合考虑用户问题和AI回复
-    // 如果用户问题虽短但AI回复很长，说明问题有价值
-    if (totalUserChars >= 10 || totalAiChars >= 30) {
-      return true;
-    }
-
-    // 用户消息和AI回复总字符数至少要达到25个字符
-    return (totalUserChars + totalAiChars) >= 25;
-  }
 
   // 分离职责 - 消息验证和初始化
   /**
@@ -1516,7 +1125,7 @@ struct Chat {
     }
 
     // 检查是否包含潜在的恶意内容
-    if (this.containsSuspiciousContent(trimmedInput)) {
+    if (containsSuspiciousContent(trimmedInput)) {
       this.showToast('消息内容包含不当内容，请修改后重试');
       return null;
     }
@@ -1626,7 +1235,7 @@ struct Chat {
     try {
       await this.databaseManager.updateChatMessage(message.id, message.content);
 
-      if (!this.userAbortedGeneration && this.shouldGenerateTitle()) {
+      if (!this.userAbortedGeneration && shouldGenerateTitle(this.messages, this.currentConversation?.title ?? '')) {
         await this.generateConversationTitle();
       }
 
@@ -1639,7 +1248,7 @@ struct Chat {
   // 控制方法：停止生成与滚动行为，提前声明以便在UI回调中使用
   private stopGeneration(): void {
     if (this.currentAbortController && this.isGenerating) {
-      hilog.error(DOMAIN, TAG, 'Stopping AI generation...');
+      hilog.info(DOMAIN, TAG, 'Stopping AI generation...');
       this.userAbortedGeneration = true;
       try {
         this.currentAbortController.abort();
@@ -1650,9 +1259,15 @@ struct Chat {
     }
   }
 
+  // 节流调用入口：避免频繁滚动
   private scrollToBottom(): void {
+    this.throttledScrollToBottom();
+  }
+
+  // 实际滚动实现
+  private doScrollToBottom(): void {
     if (!this.shouldAutoScroll) {
-      hilog.info(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
+      hilog.debug(DOMAIN, TAG, 'Auto scroll is disabled, skipping scroll to bottom');
       return;
     }
 
@@ -1767,7 +1382,7 @@ struct Chat {
    * @param streamingMessageIndex 重新生成消息的索引
    * @param conversationId 对话ID
    */
-  private setupRegenrationStreamEventHandlers(
+  private setupRegenerationStreamEventHandlers(
     emitter: StreamEventEmitter,
     streamingMessageIndex: number,
     conversationId: string
@@ -1786,58 +1401,14 @@ struct Chat {
         regeneratedMessage.content += chunk;
       });
 
-      hilog.error(DOMAIN, TAG, 'Regenerated content length=%{public}d',
+      hilog.debug(DOMAIN, TAG, 'Regenerated content length=%{public}d',
         this.messages[streamingMessageIndex].content.length);
     });
 
-    // 监听元数据事件 - 更新重新生成消息的元数据
+    // 监听元数据事件 - 复用统一的元数据更新方法
     emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
       const meta = payload as StreamMetadata;
-      if (!this.currentConversation || this.currentConversation.id !== conversationId) {
-        return;
-      }
-      if (streamingMessageIndex >= this.messages.length || !this.messages[streamingMessageIndex]) {
-        return;
-      }
-
-      let metadataChanged = false;
-      this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-        if (meta.id && regeneratedMessage.providerMessageId !== meta.id) {
-          regeneratedMessage.providerMessageId = meta.id;
-          metadataChanged = true;
-        }
-        if (meta.systemFingerprint && regeneratedMessage.systemFingerprint !== meta.systemFingerprint) {
-          regeneratedMessage.systemFingerprint = meta.systemFingerprint;
-          metadataChanged = true;
-        }
-        if (meta.created !== undefined) {
-          const createdTimestamp = meta.created * 1000;
-          if (regeneratedMessage.timestamp < createdTimestamp) {
-            regeneratedMessage.timestamp = createdTimestamp;
-            regeneratedMessage.providerCreatedAt = meta.created;
-            metadataChanged = true;
-          } else if (regeneratedMessage.providerCreatedAt !== meta.created) {
-            regeneratedMessage.providerCreatedAt = meta.created;
-            metadataChanged = true;
-          }
-        }
-      });
-
-      if (metadataChanged) {
-        const regeneratedMessage = this.messages[streamingMessageIndex];
-        if (regeneratedMessage?.id !== undefined) {
-          this.databaseManager.updateChatMessageMetadata(regeneratedMessage.id, {
-            timestamp: regeneratedMessage.timestamp,
-            providerMessageId: regeneratedMessage.providerMessageId ?? null,
-            providerCreatedAt: regeneratedMessage.providerCreatedAt ?? null,
-            systemFingerprint: regeneratedMessage.systemFingerprint ?? null,
-            modelName: regeneratedMessage.modelName ?? null,
-            providerName: regeneratedMessage.providerName ?? null
-          }).catch((metadataError: Error) => {
-            
-          });
-        }
-      }
+      this.updateStreamingMessageMetadata(streamingMessageIndex, meta, conversationId);
     });
 
     // 监听完成事件 - 处理重新生成完成
@@ -1859,7 +1430,7 @@ struct Chat {
               // 更新数据库中的消息内容
               if (regeneratedMessage.id !== undefined) {
                 await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
-                hilog.error(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
+                hilog.info(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
                   String(regeneratedMessage.id));
               } else {
                 // 兜底方案：如果没有ID，保存到数据库
@@ -1911,7 +1482,7 @@ struct Chat {
    * @param isToolContinuation 是否是工具继续阶段的错误（默认 false）
    */
   private handleStreamError(messageIndex: number, error: Error, isToolContinuation: boolean = false): void {
-    const friendlyError = this.getFriendlySendErrorMessage(error);
+    const friendlyError = getFriendlyErrorMessage(error);
 
     // 如果是用户主动中止，保留已显示的内容；否则显示错误提示
     if (!this.userAbortedGeneration && messageIndex < this.messages.length) {
@@ -2053,42 +1624,8 @@ struct Chat {
       // 准备AI消息列表
       const messagesForAI = this.prepareMessagesForAPI(userMessage);
 
-      // 检查是否启用联网搜索并构建工具数组（使用 Chat.ets 的 Toggle 开关统一控制）
-      // 互斥逻辑：阿里云用内置搜索，其他模型用外置工具调用
-      let tools: object[] = [];
-      let enableAlibabaSearch = false;
-
-      try {
-        if (this.enableWebSearch) {
-          // 如果是阿里云，使用内置搜索
-          if (this.isAliyunActive) {
-            enableAlibabaSearch = true;
-            
-          }
-          // 否则，使用外置工具调用搜索
-          else {
-            const searchConfig = this.searchConfigManager.getConfig();
-            // 检查是否已配置搜索服务
-            if (searchConfig && searchConfig.enabledServices.length > 0) {
-              const selectedService = this.searchConfigManager.getSelectedService();
-              if (selectedService) {
-                const toolDef = this.searchToolService.getToolDefinition();
-                tools = [toolDef as object];
-                
-              } else {
-                
-              }
-            } else {
-              
-            }
-          }
-        } else {
-          hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle');
-        }
-      } catch (configError) {
-        
-        // 降级到不使用工具调用
-      }
+      // 检查是否启用联网搜索并构建工具数组
+      const tools = this.getSearchTools();
 
       // 发送流式请求（使用新的事件驱动架构）
       const emitter = await this.networkManager.sendStreamChatRequestV2(
@@ -2097,10 +1634,9 @@ struct Chat {
         this.currentSettings!.modelName,
         messagesForAI,
         {
-          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
-          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
+          tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
-          requestTimeout: 60000 // 增加超时时间到 60秒
+          requestTimeout: 60000
         }
       );
 
@@ -2111,7 +1647,7 @@ struct Chat {
       this.isLoading = false;
       this.isGenerating = false;
       this.currentAbortController = null;
-      const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
+      const friendlyError = getFriendlyErrorMessage(error instanceof Error ? error : new Error(String(error)));
       this.showToast(friendlyError);
     }
   }
@@ -2130,18 +1666,41 @@ struct Chat {
     }
   }
 
+  /**
+   * 获取联网搜索工具定义数组
+   * 统一提取，避免在 sendMessage / continueConversation / regenerateMessage 中重复
+   */
+  private getSearchTools(): object[] {
+    if (!this.enableWebSearch) {
+      return [];
+    }
+    try {
+      const searchConfig = this.searchConfigManager.getConfig();
+      if (searchConfig && searchConfig.enabledServices.length > 0) {
+        const selectedService = this.searchConfigManager.getSelectedService();
+        if (selectedService) {
+          const toolDef = this.searchToolService.getToolDefinition();
+          hilog.info(DOMAIN, TAG, 'Web search enabled with service: %{public}s', selectedService.type);
+          return [toolDef as object];
+        }
+      }
+    } catch (configError) {
+      hilog.warn(DOMAIN, TAG, 'Search config error: %{public}s', String(configError));
+    }
+    return [];
+  }
+
   // 辅助方法 - 准备API消息列表
   private prepareMessagesForAPI(userMessage: ChatMessage): ChatMessage[] {
     const endIndex = this.messages.length - 1;
     const startIndex = Math.max(0, endIndex - 10);
     const messagesForAI = this.messages.slice(startIndex, endIndex);
     if (messagesForAI.length === 0) {
-      messagesForAI.push(this.cloneChatMessage(userMessage));
+      messagesForAI.push(cloneChatMessage(userMessage));
     }
     return messagesForAI;
   }
 
-  // 工具调用处理 - 执行搜索并继续对话
   // 工具调用处理 - 执行搜索并继续对话
   private async handleToolCalls(
     toolCalls: import('../services/StreamEventEmitter').ToolCallData[],
@@ -2382,30 +1941,7 @@ struct Chat {
       }
 
       // 检查搜索配置并构建工具数组
-      let tools: object[] = [];
-      let enableAlibabaSearch = false;
-      try {
-        if (this.enableWebSearch) {
-          if (this.isAliyunActive) {
-            enableAlibabaSearch = true;
-          } else {
-            const searchConfig = this.searchConfigManager.getConfig();
-            if (searchConfig && searchConfig.enabledServices.length > 0) {
-              const selectedService = this.searchConfigManager.getSelectedService();
-              if (selectedService) {
-                const toolDef = this.searchToolService.getToolDefinition();
-                tools = [toolDef as object];
-                hilog.info(DOMAIN, TAG, 'Using external search tool in continuation with service: %{public}s',
-                  selectedService.type);
-              }
-            }
-          }
-        } else {
-          hilog.info(DOMAIN, TAG, 'Web search disabled by user toggle in continuation');
-        }
-      } catch (configError) {
-        hilog.warn(DOMAIN, TAG, 'Search config error in continuation: %{public}s', String(configError));
-      }
+      const tools = this.getSearchTools();
       
       // 发送流式请求
       hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
@@ -2417,7 +1953,6 @@ struct Chat {
         this.currentSettings!.modelName,
         messagesForAI,
         {
-          enableWebSearch: enableAlibabaSearch,
           tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
           requestTimeout: 60000
@@ -2471,7 +2006,7 @@ struct Chat {
       this.isLoading = false;
       this.isGenerating = false;
       this.currentAbortController = null;
-      const friendlyError = this.getFriendlySendErrorMessage(error instanceof Error ? error : new Error(String(error)));
+      const friendlyError = getFriendlyErrorMessage(error instanceof Error ? error : new Error(String(error)));
 
       // 关键修复：在消息中追加错误而不是覆盖
       // 如果已经有搜索结果，应该追加错误而不是完全替换
@@ -2637,7 +2172,7 @@ struct Chat {
       this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
         regeneratingMessage.id = newMessageId;
       });
-      hilog.error(DOMAIN, TAG, 'Created regenerated record ID=%{public}s', String(newMessageId));
+      hilog.info(DOMAIN, TAG, 'Created regenerated record ID=%{public}s', String(newMessageId));
 
       // 设置为重新生成模式
       this.isLoading = true;
@@ -2654,36 +2189,10 @@ struct Chat {
       // 准备发送给AI的消息列表（不包括当前正在重新生成的消息）
       const messagesForAI = this.messages.slice(0, messageIndex);
 
-      hilog.error(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
+      hilog.info(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 检查是否启用联网搜索并构建工具数组（互斥逻辑）
-      let tools: object[] = [];
-      let enableAlibabaSearch = false;
-
-      try {
-        if (this.enableWebSearch) {
-          // 如果是阿里云，使用内置搜索
-          if (this.isAliyunActive) {
-            enableAlibabaSearch = true;
-            
-          }
-          // 否则，使用外置工具调用搜索
-          else {
-            const searchConfig = this.searchConfigManager.getConfig();
-            if (searchConfig && searchConfig.enabledServices.length > 0) {
-              const selectedService = this.searchConfigManager.getSelectedService();
-              if (selectedService) {
-                const toolDef = this.searchToolService.getToolDefinition();
-                tools = [toolDef as object];
-                hilog.info(DOMAIN, TAG, 'Using external search tool in regeneration with service: %{public}s',
-                  selectedService.type);
-              }
-            }
-          }
-        }
-      } catch (configError) {
-        
-      }
+      // 检查是否启用联网搜索并构建工具数组
+      const tools = this.getSearchTools();
 
       // 发送流式请求重新生成（使用新的事件驱动架构）
       const emitter = await this.networkManager.sendStreamChatRequestV2(
@@ -2692,15 +2201,14 @@ struct Chat {
         this.currentSettings?.modelName || '',
         messagesForAI,
         {
-          enableWebSearch: enableAlibabaSearch, // 阿里云内置搜索
-          tools: tools.length > 0 ? tools : undefined, // 外置工具调用（非阿里云）
+          tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
           requestTimeout: 30000
         }
       );
 
       // 设置重新生成的事件处理
-      this.setupRegenrationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
+      this.setupRegenerationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
 
     } catch (error) {
       
@@ -2738,13 +2246,13 @@ struct Chat {
       const inputMethodController = inputMethod.getController();
       inputMethodController.hideTextInput()
         .then(() => {
-          hilog.error(DOMAIN, TAG, 'Keyboard hidden successfully');
+          hilog.debug(DOMAIN, TAG, 'Keyboard hidden successfully');
         })
         .catch((error: Error) => {
-          
+          hilog.debug(DOMAIN, TAG, 'Failed to hide keyboard: %{public}s', String(error));
         });
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Error getting input method controller: %{public}s', String(error));
+      hilog.debug(DOMAIN, TAG, 'Error getting input method controller: %{public}s', String(error));
     }
   }
 
@@ -2755,45 +2263,6 @@ struct Chat {
   private updateGroupedConversations() {
     this.cachedGroupedConversations = this.groupConversationsByDate();
     this.cachedGroupedKeys = Object.keys(this.cachedGroupedConversations);
-  }
-
-  @Builder
-  buildGroupedConversations() {
-    ForEach(this.cachedGroupedKeys, (dateKey: string) => {
-      // 日期分组标题
-      Text(this.formatDateGroup(dateKey))
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .width('100%')
-        .padding({ left: 4, top: 12, bottom: 6 })
-        .textAlign(TextAlign.Start)
-        .opacity(0.7)
-
-      // 该日期下的对话列表
-      List({ space: 4 }) {
-        ForEach((this.cachedGroupedConversations?.[dateKey]) || [], (conversation: Conversation, index: number) => {
-          ListItem() {
-            this.ConversationItem(conversation)
-          }
-          .swipeAction({
-            end: () => this.conversationSwipeAction(conversation),
-            edgeEffect: SwipeEdgeEffect.Spring
-          })
-        })
-      }
-      .width('100%')
-      .scrollBar(BarState.Off)
-    })
-  }
-
-  // 获取分组对话的日期键数组（直接使用缓存数据，避免重复计算）
-  private getGroupedConversationKeys(): string[] {
-    return this.cachedGroupedKeys;
-  }
-
-  // 获取指定日期的对话列表（直接使用缓存数据，避免重复计算）
-  private getConversationsForDate(dateKey: string): Conversation[] {
-    return (this.cachedGroupedConversations?.[dateKey]) || [];
   }
 
   // 按日期分组对话的工具方法
@@ -2852,265 +2321,6 @@ struct Chat {
     }
   }
 
-  // 格式化日期分组显示文本
-  private formatDateGroup(dateKey: string): string {
-    if (dateKey === 'today') {
-      return '今天';
-    } else if (dateKey === 'yesterday') {
-      return '昨天';
-    } else if (dateKey === 'this_week') {
-      return '一周内';
-    } else if (dateKey === 'this_month') {
-      return '30天内';
-    } else if (dateKey.includes('-')) {
-      // 月份格式 YYYY-MM
-      const dateParts = dateKey.split('-');
-      const year = parseInt(dateParts[0]);
-      const month = parseInt(dateParts[1]);
-      const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月',
-        '七月', '八月', '九月', '十月', '十一月', '十二月'];
-      const currentYear = new Date().getFullYear();
-
-      if (year === currentYear) {
-        return monthNames[month - 1];
-      } else {
-        return `${year}年${monthNames[month - 1]}`;
-      }
-    } else {
-      // 兜底处理
-      return dateKey;
-    }
-  }
-
-  @Builder
-  SidebarContent() {
-    Column() {
-      // 侧边栏标题
-      Column() {
-        Row() {
-          Text('对话列表')
-            .fontSize(20)
-            .fontWeight(FontWeight.Medium)
-            .layoutWeight(1)
-
-          Button() {
-            Image($r('app.media.open_sidebar'))
-              .size({ width: 24, height: 24 })
-              .fillColor($r('sys.color.ohos_id_color_text_primary'))
-          }
-          .type(ButtonType.Circle)
-          .size({ width: 40, height: 40 })
-          .backgroundColor(Color.Transparent) //$r('sys.color.button_background_color_transparent')
-          .onClick(() => {
-            this.hideSidebar();
-            this.showControlButton = !this.showControlButton;
-            animateTo({
-              duration: 300,
-              curve: Curve.FastOutSlowIn
-            }, () => {
-              this.showSideBar = false;
-            })
-          })
-        }
-        .width('100%')
-        .height(56)
-        .padding({ left: 20, right: 16 })
-        .justifyContent(FlexAlign.SpaceBetween)
-
-        // 新建对话按钮
-        Row() {
-          Button('新建对话')
-            .fontColor($r('app.color.text_color'))
-            .width('90%')
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .borderRadius(24)
-            .onClick(() => {
-              this.createNewConversation();
-            })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Center)
-        .margin({ top: 12, bottom: 12 })
-      }
-      .margin({ top: this.getUIContext().px2vp(this.topRectHeight) })
-
-      // 对话列表
-      if (this.conversations.length === 0) {
-        Scroll() {
-          Column() {
-            Text('还没有对话记录')
-              .fontSize(14)
-              .margin({ top: 12 })
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-        }
-        .layoutWeight(1)
-      } else {
-        Scroll() {
-          Column() {
-            this.buildGroupedConversations()
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16 })
-          .alignItems(HorizontalAlign.Start)
-          .justifyContent(FlexAlign.Start)
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .scrollable(ScrollDirection.Vertical)
-        .scrollBar(BarState.Auto)
-        .align(Alignment.TopStart)
-      }
-
-      // 底部功能按钮
-      Column() {
-        // 设置按钮
-        Row() {
-          Button('设置')
-            .fontColor($r('app.color.text_color'))
-            .width('90%')
-            .backgroundColor($r('sys.color.button_background_color_transparent'))
-            .borderRadius(24)
-            .onClick(() => {
-              this.pathStack.pushPathByName("Settings", null);
-              this.hideKeyboard();
-              this.showSideBar = !this.showSideBar
-              this.showControlButton = !this.showControlButton
-            })
-            .margin({ top: 12, bottom: 12 })
-        }
-      }
-      .width('100%')
-      .margin({ bottom: this.getUIContext().px2vp(this.bottomRectHeight) })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor($r('app.color.common_background'))
-    .alignItems(HorizontalAlign.Start)
-    .justifyContent(FlexAlign.Start)
-  }
-
-  @Builder
-  conversationSwipeAction(conversation: Conversation) {
-    Row() {
-      // 重命名按钮 - 圆形
-      Button() {
-        Image($r('app.media.square_and_pencil'))
-          .size({ width: 20, height: 20 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .size({ width: 40, height: 40 })
-      .backgroundColor($r('sys.color.button_background_color_transparent'))
-      .margin({ left: 10, right: 5 })
-      .onClick(() => {
-        this.showRenameDialog(conversation);
-      })
-
-      // 删除按钮 - 圆形
-      Button() {
-        Image($r('app.media.trash'))
-          .size({ width: 20, height: 20 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .size({ width: 40, height: 40 })
-      .backgroundColor($r('sys.color.button_background_color_transparent'))
-      .margin({ left: 5, right: 10 })
-      .onClick(() => {
-        this.showDeleteConversationDialog(conversation.id, conversation.title || '新对话');
-      })
-    }
-    .padding(4)
-    .justifyContent(FlexAlign.SpaceEvenly)
-  }
-
-  @Builder
-  ConversationItem(conversation: Conversation) {
-    Row() {
-      Column() {
-        Text(conversation.title)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .textAlign(TextAlign.Start)
-
-        // 显示时间（时:分格式）
-        Text(this.formatTime(conversation.updatedAt))
-          .fontSize(12)
-          .margin({ top: 2 })
-          .width('100%')
-          .textAlign(TextAlign.Start)
-          .opacity(0.6)
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-    }
-    .width('100%')
-    .height(48)
-    .padding({
-      left: 12,
-      right: 12,
-      top: 6,
-      bottom: 6
-    })
-    .borderRadius(8)
-    .onClick(() => {
-      this.selectConversation(conversation);
-      animateTo({
-        duration: 300,
-        curve: Curve.FastOutSlowIn
-      }, () => {
-        this.showControlButton = true
-        this.showSideBar = false;
-      })
-    })
-  }
-
-  // 格式化时间显示（根据时间跨度智能显示日期和时间）
-  private formatTime(timestamp: number): string {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-    // 计算时间差（天数）
-    const timeDiff = today.getTime() - messageDate.getTime();
-    const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const time = `${hours}:${minutes}`;
-
-    // 根据日期差智能显示
-    if (daysDiff === 0) {
-      // 今天 - 只显示时间
-      return time;
-    } else if (daysDiff === 1) {
-      // 昨天 - 显示"昨天 时间"
-      return `昨天 ${time}`;
-    } else if (daysDiff >= 2 && daysDiff <= 7) {
-      // 一周内 - 显示"几天前"或具体日期
-      return `${daysDiff}天前`;
-    } else {
-      // 超过一周 - 显示具体日期
-      const month = (date.getMonth() + 1).toString().padStart(2, '0');
-      const day = date.getDate().toString().padStart(2, '0');
-      
-      if (date.getFullYear() === now.getFullYear()) {
-        // 今年 - 显示月-日
-        return `${month}-${day}`;
-      } else {
-        // 去年或更早 - 显示年-月-日
-        const year = date.getFullYear().toString().slice(-2); // 只显示后两位
-        return `${year}-${month}-${day}`;
-      }
-    }
-  }
-
   // 显示重命名对话框
   private showRenameDialog(conversation: Conversation) {
     this.renameDialogController = new CustomDialogController({
@@ -3128,22 +2338,18 @@ struct Chat {
     this.renameDialogController.open();
   }
 
-  // 重命名对话
+  // 重命名对话 - 委托给 ViewModel
   private async renameConversation(conversationId: string, newTitle: string) {
     try {
-      await this.databaseManager.updateConversationTitle(conversationId, newTitle);
-
-      // 更新当前对话标题
-      if (this.currentConversation?.id === conversationId) {
-        this.currentConversation.title = newTitle;
-      }
-
-      // 刷新对话列表
-      await this.loadConversations();
-
+      await this.viewModel.renameConversation(conversationId, newTitle);
+      
+      // 同步 ViewModel 状态到页面
+      this.currentConversation = this.viewModel.currentConversation;
+      this.conversations = this.viewModel.conversations;
+      this.updateGroupedConversations();
+      
       this.showToast('重命名成功', 2000);
     } catch (error) {
-      
       this.showToast('重命名失败', 2000);
     }
   }
@@ -3163,33 +2369,13 @@ struct Chat {
     })
   }
 
-  // 根据窗口宽度计算断点
-  /**
-   * 检查输入内容是否包含可疑内容
-   */
-  private containsSuspiciousContent(input: string): boolean {
-    // 检查是否包含潜在的脚本注入
-    const scriptPatterns = [
-      /<script[^>]*>.*?<\/script>/gi,
-      /javascript:/gi,
-      /on\w+\s*=/gi,
-      /<iframe[^>]*>/gi,
-      /<object[^>]*>/gi,
-      /<embed[^>]*>/gi
-    ];
-
-    // 检查是否包含SQL注入模式
-    const sqlPatterns = [
-      /(\bUNION\b|\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b).*(\bFROM\b|\bWHERE\b|\bINTO\b)/gi,
-      /['";].*(-{2}|\/\*)/gi
-    ];
-
-    // 检查所有模式
-    const allPatterns = [...scriptPatterns, ...sqlPatterns];
-    return allPatterns.some(pattern => pattern.test(input));
+  // 防抖调用入口：避免窗口调整时频繁计算
+  private updateBreakpoint(): void {
+    this.debouncedUpdateBreakpoint();
   }
 
-  private updateBreakpoint(): void {
+  // 实际断点计算实现
+  private doUpdateBreakpoint(): void {
     try {
       const context = this.getUIContext()?.getHostContext() as common.UIAbilityContext;
       if (context?.windowStage) {
@@ -3202,7 +2388,7 @@ struct Chat {
             const uiCtx = this.getUIContext();
             const widthVp: number = uiCtx ? uiCtx.px2vp(width) : width;
 
-            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Window width: %{public}dpx, widthVp=%{public}d', width,
+            hilog.debug(DOMAIN, TAG, '[BREAKPOINT] Window width: %{public}dpx, widthVp=%{public}d', width,
               widthVp);
 
             let breakpoint: string = 'sm';
@@ -3219,7 +2405,7 @@ struct Chat {
               breakpoint = 'xs';
             }
 
-            hilog.error(DOMAIN, TAG, '[BREAKPOINT error] Calculated breakpoint: %{public}s', String(breakpoint));
+            hilog.debug(DOMAIN, TAG, '[BREAKPOINT] Calculated breakpoint: %{public}s', String(breakpoint));
 
             // 只使用AppStorage更新，@StorageLink会自动同步
             AppStorage.setOrCreate('currentBreakPoint', breakpoint);
@@ -3233,7 +2419,4 @@ struct Chat {
     }
   }
 }
-
-
-
 

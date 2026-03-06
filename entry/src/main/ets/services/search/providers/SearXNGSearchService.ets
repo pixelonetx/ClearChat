@@ -6,7 +6,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../../../common/Logger';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -15,8 +15,7 @@ import {
   SearXNGOptions
 } from '../SearchModels';
 
-const DOMAIN = 0x0007;
-const TAG = 'SearXNGSearchService';
+const logger = createLogger('SearXNGSearchService', LogDomain.SEARCH);
 
 export class SearXNGSearchService extends SearchService<SearXNGOptions> {
   private static instance: SearXNGSearchService;
@@ -37,7 +36,7 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
   }
   
   get description(): string {
-    return '注重隐私的元搜索引擎。需自建实例，无跟踪。';
+    return '注重隐私的元搜索引擎。需自建实例，无跟踪';
   }
   
   async search(
@@ -52,7 +51,7 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
         throw new Error('SearXNG URL 不能为空');
       }
       
-      const baseUrl = serviceOptions.url.trim().replace(/\/$/, '');
+      const baseUrl: string = serviceOptions.url.trim().replace(/\/$/, '');
       const encodedQuery = encodeURIComponent(query);
       
       let url = `${baseUrl}/search?q=${encodedQuery}&format=json`;
@@ -90,7 +89,7 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
       
       const resultsArray = ((dataObj['results'] as Object[]) ?? [])
         .slice(0, commonOptions.resultSize ?? 10);
-      const items: SearchResultItem[] = resultsArray.map((item) => {
+      const items: SearchResultItem[] = resultsArray.map((item: Object): SearchResultItem => {
         const itemObj = item as Record<string, Object | string | null>;
         const resultItem: SearchResultItem = {
           title: (itemObj['title'] as string) ?? '',
@@ -108,53 +107,11 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'SearXNG search failed: %{public}s', error.message);
+        logger.error('SearXNG search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
-  }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
   }
   
   /**
@@ -181,4 +138,5 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
     return encoded;
   }
 }
+
 

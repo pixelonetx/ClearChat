@@ -3,23 +3,40 @@
  * 
  *  SSE 处理逻辑分离 - 单一职责原则
  * 
- * 优势：
- * 1. 职责单一 - 只负责 SSE 解析
- * 2. 易于测试 - 可独立测试 SSE 解析逻辑
- * 3. 易于维护 - 修改不影响其他模块
+ * 优势�?
+ * 1. 职责单一 - 只负�?SSE 解析
+ * 2. 易于测试 - 可独立测�?SSE 解析逻辑
+ * 3. 易于维护 - 修改不影响其他模�?
  * 4. 易于复用 - 可在其他场景使用
  */
 
 import { StreamState } from './StreamState';
 import { StreamEventEmitter, StreamEventType } from './StreamEventEmitter';
 import { StreamMetadata, ExtendedStreamResponse, ExtendedStreamDelta, Citation } from '../services/DataModels';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-
-const DOMAIN = 0x0000;
-const TAG = 'StreamProcessor';
+import { createLogger, LogDomain } from '../common/Logger';
 
 /**
- * SSE 处理器配置
+ * 错误详情接口
+ */
+interface ErrorDetail {
+  message?: string;
+  type?: string;
+  code?: string | number;
+}
+
+/**
+ * 错误响应数据接口
+ */
+interface ErrorResponseData {
+  error?: ErrorDetail;
+  message?: string;
+  code?: string | number;
+}
+
+const logger = createLogger('StreamProcessor', LogDomain.STREAM);
+
+/**
+ * SSE 处理器配�?
  */
 export interface StreamProcessorOptions {
   // 是否输出调试日志
@@ -28,7 +45,7 @@ export interface StreamProcessorOptions {
   // 最大缓冲区大小（字节）
   maxBufferSize?: number;
   
-  // 处理 SSE 事件的超时时间（毫秒）
+  // 处理 SSE 事件的超时时间（毫秒�?
   processTimeout?: number;
 }
 
@@ -55,10 +72,10 @@ export class StreamProcessor {
   }
 
   /**
-   * 处理 SSE 数据块
+   * 处理 SSE 数据�?
    * 
-   * @param chunk 原始数据块
-   * @throws Error 如果缓冲区超过最大大小
+   * @param chunk 原始数据�?
+   * @throws Error 如果缓冲区超过最大大�?
    */
   processChunk(chunk: string): void {
     if (!chunk || chunk.length === 0) {
@@ -93,7 +110,7 @@ export class StreamProcessor {
       return;
     }
 
-    // 处理剩余的数据
+    // 处理剩余的数�?
     const dataMatch = remaining.match(/^data:\s?(.*)$/);
     if (dataMatch) {
       const dataStr = dataMatch[1].trim();
@@ -102,9 +119,9 @@ export class StreamProcessor {
   }
 
   /**
-   * 解析缓冲区中的 SSE 事件
+   * 解析缓冲区中�?SSE 事件
    * 
-   * SSE 格式：
+   * SSE 格式�?
    * ```
    * data: {"key":"value"}
    * data: {"key":"value"}
@@ -112,7 +129,7 @@ export class StreamProcessor {
    * data: {"key":"value"}
    * ```
    * 
-   * 空行表示一个事件结束
+   * 空行表示一个事件结�?
    */
   private parseSSEEvents(): void {
     let buffer = this.state.getBufferContent();
@@ -132,7 +149,7 @@ export class StreamProcessor {
           this.handleSSEDataField(dataStr);
         }
       } else {
-        // 解析 data: 行
+        // 解析 data: �?
         const dataMatch = line.match(/^data:\s?(.*)$/);
         if (dataMatch) {
           this.state.addDataLine(dataMatch[1]);
@@ -157,7 +174,7 @@ export class StreamProcessor {
 
     if (trimmed === '[DONE]') {
       this.log('SSE 流已完成，接收到 [DONE] 信号');
-      // 处理推理内容的闭合
+      // 处理推理内容的闭�?
       if (this.state.getData().reasoningStarted) {
         this.emitter.emit(StreamEventType.DATA, '</reasoning_content>');
         this.state.markReasoningEnded();
@@ -214,7 +231,7 @@ export class StreamProcessor {
       this.state.markMetadataDispatched();
     }
 
-    // 处理选择项中的 delta
+    // 处理选择项中�?delta
     if (response.choices && response.choices.length > 0) {
       const delta = response.choices[0].delta as ExtendedStreamDelta;
 
@@ -253,31 +270,32 @@ export class StreamProcessor {
         });
       }
 
-      // 当 finish_reason 表示工具调用时，发送 TOOL_CALL 事件
+      // �?finish_reason 表示工具调用时，发�?TOOL_CALL 事件
       // 兼容性修复：有些模型（如 DeepSeek/Qwen）可能不返回 finish_reason='tool_calls'
-      // 而是直接在流结束时检查是否有完整的 tool_calls
+      // 而是直接在流结束时检查是否有完整�?tool_calls
       if (response.choices[0].finish_reason === 'tool_calls' || 
           (delta.tool_calls && delta.tool_calls.length > 0 && response.choices[0].finish_reason === 'stop')) {
-        // 这里的逻辑由 handleStreamComplete 或外部检查处理，这里只负责累积
+        // 这里的逻辑�?handleStreamComplete 或外部检查处理，这里只负责累�?
       }
     }
   }
 
   /**
-   * 处理非 SSE 的 JSON 正常响应
+   * 处理�?SSE �?JSON 正常响应
    * 
-   * 用于服务器返回普通 JSON 而不是 SSE 流的场景
+   * 用于服务器返回普�?JSON 而不�?SSE 流的场景
    */
   handleNormalJSONResponse(body: string, isError: boolean = false): void {
     try {
       // 明确类型转换以避免 any 类型
-      const parsedData: ESObject = JSON.parse(body) as ESObject;
-      const data: ESObject = parsedData;
+      const parsedData: ExtendedStreamResponse | ErrorResponseData = JSON.parse(body) as ExtendedStreamResponse | ErrorResponseData;
+      const data = parsedData;
 
       if (!isError) {
         // 处理为正常响应
-        if (data && data.choices && Array.isArray(data.choices)) {
-          const response = data as ExtendedStreamResponse;
+        const responseData = data as ExtendedStreamResponse;
+        if (responseData && responseData.choices && Array.isArray(responseData.choices)) {
+          const response = responseData;
           // 发送元数据
           if (!this.state.isMetadataDispatched()) {
             const metadata: StreamMetadata = {
@@ -292,7 +310,7 @@ export class StreamProcessor {
             this.state.markMetadataDispatched();
           }
 
-          // 发送完整内容（注：流式响应中 choices[0].delta.content 包含内容）
+          // 发送完整内容（注：流式响应�?choices[0].delta.content 包含内容�?
           const firstChoice = response.choices[0];
           if (firstChoice && firstChoice.delta) {
             const deltaContent = (firstChoice.delta as ExtendedStreamDelta).content || '';
@@ -308,7 +326,7 @@ export class StreamProcessor {
       }
 
       // 处理错误响应
-      const errorMsg = this.extractErrorMessage(data as ESObject);
+      const errorMsg = this.extractErrorMessage(data as ErrorResponseData);
       if (errorMsg) {
         this.emitter.emit(StreamEventType.ERROR, new Error(errorMsg));
         this.state.markErrorDispatched();
@@ -318,7 +336,7 @@ export class StreamProcessor {
       this.log(`警告: 无法解析 JSON 响应: ${error}`);
     }
 
-    // 作为纯文本传递
+    // 作为纯文本传�?
     if (body.trim().length > 0) {
       this.emitter.emit(StreamEventType.ERROR, new Error(body.trim()));
       this.state.markErrorDispatched();
@@ -328,19 +346,18 @@ export class StreamProcessor {
   /**
    * 从错误响应中提取错误信息
    */
-  private extractErrorMessage(data: ESObject): string | null {
+  private extractErrorMessage(data: ErrorResponseData): string | null {
     // OpenAI 格式
-    const errorField: ESObject | undefined = data.error as ESObject | undefined;
+    const errorField: ErrorDetail | undefined = data.error;
     if (errorField && typeof errorField === 'object') {
-      const errorObj: ESObject = errorField as ESObject;
-      const messageField: string | undefined = errorObj.message as string | undefined;
+      const messageField: string | undefined = errorField.message;
       if (messageField && typeof messageField === 'string') {
         return messageField;
       }
     }
 
     // 通用格式
-    const messageField: string | undefined = data.message as string | undefined;
+    const messageField: string | undefined = data.message;
     if (messageField && typeof messageField === 'string') {
       if (data.code !== undefined) {
         return `${messageField} (code: ${data.code})`;
@@ -352,7 +369,7 @@ export class StreamProcessor {
   }
 
   /**
-   * 中止流处理
+   * 中止流处�?
    */
   abort(): void {
     this.state.markUserAborted();
@@ -367,7 +384,7 @@ export class StreamProcessor {
   }
 
   /**
-   * 获取处理状态快照
+   * 获取处理状态快�?
    */
   getStateSnapshot() {
     return this.state.getSnapshot();
@@ -378,7 +395,7 @@ export class StreamProcessor {
    */
   private log(message: string): void {
     if (this.options.debug) {
-      hilog.info(DOMAIN, TAG, message);
+      logger.info( message);
     }
   }
 

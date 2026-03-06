@@ -6,7 +6,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { createLogger, LogDomain } from '../../../common/Logger';
 import { SearchService } from '../SearchService';
 import {
   SearchResult,
@@ -15,8 +15,7 @@ import {
   ExaOptions
 } from '../SearchModels';
 
-const DOMAIN = 0x0003;
-const TAG = 'ExaSearchService';
+const logger = createLogger('ExaSearchService', LogDomain.SEARCH);
 
 export class ExaSearchService extends SearchService<ExaOptions> {
   private static instance: ExaSearchService;
@@ -37,7 +36,7 @@ export class ExaSearchService extends SearchService<ExaOptions> {
   }
   
   get description(): string {
-    return '具备语义理解的神经搜索引擎。适合研究与查找特定内容。';
+    return '具备语义理解的神经搜索引擎。适合研究与查找特定内容';
   }
   
   async search(
@@ -77,7 +76,7 @@ export class ExaSearchService extends SearchService<ExaOptions> {
       const dataObj = data as Record<string, Object | null>;
       
       const resultsArray = (dataObj['results'] as Object[]) ?? [];
-      const items: SearchResultItem[] = resultsArray.map((item) => {
+      const items: SearchResultItem[] = resultsArray.map((item: Object): SearchResultItem => {
         const itemObj = item as Record<string, Object | string | null>;
         const resultItem: SearchResultItem = {
           title: (itemObj['title'] as string) ?? '',
@@ -95,53 +94,12 @@ export class ExaSearchService extends SearchService<ExaOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        hilog.error(DOMAIN, TAG, 'Exa search failed: %{public}s', error.message);
+        logger.error('Exa search failed: %{public}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');
     }
   }
-  
-  protected makeRequest(
-    url: string,
-    method: http.RequestMethod = http.RequestMethod.GET,
-    headers?: Record<string, string>,
-    body?: string,
-    timeout: number = 10000
-  ): Promise<http.HttpResponse> {
-    return new Promise<http.HttpResponse>((resolve, reject) => {
-      const httpRequest = http.createHttp();
-      
-      const headersMap: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (HarmonyOS) ClearChat/1.0',
-      };
-      
-      if (headers) {
-        const keys: string[] = Object.keys(headers);
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          headersMap[key] = headers[key];
-        }
-      }
-      
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headersMap,
-        extraData: body,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        expectDataType: http.HttpDataType.STRING,
-        usingCache: false
-      };
-      
-      httpRequest.request(url, options).then((response) => {
-        resolve(response);
-      }).catch((err: Error) => {
-        reject(err);
-      }).finally(() => {
-        httpRequest.destroy();
-      });
-    });
-  }
 }
+
 
