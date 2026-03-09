@@ -39,6 +39,14 @@
       "data": {
         "description" : "internal webview browser"
       }
+    },
+    {
+      "name": "Preference",
+      "pageSourceFile": "src/main/ets/pages/Preference.ets",
+      "buildFunction": "PreferenceBuilder",
+      "data": {
+        "description" : "Preference settings page"
+      }
     }
   ]
 }

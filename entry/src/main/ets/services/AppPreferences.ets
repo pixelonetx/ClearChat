@@ -12,6 +12,7 @@ import { common } from '@kit.AbilityKit';
 const PREFERENCES_NAME = 'app_settings';
 const KEY_THEME_MODE = 'theme_mode';
 const KEY_FONT_SIZE = 'font_size';
+const KEY_AUTO_EXPAND_THINKING = 'auto_expand_thinking';
 
 /**
  * 主题模式枚举
@@ -48,9 +49,11 @@ export class AppPreferences {
     try {
       const prefs = preferences.getPreferencesSync(context, { name: PREFERENCES_NAME });
       const savedMode = prefs.getSync(KEY_THEME_MODE, ThemeMode.AUTO) as number;
+      const autoExpandThinking = prefs.getSync(KEY_AUTO_EXPAND_THINKING, true) as boolean;
       
       // 保存到 AppStorage
       AppStorage.setOrCreate('themeMode', savedMode);
+      AppStorage.setOrCreate('autoExpandThinking', autoExpandThinking);
       
       // 应用主题
       AppPreferences.applyTheme(context, savedMode);
@@ -118,6 +121,21 @@ export class AppPreferences {
         return '深色';
       default:
         return '未知';
+    }
+  }
+
+  /**
+   * 设置是否自动展开思考过程
+   */
+  static setAutoExpandThinking(context: common.Context, enabled: boolean): void {
+    try {
+      const prefs = preferences.getPreferencesSync(context, { name: PREFERENCES_NAME });
+      prefs.putSync(KEY_AUTO_EXPAND_THINKING, enabled);
+      prefs.flush();
+
+      AppStorage.setOrCreate('autoExpandThinking', enabled);
+    } catch (err) {
+      console.error('Failed to set autoExpandThinking:', err);
     }
   }
 }

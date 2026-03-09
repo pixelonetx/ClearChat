@@ -7,6 +7,7 @@ import { AboutSheetBuilder } from '../components/settings/AboutSheet';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { WebBrowserParam } from '../components/utils/WebViewBrowser';
 import { ThemeMode, AppPreferences } from '../services/AppPreferences';
+import { ExportService } from '../services/ExportService';
 const DOMAIN = 0x0000;
 const TAG = 'Settings';
 
@@ -69,6 +70,12 @@ struct Settings {
                 onClick: () => {
                   // 使用 bindMenu，点击事件留空
                 }
+              },
+              {
+                title: '偏好',
+                onClick: () => {
+                  this.pathStack.pushPathByName("Preference", null);
+                }
               }
             ]);
 
@@ -88,16 +95,15 @@ struct Settings {
               }
             ]);
 
-            // // 数据设置
-            // this.SettingGroup('数据设置', [
-            //   {
-            //     title: '清空聊天记录',
-            //     onClick: () => {
-            //       this.showClearDataDialog();
-            //     },
-            //     isDestructive: true
-            //   }
-            // ]);
+            // 数据设置
+            this.SettingGroup('数据设置', [
+              {
+                title: '导出数据',
+                onClick: () => {
+                  this.exportAllData();
+                }
+              }
+            ]);
 
             // 帮助与支持
             this.SettingGroup('帮助与支持', [
@@ -324,6 +330,27 @@ struct Settings {
   //     }
   //   }
   // }
+
+  private async exportAllData(): Promise<void> {
+    try {
+      const success = await ExportService.getInstance().exportAllConversations();
+      if (success) {
+        try {
+          Prompt.showToast({ message: '数据导出成功', duration: 2000 });
+        } catch (toastErr) {
+          hilog.warn(DOMAIN, TAG, 'Toast display failed: %{public}s', String(toastErr));
+        }
+      }
+      // success === false means user cancelled, no toast needed
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Export all data failed: %{public}s', String(error));
+      try {
+        Prompt.showToast({ message: `导出失败: ${String(error)}`, duration: 3000 });
+      } catch (toastErr) {
+        hilog.warn(DOMAIN, TAG, 'Toast display failed: %{public}s', String(toastErr));
+      }
+    }
+  }
 
   private openUrl(url: string) {
     const useUrl = url;
