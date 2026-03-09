@@ -8,7 +8,7 @@
 
 [![HarmonyOS NEXT](https://img.shields.io/badge/HarmonyOS-NEXT-blue)](https://developer.huawei.com/consumer/cn/harmonyos/)
 [![ArkTS](https://img.shields.io/badge/Language-ArkTS-orange)](https://developer.huawei.com/consumer/cn/arkts/)
-[![Version](https://img.shields.io/badge/Version-0.2.5-green)](https://github.com)
+[![Version](https://img.shields.io/badge/Version-0.3.3-green)](https://github.com)
 
 </div>
 
@@ -89,8 +89,6 @@ entry/src/main/ets/
 │   ├── MarkdownParser.ets     # Markdown 解析器 (850行)
 │   ├── MarkdownRenderer.ets   # Markdown 渲染引擎
 │   ├── CodeBlock.ets          # 代码块组件
-│   ├── SearchStatusCard.ets   # 搜索状态卡片
-│   ├── SearchResultsCard.ets  # 搜索结果卡片
 │   ├── SearchResultsSheet.ets # 搜索结果半模态
 │   ├── ModelSelectorDialog.ets # 模型选择对话框
 │   ├── WebViewBrowser.ets     # 内置浏览器
@@ -137,12 +135,12 @@ entry/src/main/ets/
 ## 技术栈
 
 ### 核心框架
-- **HarmonyOS NEXT** - 纯血鸿蒙原生应用框架
-- **ArkTS** - 鸿蒙应用开发语言（TypeScript 超集）
+- **HarmonyOS NEXT**
+- **ArkTS** - 鸿蒙应用开发语言（extend TypeScript）
 - **ArkUI** - 声明式 UI 开发框架
 
 ### 开发工具
-- **DevEco Studio 5.0+** - 鸿蒙应用集成开发环境
+- **DevEco Studio** - 鸿蒙应用集成开发环境
 - **Hvigor** - 构建工具链
 
 ### 核心能力集
@@ -151,7 +149,6 @@ entry/src/main/ets/
 | `@kit.NetworkKit` | HTTP 请求、SSE 流式通信 |
 | `@kit.ArkData` | SQLite 关系型数据库、Preferences |
 | `@kit.AbilityKit` | 应用生命周期、窗口管理 |
-| `@kit.ArkUI` | UI 组件、Navigation 导航 |
 | `@kit.IMEKit` | 输入法交互、键盘避让 |
 | `@kit.BasicServicesKit` | 剪贴板、系统能力 |
 
@@ -422,46 +419,6 @@ try {
 
 ## 快速开始
 
-### 环境要求
-
-- **DevEco Studio**: 5.0.0 或更高版本
-- **HarmonyOS SDK**: API 12 (5.0.0) 或更高版本
-- **Node.js**: 用于构建工具链
-
-### 构建步骤
-
-1. **克隆项目**
-```bash
-git clone <repository-url>
-cd ClearChat
-```
-
-2. **安装依赖**
-```bash
-# 使用 ohpm 安装依赖
-ohpm install
-```
-
-3. **配置签名**
-- 在 DevEco Studio 中配置应用签名
-- 或使用自动签名功能
-
-4. **构建运行**
-```bash
-# 清理构建
-hvigorw clean
-
-# 构建 HAP
-hvigorw assembleHap
-
-# 构建 APP
-hvigorw assembleApp
-```
-
-5. **安装到设备**
-- 连接 HarmonyOS NEXT 设备
-- 点击 DevEco Studio 的运行按钮
-
 ### 配置说明
 
 首次运行需要配置：
@@ -503,53 +460,3 @@ hvigorw assembleApp
 - 服务和工具类采用 camelCase
 - 完善的错误处理和日志记录
 - 详细的代码注释和文档
-
----
-
-## 技术亮点
-
-1. **纯血鸿蒙原生** - 基于 HarmonyOS NEXT 系统
-2. **事件驱动架构** - StreamEventEmitter + StreamState + StreamProcessor
-3. **工具调用支持** - 完整实现 OpenAI Tool Calling 协议
-4. **多搜索引擎** - 统一接口集成 7 大搜索引擎
-5. **Markdown 引擎** - 独立实现解析和渲染
-6. **数据库** - 加密存储 + 事务 + 迁移
-7. **性能优化** - 虚拟滚动 + 多层缓存 + 增量渲染
-8. **模块化设计** - 清晰分层 + 服务解耦 + 可扩展
-
----
-
-## 未来规划
-
-- [ ] 多模态支持（图片、语音）
-- [ ] 插件系统
-- [ ] 数据导出/导入
-- [ ] 云端同步
-- [ ] 更多 AI 模型支持
-- [ ] 单元测试覆盖
-- [ ] 性能监控和分析
-
----
-
-## 许可证
-
-本项目尚未开源。
-
----
-
-## 联系方式
-
-如有问题或建议，欢迎通过以下方式联系：
-
-- Issue Tracker: [GitHub Issues](https://github.com/boltcoretx/ClearChat/issues)
-- Email: [zuokeyangtx@163.com](mailto:zuokeyangtx@163.com)
-
----
-
-<div align="center">
-
-**最低兼容**: HarmonyOS NEXT 5.0.5 (API 12)
-
-Made for HarmonyOS NEXT
-
-</div>

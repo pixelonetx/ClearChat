@@ -320,6 +320,19 @@ struct SearchServices {
     }
   }
 
+  private getServiceTypeDisplayName(type: string): string {
+    switch (type) {
+      case 'Tavily': return 'Tavily';
+      case 'Exa': return 'Exa';
+      case 'Zhipu': return '智谱';
+      case 'SearXNG': return 'SearXNG';
+      case 'Brave': return 'Brave';
+      case 'Metaso': return '秘塔';
+      case 'GoogleCustomSearch': return 'Google Custom Search';
+      default: return type;
+    }
+  }
+
   private getStatusColor(serviceId: string): string {
     const status = this.connectionStatus[serviceId];
     if (status === null || status === undefined) {
@@ -383,24 +396,50 @@ struct SearchServices {
               .fontColor($r('app.color.text_secondary'))
               .fontWeight(FontWeight.Medium);
 
-            Select([
-              { value: 'Tavily' },
-              { value: 'Exa' },
-              { value: '智谱' },
-              { value: 'SearXNG' },
-              { value: 'Brave' },
-              { value: '秘塔' },
-              { value: 'Google Custom Search' }
+            Row() {
+              Text(this.getServiceTypeDisplayName(this.selectedServiceType))
+                .fontSize(15)
+                .fontColor($r('sys.color.ohos_id_color_text_primary'))
+                .layoutWeight(1)
+
+              SymbolGlyph($r('sys.symbol.chevron_right'))
+                .fontSize(18)
+                .fontColor([$r('sys.color.ohos_id_color_text_secondary')])
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
+            .borderRadius(10)
+            .bindMenu([
+              {
+                value: 'Tavily',
+                action: () => { this.selectedServiceType = 'Tavily'; }
+              },
+              {
+                value: 'Exa',
+                action: () => { this.selectedServiceType = 'Exa'; }
+              },
+              {
+                value: '智谱',
+                action: () => { this.selectedServiceType = 'Zhipu'; }
+              },
+              {
+                value: 'SearXNG',
+                action: () => { this.selectedServiceType = 'SearXNG'; }
+              },
+              {
+                value: 'Brave',
+                action: () => { this.selectedServiceType = 'Brave'; }
+              },
+              {
+                value: '秘塔',
+                action: () => { this.selectedServiceType = 'Metaso'; }
+              },
+              {
+                value: 'Google Custom Search',
+                action: () => { this.selectedServiceType = 'GoogleCustomSearch'; }
+              }
             ])
-              .selected(0)
-              .value(this.selectedServiceType)
-              .onSelect((index: number, value?: string | string[]) => {
-                const types = ['Tavily', 'Exa', 'Zhipu', 'SearXNG', 'Brave', 'Metaso', 'GoogleCustomSearch'];
-                if (index >= 0 && index < types.length) {
-                  this.selectedServiceType = types[index];
-                }
-              })
-              .width('100%')
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%');

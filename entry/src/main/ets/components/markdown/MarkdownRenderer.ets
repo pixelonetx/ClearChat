@@ -32,7 +32,7 @@ interface ContentPart {
 export struct MarkdownRenderer {
   @Prop content: string;
   @Prop maxWidth: string = '100%'; // 新增宽度约束属性
-  // 是否默认展开“思考过程”卡片
+  // 是否默认展开思考过程（流式时展开，完成后折叠）
   @Prop defaultThinkingExpanded: boolean = true;
 
   // 优先使用内置浏览器打开链接
@@ -614,42 +614,36 @@ export struct MarkdownRenderer {
   }
 
   /**
-   * 渲染思考部分，UI和逻辑重构
+   * 渲染思考部分 - OpenAI 极简风格
+   * 折叠时仅显示一行文字 "已深度思考"，展开后以次要色显示思考内容
    * @param content 思考内容
    * @param id 唯一标识符
    */
   @Builder
   renderThinkingSection(content: string, id: number) {
     Column() {
-      // 标题和折叠切换器
-      Row() {
-        Text('思考过程 🤔')
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_secondary'))
-
-        Blank()
-
+      // 极简折叠行：仅文字 + 小三角
+      Row({ space: 4 }) {
         Image(this.expandedSections.has(id) ? $r('app.media.chevron_down') : $r('app.media.chevron_right'))
-          .width(16)
-          .height(16)
-          .fillColor($r('app.color.icon_secondary'))
+          .width(12)
+          .height(12)
+          .fillColor($r('app.color.text_secondary'))
+
+        Text('已深度思考')
+          .fontSize(13)
+          .fontColor($r('app.color.text_secondary'))
       }
-      .width('100%')
-      .padding(12)
-      .backgroundColor($r('app.color.bg_secondary'))
-      .borderRadius(6)
+      .padding({ top: 4, bottom: 4 })
       .onClick(() => {
         if (this.expandedSections.has(id)) {
           this.expandedSections.delete(id);
         } else {
           this.expandedSections.add(id);
         }
-        // 强制刷新状态
         this.expandedSections = new Set(this.expandedSections);
       })
 
-      // 可折叠的内容区域
+      // 展开的思考内容 - 左侧细线 + 次要文字色
       if (this.expandedSections.has(id)) {
         Column() {
           ForEach(this.parser.parse(content || ''), (block: MarkdownBlock) => {
@@ -657,24 +651,19 @@ export struct MarkdownRenderer {
           })
         }
         .width('100%')
-        .padding({ top: 8, bottom: 12, left: 12, right: 12 })
+        .padding({ left: 12, top: 4, bottom: 4 })
         .alignItems(HorizontalAlign.Start)
-        .backgroundColor($r('app.color.bg_secondary'))
         .border({
-          width: { top: 1 },
+          width: { left: 2 },
           color: $r('app.color.border_primary'),
           style: BorderStyle.Solid
         })
-        .margin({ top: -6 }) // 向上移动以覆盖标题的下圆角
-        .borderWidth({ top: 1 })
-        .borderColor($r('app.color.border_primary'))
-        .borderRadius({ bottomLeft: 6, bottomRight: 6 })
+        .opacity(0.7)
       }
     }
-    .borderWidth(0.5)
-    .borderRadius(10)
     .width('100%')
-    .margin({ top: 8, bottom: 8 })
+    .margin({ top: 4, bottom: 4 })
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {

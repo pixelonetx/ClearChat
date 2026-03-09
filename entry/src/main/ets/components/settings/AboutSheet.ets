@@ -21,7 +21,7 @@ export function AboutSheetBuilder() {
         .fontColor($r('sys.color.ohos_id_color_text_primary'))
 
       // 版本信息
-      Text('版本 0.3.2')
+      Text('版本 0.3.3')
         .fontSize(14)
         .fontColor($r('sys.color.ohos_id_color_text_secondary'))
     }

@@ -27,9 +27,8 @@ export struct MessageItem {
   onEdit?: (message: ChatMessage) => void | Promise<void>;
   onDelete?: (message: ChatMessage) => void | Promise<void>;
   onRegenerate?: (message: ChatMessage) => void | Promise<void>;
-  // 下拉菜单显示状态
-  @State showUserMenu: boolean = false;
-  @State showAssistantMenu: boolean = false;
+  // 偏好设置：是否自动展开思考过程
+  @StorageProp('autoExpandThinking') autoExpandThinking: boolean = true;
   // 缓存计算结果以提升性能，避免重复计算
   @State private isUserMessage: boolean = false;
   @State private messageContent: string = '';
@@ -154,187 +153,79 @@ export struct MessageItem {
   }
 
   @Builder
-  UserDropdownMenu() {
-    Column() {
-      Button() {
-        Row({ space: 6 }) {
-          Image($r('app.media.trash'))
-            .size({ width: 14, height: 14 })
-            .fillColor($r('sys.color.ohos_id_color_text_primary'))
-          Text('删除')
-            .fontSize(12)
-        }
-      }
-      .padding({
-        left: 12,
-        right: 12,
-        top: 8,
-        bottom: 8
-      })
-      .backgroundColor($r('sys.color.background_primary'))
-      .onClick(() => {
-        if (this.onDelete) {
-          this.onDelete(this.message);
-        }
-        this.showUserMenu = false;
-      })
-    }
-  }
-
-  @Builder
-  AssistantDropdownMenu() {
-    Column() {
-      Button() {
-        Row({ space: 6 }) {
-          Image($r('app.media.trash'))
-            .size({ width: 14, height: 14 })
-            .fillColor($r('sys.color.ohos_id_color_text_primary'))
-          Text('删除')
-            .fontSize(12)
-        }
-      }
-      .backgroundColor($r('sys.color.background_primary'))
-      .padding({
-        left: 12,
-        right: 12,
-        top: 8,
-        bottom: 8
-      })
-      .onClick(() => {
-        if (this.onDelete) {
-          this.onDelete(this.message);
-        }
-        this.showAssistantMenu = false;
-      })
-    }
-  }
-
-  @Builder
   UserActionButtons() {
-    Row({ space: 2 }) {
-      // 复制按钮 - 圆形
-      Button() {
-        Image($r('app.media.rectangle_on_rectangle'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .onClick(() => {
-        if (this.onCopy) {
-          this.onCopy(this.message);
-        }
-      })
-
-      // 编辑按钮 - 圆形
-      Button() {
-        Image($r('app.media.square_and_pencil'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .onClick(() => {
-        if (this.onEdit) {
-          this.onEdit(this.message);
-        }
-      })
-
-      // 更多按钮 - 圆形
-      Button() {
-        Image($r('app.media.more_fill'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .bindPopup(this.showUserMenu, {
-        builder: this.UserDropdownMenu,
-        placement: Placement.BottomLeft,
-        maskColor: Color.Transparent,
-        popupColor: Color.Transparent,
-        enableArrow: false,
-        showInSubWindow: false,
-        onStateChange: (e) => {
-          if (!e.isVisible) {
-            this.showUserMenu = false;
+    Row({ space: 12 }) {
+      // 复制
+      Image($r('app.media.rectangle_on_rectangle'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onCopy) {
+            this.onCopy(this.message);
           }
-        }
-      })
-      .onClick(() => {
-        this.showUserMenu = !this.showUserMenu;
-      })
+        })
+
+      // 编辑
+      Image($r('app.media.square_and_pencil'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onEdit) {
+            this.onEdit(this.message);
+          }
+        })
+
+      // 删除
+      Image($r('app.media.trash'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onDelete) {
+            this.onDelete(this.message);
+          }
+        })
     }
     .width('100%')
     .justifyContent(FlexAlign.End)
-    .margin({ top: 4, right: 4 })
+    .margin({ top: 6, right: 4 })
   }
 
   @Builder
   AssistantActionButtons() {
-    Row({ space: 2 }) {
-      // 复制按钮 - 圆形
-      Button() {
-        Image($r('app.media.rectangle_on_rectangle'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .onClick(() => {
-        if (this.onCopy) {
-          this.onCopy(this.message);
-        }
-      })
-
-      // 重新生成按钮 - 圆形
-      Button() {
-        Image($r('app.media.arrow_clockwise'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .onClick(() => {
-        if (this.onRegenerate) {
-          this.onRegenerate(this.message);
-        }
-      })
-
-      // 更多按钮 - 圆形
-      Button() {
-        Image($r('app.media.more_fill'))
-          .size({ width: 14, height: 14 })
-          .fillColor($r('sys.color.ohos_id_color_text_primary'))
-      }
-      .type(ButtonType.Circle)
-      .backgroundColor($r('app.color.common_background'))
-      .size({ width: 28, height: 28 })
-      .bindPopup(this.showAssistantMenu, {
-        builder: this.AssistantDropdownMenu,
-        placement: Placement.BottomRight,
-        maskColor: Color.Transparent,
-        popupColor: Color.Transparent,
-        enableArrow: false,
-        showInSubWindow: false,
-        onStateChange: (e) => {
-          if (!e.isVisible) {
-            this.showAssistantMenu = false;
+    Row({ space: 12 }) {
+      // 复制
+      Image($r('app.media.rectangle_on_rectangle'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onCopy) {
+            this.onCopy(this.message);
           }
-        }
-      })
-      .onClick(() => {
-        this.showAssistantMenu = !this.showAssistantMenu;
-      })
+        })
+
+      // 重新生成
+      Image($r('app.media.arrow_clockwise'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onRegenerate) {
+            this.onRegenerate(this.message);
+          }
+        })
+
+      // 删除
+      Image($r('app.media.trash'))
+        .size({ width: 14, height: 14 })
+        .fillColor($r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.onDelete) {
+            this.onDelete(this.message);
+          }
+        })
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
-    .margin({ top: 4, left: 4 })
+    .margin({ top: 6, left: 4 })
   }
 
   @Builder
@@ -371,66 +262,60 @@ export struct MessageItem {
 
   @Builder
   ToolCallView() {
-    Column({ space: 8 }) {
+    Column({ space: 4 }) {
       ForEach(this.message.toolCalls || [], (toolCall: import('../../services/DataModels').ToolCall, index: number) => {
-        Row({ space: 8 }) {
+        Row({ space: 6 }) {
           // 图标
           if (toolCall.function?.name === 'search_web') {
             Image($r('app.media.worldclock'))
-              .width(16)
-              .height(16)
-              .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+              .width(14)
+              .height(14)
+              .fillColor($r('app.color.text_secondary'))
           } else {
             Image($r('sys.symbol.square_grid_2x2'))
-              .width(16)
-              .height(16)
-              .fillColor($r('sys.color.ohos_id_color_text_secondary'))
+              .width(14)
+              .height(14)
+              .fillColor($r('app.color.text_secondary'))
           }
 
           // 文本
           Text(this.getToolCallDescription(toolCall))
-            .fontSize(14)
-            .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+            .fontSize(13)
+            .fontColor($r('app.color.text_secondary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
 
-          // 状态 (如果 content 为空，且是最后一个 toolCall，可能正在执行)
+          // 状态
           if (this.message.content.length === 0 && index === (this.message.toolCalls?.length || 0) - 1) {
             LoadingProgress()
-              .width(16)
-              .height(16)
-              .color($r('sys.color.ohos_id_color_text_secondary'))
+              .width(14)
+              .height(14)
+              .color($r('app.color.text_secondary'))
           } else {
             Image($r('sys.symbol.checkmark'))
-              .width(16)
-              .height(16)
-              .fillColor(Color.Green)
+              .width(14)
+              .height(14)
+              .fillColor($r('app.color.text_secondary'))
           }
         }
         .width('100%')
-        .padding(10)
-        .backgroundColor($r('sys.color.ohos_id_color_sub_background'))
-        .borderRadius(8)
+        .padding({ top: 4, bottom: 4 })
       })
     }
     .width('100%')
-    .margin({ bottom: 8 })
+    .margin({ bottom: 6 })
   }
 
   @Builder
   AssistantMessage() {
     Column() {
-      // 只显示模型名称（如果有）
+      // 模型名称（次要文字色，不抢眼）
       if (this.message.modelName) {
-        Row() {
-          Text(this.message.modelName)
-            .fontSize(MessageStyle.MODEL_NAME_FONT_SIZE)
-            // .opacity(0.8)
-            .margin({ bottom: 8 })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Start)
+        Text(this.message.modelName)
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .margin({ bottom: 6 })
       }
 
       // 工具调用展示
@@ -590,7 +475,8 @@ export struct MessageItem {
             } else {
               MarkdownRenderer({
                 content: this.message.content,
-                maxWidth: 'auto' // 自动继承父容器宽度限制
+                maxWidth: 'auto', // 自动继承父容器宽度限制
+                defaultThinkingExpanded: this.autoExpandThinking
               })
             }
           }

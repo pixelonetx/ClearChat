@@ -126,16 +126,34 @@ export struct MessageList {
           this.shouldAutoScroll = true;
         }
       })
-      .onDidScroll((xOffset: number, yOffset: number): void => {
-        if (yOffset > 0 && !this.showScrollToBottomButton) {
-          this.showScrollToBottomButton = true;
+      .onDidScroll((): void => {
+        // 核心逻辑：不在底部就显示按钮，在底部就隐藏
+        if (this.shouldAutoScroll) {
+          // 自动滚动期间（流式输出）不显示按钮
+          return;
+        }
+        try {
+          const atEnd = this.scroller.isAtEnd();
+          if (atEnd && this.showScrollToBottomButton) {
+            this.showScrollToBottomButton = false;
+            this.shouldAutoScroll = true;
+          } else if (!atEnd && !this.showScrollToBottomButton) {
+            this.showScrollToBottomButton = true;
+          }
+        } catch (_e) {
+          // isAtEnd() 不可用时忽略，依赖 onScrollEdge 兜底
+        }
+      })
+      .onTouch((event: TouchEvent): void => {
+        // 用户触摸滚动区域时，关闭自动滚动（交由滚动事件判断是否在底部）
+        if (event.type === TouchType.Down) {
           this.shouldAutoScroll = false;
         }
       })
-      .layoutWeight(1)
       .scrollable(ScrollDirection.Vertical)
       .scrollBar(BarState.Off)
       .width('100%')
+      .height('100%')
       .align(Alignment.TopStart)
       .onClick((): void => {
         this.onHideKeyboard?.();
@@ -146,6 +164,8 @@ export struct MessageList {
         this.ScrollToBottomButton()
       }
     }
+    .layoutWeight(1)
+    .width('100%')
     .alignContent(Alignment.Bottom)
   }
 
