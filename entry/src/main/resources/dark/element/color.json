@@ -43,6 +43,14 @@
     {
       "name": "input_area_color",
       "value": "#1C1C1E"
+    },
+    {
+      "name": "accent",
+      "value": "#0A84FF"
+    },
+    {
+      "name": "error_color",
+      "value": "#FF453A"
     }
   ]
 }

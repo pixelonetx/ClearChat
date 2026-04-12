@@ -609,7 +609,18 @@ export class MarkdownParser {
    * @returns 如果是表格分隔行返回true，否则返回false
    */
   private isTableSeparatorLine(line: string): boolean {
-    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test(line.trim());
+    const trimmed = line.trim();
+    if (!trimmed.includes('-')) {
+      return false;
+    }
+    // 用 split 代替嵌套量词正则，避免灾难性回溯
+    const parts = trimmed.split('|');
+    // 至少需要有内容部分
+    const contentParts = parts.filter(p => p.trim() !== '');
+    if (contentParts.length === 0) {
+      return false;
+    }
+    return contentParts.every(part => /^:?-{3,}:?$/.test(part.trim()));
   }
 
   /**

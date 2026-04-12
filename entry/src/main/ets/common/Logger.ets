@@ -50,7 +50,7 @@ interface LoggerConfig {
  * 默认配置（生产环境建议设置为 INFO 或 WARN）
  */
 const DEFAULT_CONFIG: LoggerConfig = {
-  minLevel: LogLevel.DEBUG, // 开发时使用 DEBUG，生产时改为 INFO 或 WARN
+  minLevel: LogLevel.INFO, // 生产环境使用 INFO，开发调试时可改为 DEBUG
   enableConsole: false,
   enableHilog: true
 };

@@ -48,10 +48,11 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
       const startTime = Date.now();
       
       const encodedQuery = encodeURIComponent(query);
-      const url = `https://www.googleapis.com/customsearch/v1?q=${encodedQuery}&key=${serviceOptions.apiKey}&cx=${serviceOptions.searchEngineId}&num=${commonOptions.resultSize ?? 10}`;
-      
+      const url = `https://www.googleapis.com/customsearch/v1?q=${encodedQuery}&cx=${serviceOptions.searchEngineId}&num=${commonOptions.resultSize ?? 10}`;
+
       const headers: Record<string, string> = {
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'X-Goog-Api-Key': serviceOptions.apiKey
       };
       
       const response = await this.makeRequest(

@@ -8,6 +8,9 @@
 import { preferences } from '@kit.ArkData';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { common } from '@kit.AbilityKit';
+import { createLogger, LogDomain } from '../common/Logger';
+
+const logger = createLogger('AppPreferences', LogDomain.APP);
 
 const PREFERENCES_NAME = 'app_settings';
 const KEY_THEME_MODE = 'theme_mode';
@@ -58,7 +61,7 @@ export class AppPreferences {
       // 应用主题
       AppPreferences.applyTheme(context, savedMode);
     } catch (err) {
-      console.error('Failed to init theme:', err);
+      logger.error('Failed to init theme: %{public}s', String(err));
     }
   }
 
@@ -78,7 +81,7 @@ export class AppPreferences {
       // 应用主题
       AppPreferences.applyTheme(context, mode);
     } catch (err) {
-      console.error('Failed to set theme:', err);
+      logger.error('Failed to set theme: %{public}s', String(err));
     }
   }
 
@@ -90,7 +93,7 @@ export class AppPreferences {
       const colorMode = AppPreferences.toColorMode(mode);
       context.getApplicationContext().setColorMode(colorMode);
     } catch (err) {
-      console.error('Failed to apply theme:', err);
+      logger.error('Failed to apply theme: %{public}s', String(err));
     }
   }
 
@@ -135,7 +138,7 @@ export class AppPreferences {
 
       AppStorage.setOrCreate('autoExpandThinking', enabled);
     } catch (err) {
-      console.error('Failed to set autoExpandThinking:', err);
+      logger.error('Failed to set autoExpandThinking: %{public}s', String(err));
     }
   }
 }

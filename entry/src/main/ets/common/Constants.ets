@@ -144,12 +144,12 @@ export class AnimationCurves {
  * 颜色资源引用
  */
 export class ColorResources {
-  static readonly BG_PRIMARY = $r('app.color.bg_secondary');
+  static readonly BG_PRIMARY = $r('app.color.common_background');
   static readonly BG_SECONDARY = $r('app.color.bg_secondary');
-  static readonly TEXT_PRIMARY = $r('app.color.text_secondary');
+  static readonly TEXT_PRIMARY = $r('app.color.text_color');
   static readonly TEXT_SECONDARY = $r('app.color.text_secondary');
-  static readonly ACCENT = $r('app.color.text_color');
-  static readonly ERROR = $r('app.color.text_secondary');
+  static readonly ACCENT = $r('app.color.accent');
+  static readonly ERROR = $r('app.color.error_color');
   static readonly BORDER_PRIMARY = $r('app.color.border_primary');
 }
 
