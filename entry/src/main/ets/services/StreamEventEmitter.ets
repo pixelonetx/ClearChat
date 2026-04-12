@@ -10,6 +10,10 @@
  * 4. 易于测试 - 独立的事件单元
  */
 
+import { createLogger, LogDomain } from '../common/Logger';
+
+const logger = createLogger('StreamEventEmitter', LogDomain.STREAM);
+
 export enum StreamEventType {
   // 数据事件
   DATA = 'data',
@@ -130,7 +134,7 @@ export class StreamEventEmitter {
           listener(payload);
         } catch (error) {
           // 避免一个监听器的错误影响其他监听器
-          console.error(`Error in listener for ${eventType}:`, error);
+          logger.error('Error in listener for %{public}s: %{public}s', String(eventType), String(error));
         }
       });
     }
@@ -147,7 +151,7 @@ export class StreamEventEmitter {
         try {
           listener(payload);
         } catch (error) {
-          console.error(`Error in once listener for ${eventType}:`, error);
+          logger.error('Error in once listener for %{public}s: %{public}s', String(eventType), String(error));
         }
       });
       this.once_listeners.delete(key);

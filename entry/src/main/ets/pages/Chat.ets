@@ -4,48 +4,29 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ChatMessage, AppSettings, Citation, ChatMessageMetadataUpdate, StreamMetadata } from '../services/DataModels';
+import { ChatMessage, AppSettings } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
-import { StreamEventEmitter, StreamEventType, EventPayload } from '../services/StreamEventEmitter';
-import { TitleGenerationService } from '../services/TitleGenerationService';
 import { ClipboardManager } from '../components/utils/ClipboardManager';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { NativeDialogHelper } from '../components/dialogs/NativeDialogHelper';
-import { MessageItem } from '../components/chat/MessageItem';
 import { RenameConversationDialog } from '../components/dialogs/RenameConversationDialog';
 import { ModelSelectorSheet } from '../components/dialogs/ModelSelectorDialog';
 import { AbortController, createAbortController } from '../interfaces/AbortController';
-import { SearchToolService } from '../services/search/SearchToolService';
 import { SearchConfigManager } from '../services/search/SearchConfigManager';
-import { cloneChatMessage, getFriendlyErrorMessage, containsSuspiciousContent, shouldGenerateTitle } from '../viewmodels/ChatUtils';
+import { cloneChatMessage, getFriendlyErrorMessage, containsSuspiciousContent } from '../viewmodels/ChatUtils';
 import { ChatSidebar, ChatSidebarConfig } from '../components/chat/ChatSidebar';
 import { MessageList, MessageListConfig } from '../components/chat/MessageList';
 import { throttle, debounce } from '../common/NetworkUtils';
 import { ChatViewModel } from '../viewmodels/ChatViewModel';
+import { ChatStreamingService, StreamingCallbacks, ModelInfo, ApiConfig } from '../services/ChatStreamingService';
+import { SettingsReloadService, SettingsReloadCallbacks } from '../services/SettingsReloadService';
+import { groupConversationsByDate } from '../services/ConversationGroupHelper';
 
 const DOMAIN = 0x0000;
 const TAG = 'Chat';
-
-// 定义模型信息接口
-interface ModelInfo {
-  modelName: string;
-  providerName: string;
-}
-
-// 定义流式消息初始化结果接口
-interface StreamingMessageResult {
-  index: number;
-  id: number;
-}
-
-// 定义搜索工具参数接口
-interface SearchToolArgs {
-  query: string;
-  resultSize?: number;
-}
 
 class ToastOptions {
   message: string;
@@ -115,19 +96,17 @@ struct Chat {
   @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
   private databaseManager = DatabaseManager.getInstance();
   private networkManager = NetworkManagerV2.getInstance();
-  private titleGenerationService: TitleGenerationService = new TitleGenerationService();
-  private searchToolService = SearchToolService.getInstance();
   private searchConfigManager = SearchConfigManager.getInstance();
   private scroller: Scroller = new Scroller();
   private currentSettings: AppSettings | null = null;
-  private previousSettingsVersion: number = 0;
-  private pendingSettingsReload: Promise<void> | null = null;
-  private requestedSettingsVersion: number = 0;
   private handledReloadVersion: number = 0;
   private messageDataSource: ArrayDataSource<ChatMessage> = new ArrayDataSource<ChatMessage>(this.messages);
-  private currentAbortController: AbortController | null = null; // 新增：用于中断请求
-  private shouldAbortRequest: boolean = false; // 中断请求标志
-  private userAbortedGeneration: boolean = false; // 用户主动停止标记
+  private currentAbortController: AbortController | null = null;
+  private userAbortedGeneration: boolean = false;
+
+  // 提取的服务（在 aboutToAppear 的 initServices 中初始化）
+  private streamingService: ChatStreamingService | null = null;
+  private settingsReloadService: SettingsReloadService | null = null;
 
   // 防抖/节流优化包装函数
   private throttledScrollToBottom: () => void = throttle(() => this.doScrollToBottom(), 100);
@@ -520,11 +499,13 @@ struct Chat {
   }
 
   async aboutToAppear() {
+    // 初始化提取的服务
+    this.initServices();
+
     await this.initializeApp();
-    this.previousSettingsVersion = this.normalizeSettingsVersion(this.settingsVersion);
-    this.requestedSettingsVersion = this.previousSettingsVersion;
+    this.settingsReloadService!.initialize(this.settingsVersion);
     this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE) // 设置键盘避让模式
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE)
 
     // 同步状态到 ViewModel
     this.syncStateToViewModel();
@@ -541,14 +522,114 @@ struct Chat {
         });
       }
     } catch (err) {
-      
+
     }
+  }
+
+  /**
+   * 初始化提取的服务，建立回调绑定
+   */
+  private initServices(): void {
+    const streamingCallbacks: StreamingCallbacks = {
+      replaceMessageAt: (index: number, updater: (message: ChatMessage) => void): void => {
+        this.replaceMessageAt(index, updater);
+      },
+      appendMessage: (message: ChatMessage): number => {
+        return this.appendMessage(message);
+      },
+      getMessages: (): ChatMessage[] => {
+        return this.messages;
+      },
+      getCurrentConversationId: (): string | undefined => {
+        return this.currentConversation?.id;
+      },
+      getCurrentModelInfo: (): ModelInfo => {
+        return this.getCurrentModelInfo();
+      },
+      getNextTimestamp: (): number => {
+        return this.getNextTimestamp();
+      },
+      showToast: (message: string, duration?: number): void => {
+        this.showToast(message, duration);
+      },
+      scrollToBottom: (): void => {
+        this.scrollToBottom();
+      },
+      setLoadingState: (isLoading: boolean, isGenerating: boolean): void => {
+        this.isLoading = isLoading;
+        this.isGenerating = isGenerating;
+      },
+      setAbortController: (controller: AbortController | null): void => {
+        this.currentAbortController = controller;
+      },
+      isUserAborted: (): boolean => {
+        return this.userAbortedGeneration;
+      },
+      setUserAborted: (value: boolean): void => {
+        this.userAbortedGeneration = value;
+      },
+      getApiConfig: (): ApiConfig | null => {
+        if (!this.currentSettings) {
+          return null;
+        }
+        const config: ApiConfig = {
+          apiUrl: this.currentSettings.apiUrl,
+          apiKey: this.currentSettings.apiKey,
+          modelName: this.currentSettings.modelName
+        };
+        return config;
+      },
+      getCurrentConversationTitle: (): string => {
+        return this.currentConversation?.title ?? '';
+      },
+      onTitleGenerated: async (title: string): Promise<void> => {
+        if (this.currentConversation && title !== this.currentConversation.title) {
+          await this.databaseManager.updateConversationTitle(this.currentConversation.id, title);
+          this.currentConversation.title = title;
+          await this.loadConversations();
+        }
+      }
+    };
+
+    this.streamingService = new ChatStreamingService(streamingCallbacks);
+
+    const reloadCallbacks: SettingsReloadCallbacks = {
+      loadSettings: async (): Promise<void> => {
+        await this.loadSettings();
+      },
+      loadConversations: async (): Promise<void> => {
+        await this.loadConversations();
+      },
+      loadChatHistory: async (): Promise<void> => {
+        if (this.conversations.length > 0) {
+          await this.loadChatHistory();
+        }
+      },
+      handleEmptyConversations: async (): Promise<void> => {
+        if (this.conversations.length === 0) {
+          hilog.info(DOMAIN, TAG, 'No conversations after reload, creating empty conversation');
+          try {
+            const emptyConversation = await this.databaseManager.createConversation('新对话');
+            this.currentConversation = emptyConversation;
+            this.conversations.push(emptyConversation);
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          } catch (createError) {
+            hilog.error(DOMAIN, TAG, 'Failed to create conversation during reload: %{public}s', String(createError));
+            this.currentConversation = null;
+            this.messages = [];
+            this.notifyMessagesUpdated();
+          }
+        }
+      }
+    };
+
+    this.settingsReloadService = new SettingsReloadService(reloadCallbacks);
   }
 
   async onPageShow() {
     const latestVersion = this.conversationsReloadVersion ?? 0;
 
-    // 页面显示时，若检测到刷新版本变化，则强制重新加载对话/消息
     if (latestVersion !== this.handledReloadVersion) {
       hilog.info(DOMAIN, TAG,
         'Chat: onPageShow detected conversationsReloadVersion change -> %{public}d (handled=%{public}d)', latestVersion,
@@ -558,20 +639,19 @@ struct Chat {
       this.notifyMessagesUpdated();
       this.conversations = [];
       this.handledReloadVersion = latestVersion;
-      await this.reloadChatState('conversationsReloadVersion');
+      await this.settingsReloadService!.reload('conversationsReloadVersion');
       return;
     }
 
     if (this.isInitialized) {
-      // 如果不是因为清空数据，则按原逻辑检查设置版本
       hilog.debug(DOMAIN, TAG, 'Chat: onPageShow triggered, reloading chat state due to settings version.');
-      await this.reloadChatState('onPageShow');
+      await this.settingsReloadService!.reload('onPageShow');
     }
   }
 
   aboutToRender() {
-    this.logSettingsVersionState('aboutToRender before check');
-    this.checkSettingsVersionChange();
+    this.settingsReloadService!.logState('aboutToRender before check', this.settingsVersion);
+    this.settingsReloadService!.checkVersionChange(this.settingsVersion, this.isInitialized);
   }
 
   async initializeApp() {
@@ -681,119 +761,11 @@ struct Chat {
     }
   }
 
-  private async reloadChatState(reason: string = 'manual', targetVersion?: number): Promise<void> {
-    const desiredVersion = targetVersion ?? this.normalizeSettingsVersion(this.settingsVersion);
-    this.requestedSettingsVersion = desiredVersion;
-
-    if (!this.pendingSettingsReload) {
-      this.pendingSettingsReload = this.performSettingsReload(reason);
-    } else {
-      hilog.warn(DOMAIN, TAG,
-        'Chat: settings reload already in progress, updated targetVersion=%{public}d, reason=%{public}s',
-        this.requestedSettingsVersion, String(reason));
-    }
-
-    try {
-      await this.pendingSettingsReload;
-    } finally {
-      // no-op: performSettingsReload will reset pendingSettingsReload when finished
-    }
-  }
-
-  private async performSettingsReload(initialReason: string): Promise<void> {
-    let attempt = 0;
-    try {
-      while (true) {
-        attempt += 1;
-        const targetVersion = this.requestedSettingsVersion;
-        hilog.info(DOMAIN, TAG,
-          'Chat: reloadChatState start [reason=%{public}s] attempt=%{public}d targetVersion=%{public}d',
-          String(initialReason), attempt, targetVersion);
-        await this.loadSettings();
-        await this.loadConversations();
-
-        if (this.conversations.length === 0) {
-          // 修复：如果没有对话，创建一个空对话，确保 currentConversation 不为空
-          hilog.info(DOMAIN, TAG, 'No conversations after reload, creating empty conversation');
-          try {
-            const emptyConversation = await this.databaseManager.createConversation('新对话');
-            this.currentConversation = emptyConversation;
-            this.conversations.push(emptyConversation);
-            this.messages = [];
-            this.notifyMessagesUpdated();
-          } catch (createError) {
-            hilog.error(DOMAIN, TAG, 'Failed to create conversation during reload: %{public}s', String(createError));
-            this.currentConversation = null;
-            this.messages = [];
-            this.notifyMessagesUpdated();
-          }
-        } else {
-          await this.loadChatHistory();
-        }
-
-        this.previousSettingsVersion = targetVersion;
-        this.logSettingsVersionState('Chat: reloadChatState completed');
-
-        if (this.requestedSettingsVersion === targetVersion) {
-          break;
-        }
-
-        hilog.debug(DOMAIN, TAG,
-          'Chat: detected newer settings reload request during execution, repeating with latest targetVersion');
-      }
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Chat: reloadChatState failed: %{public}s', String(error));
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error(String(error));
-    } finally {
-      this.pendingSettingsReload = null;
-    }
-  }
-
-  private checkSettingsVersionChange() {
-    if (!this.isInitialized) {
-      return;
-    }
-
-    const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
-    if (currentVersion === this.previousSettingsVersion && !this.pendingSettingsReload) {
-      return;
-    }
-
-    hilog.info(DOMAIN, TAG, 'Chat: detected settingsVersion change -> %{public}s', String(currentVersion));
-    this.reloadChatState('settingsVersion change', currentVersion).catch((error: Error) => {
-      hilog.error(DOMAIN, TAG, 'Failed to refresh chat after settings change: %{public}s', String(error));
-    });
-  }
-
-  private normalizeSettingsVersion(value: number): number {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    return 0;
-  }
-
-  private logSettingsVersionState(prefix: string) {
-    const current = this.normalizeSettingsVersion(this.settingsVersion);
-    hilog.debug(DOMAIN, TAG, '%{public}s; currentVersion=%{public}d, previousVersion=%{public}d', String(prefix),
-      current, this.previousSettingsVersion);
-  }
-
+  /**
+   * 等待最新设置加载完成（委托给 SettingsReloadService）
+   */
   private async waitForLatestSettings(reason: string): Promise<void> {
-    if (this.pendingSettingsReload) {
-      hilog.debug(DOMAIN, TAG, 'Chat: awaiting pending settings reload before %{public}s', String(reason));
-      await this.pendingSettingsReload;
-    }
-
-    const currentVersion = this.normalizeSettingsVersion(this.settingsVersion);
-    if (currentVersion !== this.previousSettingsVersion) {
-      hilog.info(DOMAIN, TAG,
-        'Chat: settings version mismatch detected during %{public}s, triggering reload to %{public}d', String(reason),
-        currentVersion);
-      await this.reloadChatState(reason, currentVersion);
-    }
+    await this.settingsReloadService!.waitForLatest(reason, this.settingsVersion);
   }
 
   async loadChatHistory() {
@@ -1046,27 +1018,7 @@ struct Chat {
     }
   }
 
-  async generateConversationTitle() {
-    if (!this.currentConversation || !this.currentSettings) {
-      return;
-    }
-
-    try {
-      const title: string = await this.titleGenerationService.generateTitle(
-        this.messages,
-        this.currentSettings.apiKey,
-        this.currentSettings.apiUrl,
-        this.currentSettings.modelName
-      );
-      if (title && title !== this.currentConversation.title) {
-        await this.databaseManager.updateConversationTitle(this.currentConversation.id, title);
-        this.currentConversation.title = title;
-        await this.loadConversations();
-      }
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to generate conversation title: %{public}s', String(error));
-    }
-  }
+  // generateConversationTitle -> 已提取到 ChatStreamingService
 
   // 获取当前活跃的模型和提供商信息
   getCurrentModelInfo(): ModelInfo {
@@ -1148,102 +1100,8 @@ struct Chat {
     });
   }
 
-  // 分离职责 - 初始化流式消息
-  /**
-   * 初始化流式AI消息并保存到数据库
-   * @param userMessage 用户消息
-   * @param conversationId 对话ID
-   * @returns 流式消息索引和数据库ID
-   */
-  private async initializeStreamingMessage(
-    userMessage: ChatMessage,
-    conversationId: string
-  ): Promise<StreamingMessageResult> {
-    const modelInfo = this.getCurrentModelInfo();
-    const streamingMessage = new ChatMessage('', 'assistant', {
-      conversationId: conversationId,
-      modelName: modelInfo.modelName,
-      providerName: modelInfo.providerName,
-      // 关键修复：使用逻辑时间戳确保AI消息严格晚于用户消息
-      timestamp: this.getNextTimestamp()
-    });
-
-    const index = this.appendMessage(streamingMessage);
-    const id = await this.databaseManager.insertChatMessage(streamingMessage);
-
-    this.replaceMessageAt(index, (msg) => {
-      msg.id = id;
-    });
-
-    const result: StreamingMessageResult = { index: index, id: id };
-    return result;
-  }
-
-  // 分离职责 - 追加数据块
-  /**
-   * 将流式数据块追加到消息中
-   * @param messageIndex 消息索引
-   * @param chunk 数据块
-   * @param conversationId 对话ID
-   */
-  private appendChunkToMessage(
-    messageIndex: number,
-    chunk: string,
-    conversationId: string
-  ): void {
-    if (this.currentConversation?.id !== conversationId) {
-      return;
-    }
-
-    if (messageIndex < this.messages.length) {
-      this.replaceMessageAt(messageIndex, (msg) => {
-        msg.content += chunk;
-      });
-    }
-  }
-
-  // 分离职责 - 处理流式完成
-  /**
-   * 处理流式请求完成，重置UI状态
-   */
-  private handleStreamComplete(): void {
-    this.isLoading = false;
-    this.isGenerating = false;
-    this.currentAbortController = null;
-    this.userAbortedGeneration = false;
-  }
-
-  // 分离职责 - 持久化消息
-  /**
-   * 异步持久化流式消息到数据库
-   * @param messageIndex 消息索引
-   * @param conversationId 对话ID
-   */
-  private async persistStreamedMessage(
-    messageIndex: number,
-    conversationId: string
-  ): Promise<void> {
-    if (messageIndex >= this.messages.length) {
-      return;
-    }
-
-    const message = this.messages[messageIndex];
-    if (!message.id) {
-      return;
-    }
-
-    try {
-      await this.databaseManager.updateChatMessage(message.id, message.content);
-
-      if (!this.userAbortedGeneration && shouldGenerateTitle(this.messages, this.currentConversation?.title ?? '')) {
-        await this.generateConversationTitle();
-      }
-
-      await this.databaseManager.updateConversationMessageCount(conversationId);
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Error persisting message: %{public}s', String(error));
-    }
-  }
+  // initializeStreamingMessage, appendChunkToMessage, handleStreamComplete,
+  // persistStreamedMessage -> 已提取到 ChatStreamingService
 
   // 控制方法：停止生成与滚动行为，提前声明以便在UI回调中使用
   private stopGeneration(): void {
@@ -1287,294 +1145,10 @@ struct Chat {
     }
   }
 
-  // 事件驱动处理 - 设置流式事件处理
-  /**
-   * 为流式请求设置事件处理（替代回调地狱）
-   * @param emitter 事件发射器
-   * @param streamingMessageIndex 流式消息索引
-   * @param conversationId 对话ID
-   * @param isToolContinuation 是否是工具继续阶段（默认 false）
-   */
-  private setupStreamEventHandlers(
-    emitter: StreamEventEmitter,
-    streamingMessageIndex: number,
-    conversationId: string,
-    isToolContinuation: boolean = false
-  ): void {
-    hilog.info(DOMAIN, TAG,
-      'Setting up stream event handlers for message index: %{public}d, isToolContinuation=%{public}s',
-      streamingMessageIndex, String(isToolContinuation));
+  // setupStreamEventHandlers, setupRegenerationStreamEventHandlers,
+  // handleStreamError, updateStreamingMessageMetadata -> 已提取到 ChatStreamingService
 
-    // 标志：用于跟踪是否已处理工具调用（防止 COMPLETE 事件在工具执行期间重置状态）
-    let toolCallHandled = false;
-
-    // 监听数据事件
-    emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
-      const chunk = payload as string;
-      
-      this.appendChunkToMessage(streamingMessageIndex, chunk, conversationId);
-    });
-
-    // 监听元数据事件
-    emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
-      const meta = payload as StreamMetadata;
-      
-      this.updateStreamingMessageMetadata(streamingMessageIndex, meta, conversationId);
-    });
-
-    // 监听完成事件
-    emitter.once(StreamEventType.COMPLETE, () => {
-      hilog.info(DOMAIN, TAG, 'Received COMPLETE event for message index: %{public}d, toolCallHandled=%{public}s',
-        streamingMessageIndex, String(toolCallHandled));
-
-      // 关键修复：只有在没有工具调用时才重置状态
-      // 如果有工具调用，让 continueConversationWithToolResult 中的流来处理完成
-      if (!toolCallHandled) {
-        this.handleStreamComplete();
-      }
-
-      // 异步持久化，不阻塞UI状态更新
-      if (!toolCallHandled) {
-        this.persistStreamedMessage(streamingMessageIndex, conversationId)
-          .catch((err: Error) => {
-            
-          });
-      }
-    });
-
-    // 监听错误事件
-    emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
-      const error = payload as Error;
-      hilog.error(DOMAIN, TAG, 'Received ERROR event: %{public}s', String(error));
-      // 在工具继续阶段的错误会有不同的处理
-      this.handleStreamError(streamingMessageIndex, error, isToolContinuation);
-    });
-
-    // 监听警告事件（可选）
-    emitter.on(StreamEventType.WARNING, (payload: EventPayload) => {
-      const warning = payload as string;
-      
-    });
-
-    // 监听工具调用事件
-    emitter.once(StreamEventType.TOOL_CALL, (payload: EventPayload) => {
-      const toolCalls = payload as import('../services/StreamEventEmitter').ToolCallData[];
-      
-
-      // 标记已处理工具调用，这样之后的 COMPLETE 事件就不会重置状态
-      toolCallHandled = true;
-
-      this.handleToolCalls(toolCalls, streamingMessageIndex, conversationId)
-        .catch((err: Error) => {
-          hilog.error(DOMAIN, TAG, 'Failed to handle tool calls: %{public}s', String(err));
-          // 工具调用错误不应该通过 handleStreamError 处理，因为已经在 handleToolCalls 中处理过了
-          // this.handleStreamError(streamingMessageIndex, err);
-        });
-    });
-
-    
-  }
-
-  // 事件驱动处理 - 设置重新生成事件处理
-  /**
-   * 为重新生成流式请求设置事件处理
-   * @param emitter 事件发射器
-   * @param streamingMessageIndex 重新生成消息的索引
-   * @param conversationId 对话ID
-   */
-  private setupRegenerationStreamEventHandlers(
-    emitter: StreamEventEmitter,
-    streamingMessageIndex: number,
-    conversationId: string
-  ): void {
-    // 监听数据事件 - 更新重新生成的消息内容
-    emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
-      const chunk = payload as string;
-      if (!this.currentConversation || this.currentConversation.id !== conversationId) {
-        return;
-      }
-      if (streamingMessageIndex >= this.messages.length || !this.messages[streamingMessageIndex]) {
-        return;
-      }
-
-      this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-        regeneratedMessage.content += chunk;
-      });
-
-      hilog.debug(DOMAIN, TAG, 'Regenerated content length=%{public}d',
-        this.messages[streamingMessageIndex].content.length);
-    });
-
-    // 监听元数据事件 - 复用统一的元数据更新方法
-    emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
-      const meta = payload as StreamMetadata;
-      this.updateStreamingMessageMetadata(streamingMessageIndex, meta, conversationId);
-    });
-
-    // 监听完成事件 - 处理重新生成完成
-    emitter.once(StreamEventType.COMPLETE, () => {
-      
-
-      // 立即重置UI状态，不等待数据库操作
-      this.isLoading = false;
-      this.isGenerating = false;
-      this.currentAbortController = null;
-
-      // 异步执行数据库操作，不阻塞UI状态更新
-      (async () => {
-        try {
-          if (this.currentConversation && this.currentConversation.id === conversationId) {
-            if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-              const regeneratedMessage = this.messages[streamingMessageIndex];
-
-              // 更新数据库中的消息内容
-              if (regeneratedMessage.id !== undefined) {
-                await this.databaseManager.updateChatMessage(regeneratedMessage.id, regeneratedMessage.content);
-                hilog.info(DOMAIN, TAG, 'Regenerated message updated in DB ID=%{public}s',
-                  String(regeneratedMessage.id));
-              } else {
-                // 兜底方案：如果没有ID，保存到数据库
-                const savedId = await this.databaseManager.insertChatMessage(regeneratedMessage);
-                this.replaceMessageAt(streamingMessageIndex, (messageToPersist: ChatMessage) => {
-                  messageToPersist.id = savedId;
-                });
-                
-              }
-              // 滚动到底部
-              setTimeout(() => {
-                if (this.scroller) {
-                  this.scroller.scrollEdge(Edge.Bottom);
-                }
-              }, 100);
-            }
-          }
-        } catch (dbError) {
-          hilog.error(DOMAIN, TAG, 'Error during regeneration database operations: %{public}s', String(dbError));
-        }
-      })();
-    });
-
-    // 监听错误事件 - 处理重新生成失败
-    emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
-      const error = payload as Error;
-      
-
-      if (this.currentConversation && this.currentConversation.id === conversationId) {
-        if (streamingMessageIndex < this.messages.length && this.messages[streamingMessageIndex]) {
-          this.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
-            regeneratedMessage.content = `重新生成失败: ${error.message || error}`;
-          });
-        }
-      }
-
-      this.isLoading = false;
-      this.isGenerating = false;
-      this.currentAbortController = null;
-      this.showToast('重新生成失败');
-    });
-  }
-
-  // 分离职责 - 处理流式错误
-  /**
-   * 处理流式请求错误
-   * @param messageIndex 消息索引
-   * @param error 错误对象
-   * @param isToolContinuation 是否是工具继续阶段的错误（默认 false）
-   */
-  private handleStreamError(messageIndex: number, error: Error, isToolContinuation: boolean = false): void {
-    const friendlyError = getFriendlyErrorMessage(error);
-
-    // 如果是用户主动中止，保留已显示的内容；否则显示错误提示
-    if (!this.userAbortedGeneration && messageIndex < this.messages.length) {
-      this.replaceMessageAt(messageIndex, (msg) => {
-        // 如果消息为空，显示错误提示；如果已有内容，追加错误说明
-        if (msg.content.length === 0) {
-          msg.content = `[错误] ${friendlyError}`;
-        } else {
-          // 根据是否是工具继续阶段来显示不同的错误前缀
-          const errorPrefix = isToolContinuation ? '继续生成失败' : '生成过程中出现错误';
-          msg.content += `\n\n[错误] ${errorPrefix}: ${friendlyError}`;
-        }
-      });
-    }
-
-    this.isLoading = false;
-    this.isGenerating = false;
-    this.currentAbortController = null;
-    this.userAbortedGeneration = false;
-    this.showToast(friendlyError);
-  }
-
-  // 分离职责 - 更新元数据
-  /**
-   * 更新流式消息的元数据
-   * @param streamingMessageIndex 流式消息索引
-   * @param meta 元数据
-   * @param conversationId 对话ID
-   */
-  private updateStreamingMessageMetadata(
-    streamingMessageIndex: number,
-    meta: StreamMetadata,
-    conversationId: string
-  ): void {
-    if (!this.currentConversation || this.currentConversation.id !== conversationId) {
-      return;
-    }
-    if (streamingMessageIndex >= this.messages.length) {
-      return;
-    }
-
-    let metadataChanged = false;
-    this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-      if (meta.id && message.providerMessageId !== meta.id) {
-        message.providerMessageId = meta.id;
-        metadataChanged = true;
-      }
-      if (meta.systemFingerprint && message.systemFingerprint !== meta.systemFingerprint) {
-        message.systemFingerprint = meta.systemFingerprint;
-        metadataChanged = true;
-      }
-      if (meta.created !== undefined) {
-        const createdTimestamp = meta.created * 1000;
-        if (message.timestamp < createdTimestamp) {
-          message.timestamp = createdTimestamp;
-          message.providerCreatedAt = meta.created;
-          metadataChanged = true;
-        } else if (message.providerCreatedAt !== meta.created) {
-          message.providerCreatedAt = meta.created;
-          metadataChanged = true;
-        }
-      }
-    });
-
-    if (metadataChanged) {
-      const persistedMessage = this.messages[streamingMessageIndex];
-      if (persistedMessage?.id !== undefined) {
-        const update: ChatMessageMetadataUpdate = {
-          timestamp: persistedMessage.timestamp,
-          providerMessageId: persistedMessage.providerMessageId ?? null,
-          providerCreatedAt: persistedMessage.providerCreatedAt ?? null,
-          systemFingerprint: persistedMessage.systemFingerprint ?? null,
-          modelName: persistedMessage.modelName ?? null,
-          providerName: persistedMessage.providerName ?? null
-        };
-        if (meta && meta.citations) {
-          update.citations = meta.citations as Citation[];
-          this.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-            if (update.citations) {
-              message.citations = update.citations as Citation[];
-            }
-          });
-        }
-        this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
-          .catch((metadataError: Error) => {
-            
-          });
-      }
-    }
-  }
-
-  // 简化的主函数 - 仅负责流程控制
+  // 主函数 - 仅负责流程控制
   async sendMessage() {
     try {
       // 验证和准备消息
@@ -1586,7 +1160,6 @@ struct Chat {
       // 前置检查和准备
       await this.waitForLatestSettings('sendMessage');
       this.hideKeyboard();
-      // 发送消息时重置自动滚动状态
       this.shouldAutoScroll = true;
       this.showScrollToBottomButton = false;
       this.scrollToBottom();
@@ -1616,18 +1189,17 @@ struct Chat {
         msg.id = userMessageId;
       });
 
-      // 初始化流式消息
-      const streamingResult: StreamingMessageResult =
-        await this.initializeStreamingMessage(userMessage, targetConversationId);
-      const streamingIndex: number = streamingResult.index;
+      // 初始化流式消息（委托给 streamingService）
+      const streamingResult = await this.streamingService!.initializeStreamingMessage(userMessage, targetConversationId);
+      const streamingIndex = streamingResult.index;
 
-      // 准备AI消息列表
-      const messagesForAI = this.prepareMessagesForAPI(userMessage);
+      // 准备AI消息列表（委托给 streamingService）
+      const messagesForAI = this.streamingService!.prepareMessagesForAPI(userMessage);
 
-      // 检查是否启用联网搜索并构建工具数组
-      const tools = this.getSearchTools();
+      // 检查搜索工具（委托给 streamingService）
+      const tools = this.streamingService!.getSearchTools(this.enableWebSearch);
 
-      // 发送流式请求（使用新的事件驱动架构）
+      // 发送流式请求
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings!.apiUrl,
         this.currentSettings!.apiKey,
@@ -1640,8 +1212,11 @@ struct Chat {
         }
       );
 
-      // 设置事件处理（替代回调地狱）
-      this.setupStreamEventHandlers(emitter, streamingIndex, targetConversationId);
+      // 设置事件处理（委托给 streamingService）
+      this.streamingService!.setupStreamEventHandlers(
+        emitter, streamingIndex, targetConversationId,
+        this.currentConversation?.title ?? ''
+      );
 
     } catch (error) {
       this.isLoading = false;
@@ -1666,366 +1241,10 @@ struct Chat {
     }
   }
 
-  /**
-   * 获取联网搜索工具定义数组
-   * 统一提取，避免在 sendMessage / continueConversation / regenerateMessage 中重复
-   */
-  private getSearchTools(): object[] {
-    if (!this.enableWebSearch) {
-      return [];
-    }
-    try {
-      const searchConfig = this.searchConfigManager.getConfig();
-      if (searchConfig && searchConfig.enabledServices.length > 0) {
-        const selectedService = this.searchConfigManager.getSelectedService();
-        if (selectedService) {
-          const toolDef = this.searchToolService.getToolDefinition();
-          hilog.info(DOMAIN, TAG, 'Web search enabled with service: %{public}s', selectedService.type);
-          return [toolDef as object];
-        }
-      }
-    } catch (configError) {
-      hilog.warn(DOMAIN, TAG, 'Search config error: %{public}s', String(configError));
-    }
-    return [];
-  }
+  // getSearchTools, prepareMessagesForAPI -> 已提取到 ChatStreamingService
 
-  // 辅助方法 - 准备API消息列表
-  private prepareMessagesForAPI(userMessage: ChatMessage): ChatMessage[] {
-    const endIndex = this.messages.length - 1;
-    const startIndex = Math.max(0, endIndex - 10);
-    const messagesForAI = this.messages.slice(startIndex, endIndex);
-    if (messagesForAI.length === 0) {
-      messagesForAI.push(cloneChatMessage(userMessage));
-    }
-    return messagesForAI;
-  }
+  // handleToolCalls, continueConversationWithToolResult -> 已提取到 ChatStreamingService
 
-  // 工具调用处理 - 执行搜索并继续对话
-  private async handleToolCalls(
-    toolCalls: import('../services/StreamEventEmitter').ToolCallData[],
-    assistantMessageIndex: number,
-    conversationId: string
-  ): Promise<void> {
-    hilog.info(DOMAIN, TAG, 'Handling %{public}d tool calls', toolCalls.length);
-
-    // 关键修复：将工具调用信息保存到 assistant 消息中
-    if (assistantMessageIndex < this.messages.length) {
-      // 转换为 ToolCall 格式
-      const formattedToolCalls: import('../services/DataModels').ToolCall[] =
-        toolCalls.map((tc): import('../services/DataModels').ToolCall => {
-          const toolFunction: import('../services/DataModels').ToolFunction = {
-            name: tc.name,
-            arguments: tc.arguments
-          };
-
-          const toolCall: import('../services/DataModels').ToolCall = {
-            id: tc.id,
-            type: tc.type || 'function',
-            function: toolFunction
-          };
-
-          return toolCall;
-        });
-
-      this.replaceMessageAt(assistantMessageIndex, (msg) => {
-        msg.toolCalls = formattedToolCalls;
-      });
-
-      hilog.info(DOMAIN, TAG, 'Saved %{public}d tool calls to assistant message', formattedToolCalls.length);
-    }
-
-    // 重要修复：不在此处调用 handleStreamComplete()
-    // 原因：工具调用完成后还需继续生成模型回答，不应该重置 isGenerating 状态
-    // handleStreamComplete() 应该在最终流完成时由 setupStreamEventHandlers 中的 COMPLETE 事件处理器调用
-    // this.handleStreamComplete();
-
-    // 执行每个工具调用
-    for (const toolCall of toolCalls) {
-      hilog.info(DOMAIN, TAG, 'Processing tool call: id=%{public}s, name=%{public}s, type=%{public}s',
-        String(toolCall.id || 'MISSING'), String(toolCall.name), String(toolCall.type));
-
-      if (toolCall.name === 'search_web' && toolCall.arguments) {
-        try {
-          // 验证工具调用 ID
-          if (!toolCall.id) {
-            hilog.error(DOMAIN, TAG, 'Tool call missing required ID field');
-            throw new Error('工具调用缺少必需的 ID 字段，无法继续处理');
-          }
-
-          // 解析参数
-          const args = JSON.parse(toolCall.arguments) as SearchToolArgs;
-          const query = args.query;
-
-          hilog.info(DOMAIN, TAG, 'Executing search for query: %{public}s with toolCallId: %{public}s',
-            query, toolCall.id);
-
-
-          // 执行搜索
-          const searchResult = await this.searchToolService.executeSearch(query, args.resultSize);
-
-          
-
-          // 将搜索结果转换为Citation数组，保存到AI消息中
-          let citations: Citation[] = [];
-          if (assistantMessageIndex < this.messages.length) {
-            const assistantMessage = this.messages[assistantMessageIndex];
-            // 创建Citation数组（仅用于UI显示）
-            citations = searchResult.items.map((item): Citation => ({
-              title: item.title,
-              url: item.url,
-              snippet: item.text
-            }));
-
-            // 只更新citations到assistant消息（用于UI显示一个胶囊）
-            this.replaceMessageAt(assistantMessageIndex, (msg) => {
-              msg.citations = citations;
-            });
-
-            // 持久化assistant消息的citations更新
-            if (assistantMessage.id) {
-              const update: ChatMessageMetadataUpdate = {
-                timestamp: assistantMessage.timestamp,
-                providerMessageId: assistantMessage.providerMessageId ?? null,
-                providerCreatedAt: assistantMessage.providerCreatedAt ?? null,
-                systemFingerprint: assistantMessage.systemFingerprint ?? null,
-                modelName: assistantMessage.modelName ?? null,
-                providerName: assistantMessage.providerName ?? null,
-                citations: citations
-              };
-              await this.databaseManager.updateChatMessageMetadata(assistantMessage.id, update);
-            }
-          }
-
-          await this.continueConversationWithToolResult(conversationId, assistantMessageIndex, searchResult,
-            toolCall.id, toolCall.name);
-
-        } catch (error) {
-          hilog.error(DOMAIN, TAG, 'Tool execution failed: %{public}s', String(error));
-          const err = error instanceof Error ? error : new Error(String(error));
-
-          // 显示友好的错误提示
-          let errorMessage = '搜索失败';
-          if (err.message.includes('未配置')) {
-            errorMessage = err.message;
-          } else if (err.message.includes('未启用')) {
-            errorMessage = err.message;
-          } else if (err.message.includes('未选择')) {
-            errorMessage = err.message;
-          } else if (err.message.includes('缺少')) {
-            errorMessage = err.message;
-          } else {
-            errorMessage = `搜索失败: ${err.message}`;
-          }
-
-          // 关键修复：只在消息为空时才设置错误，否则追加
-          // 这样可以保留已有的内容并追加错误说明
-          if (assistantMessageIndex < this.messages.length) {
-            this.replaceMessageAt(assistantMessageIndex, (msg) => {
-              if (msg.content.length === 0) {
-                // 消息为空，设置错误信息
-                msg.content = `[搜索失败] ${errorMessage}\n\n请检查搜索配置或稍后重试。`;
-              } else {
-                // 消息不为空，追加错误信息而不是替换
-                msg.content += `\n\n[搜索失败] ${errorMessage}\n请检查搜索配置或稍后重试。`;
-              }
-            });
-          }
-
-          // 错误处理：如果搜索失败，不继续生成，而是重置状态
-          // 这样可以避免继续对话时出现"生成过程中出现错误"
-          this.isLoading = false;
-          this.isGenerating = false;
-          this.currentAbortController = null;
-
-          // 不抛出错误，允许继续处理其他工具调用
-          continue;
-        }
-      }
-    }
-  }
-
-  // 继续对话 - 在工具执行后
-  private async continueConversationWithToolResult(
-    conversationId: string,
-    assistantMessageIndex: number,
-    searchResult?: import('../services/search/SearchModels').SearchResult,
-    toolCallId?: string,
-    toolName?: string
-  ): Promise<void> {
-    if (!this.currentConversation || this.currentConversation.id !== conversationId) {
-      
-      return;
-    }
-
-    // 关键修复：保持 isGenerating = true，因为工具执行后还要继续生成模型回答
-    // 不要在此处重置状态，应该让 setupStreamEventHandlers 中的事件处理器来管理
-    // 这样可以确保按钮在整个过程中保持正确的状态
-
-    // 保持 isLoading = true 和 isGenerating = true，确保按钮显示"停止"而不是"发送"
-    this.isLoading = true;
-    // isGenerating 应该已经为 true（来自 handleToolCalls 调用前的状态）
-    this.currentAbortController = createAbortController();
-
-    hilog.info(DOMAIN, TAG,
-      'Starting continueConversationWithToolResult, isLoading=%{public}s, isGenerating=%{public}s',
-      String(this.isLoading), String(this.isGenerating));
-
-    try {
-      // 构建工具结果消息 - 这是API格式所需的标准tool_result
-      let toolContent = '';
-      // 检查是否有搜索结果，构建工具内容
-      if (searchResult) {
-        // 构建搜索结果文本供API使用
-        if (searchResult.answer) {
-          toolContent = `搜索摘要: ${searchResult.answer}\n\n`;
-        }
-        toolContent += '详细搜索结果:\n';
-        for (const item of searchResult.items) {
-          toolContent += `[${item.index || 0}] 标题: ${item.title}\n内容: ${item.text}\nURL: ${item.url}\n\n`;
-        }
-      }
-
-      // 验证 toolCallId 是否存在
-      if (!toolCallId) {
-        hilog.error(DOMAIN, TAG, 'Tool call ID is missing, cannot create tool message');
-        throw new Error('工具调用ID缺失，无法继续对话');
-      }
-
-      // 添加工具结果消息到对话历史（仅内存，不持久化）
-      const toolResultMessage = new ChatMessage(
-        toolContent,
-        'tool',
-        { conversationId: conversationId, timestamp: this.getNextTimestamp(), toolCallId: toolCallId }
-      );
-
-      // 为内存中的消息分配一个临时ID（不从数据库获取）
-      toolResultMessage.id = -toolContent.length - Math.floor(Math.random() * 10000);
-
-      // 获取当前的 Assistant 消息
-      const previousAssistantMsg = this.messages[assistantMessageIndex];
-      
-      // 准备 API 请求所需的上下文
-      const contextMessages = this.messages.slice(0, assistantMessageIndex + 1);
-      contextMessages.push(toolResultMessage);
-      
-      // 重用旧消息的 ID 和模型信息，清空内容用于接收新响应
-      // 这样避免创建重复的数据库记录
-      const modelInfo = this.getCurrentModelInfo();
-      this.replaceMessageAt(assistantMessageIndex, (msg) => {
-        // 保留原有的 ID（已在数据库中），清空内容以接收新流式数据
-        msg.content = '';
-        // 更新模型信息以反映当前使用的模型
-        msg.modelName = modelInfo.modelName;
-        msg.providerName = modelInfo.providerName;
-        msg.timestamp = this.getNextTimestamp();
-        // 保留工具调用信息
-        msg.toolCalls = previousAssistantMsg.toolCalls ? [...previousAssistantMsg.toolCalls] : [];
-      });
-      
-      // 更新当前流式更新的目标索引
-      const streamingIndex = assistantMessageIndex;
-
-      // 构建 API 请求消息列表
-      const messagesForAI = contextMessages.slice(Math.max(0, contextMessages.length - 20));
-
-      hilog.info(DOMAIN, TAG, 'Continuing conversation with merged UI bubble. Context length: %{public}d', messagesForAI.length);
-
-      // 打印消息序列以便调试
-      for (let i = 0; i < messagesForAI.length; i++) {
-        const msg = messagesForAI[i];
-        hilog.info(DOMAIN, TAG,
-          'Message[%{public}d]: role=%{public}s, hasToolCallId=%{public}s, hasToolCalls=%{public}s, contentLength=%{public}d',
-          i, msg.role, String(!!msg.toolCallId), String(!!(msg.toolCalls && msg.toolCalls.length > 0)),
-          msg.content.length);
-      }
-
-      // 检查搜索配置并构建工具数组
-      const tools = this.getSearchTools();
-      
-      // 发送流式请求
-      hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
-        this.currentSettings!.apiUrl.substring(0, 30), this.currentSettings!.modelName, messagesForAI.length);
-
-      const emitter = await this.networkManager.sendStreamChatRequestV2(
-        this.currentSettings!.apiUrl,
-        this.currentSettings!.apiKey,
-        this.currentSettings!.modelName,
-        messagesForAI,
-        {
-          tools: tools.length > 0 ? tools : undefined,
-          abortController: this.currentAbortController,
-          requestTimeout: 60000
-        }
-      );
-
-      // 设置事件处理器来接收流式响应
-      this.setupStreamEventHandlers(emitter, streamingIndex, conversationId, true);
-
-      // 设置超时保护
-      const timeoutId = setTimeout(() => {
-        if (this.isLoading || this.isGenerating) {
-          hilog.error(DOMAIN, TAG, 'Stream timeout after 60s, forcing state reset');
-          this.isLoading = false;
-          this.isGenerating = false;
-          this.currentAbortController = null;
-          this.showToast('请求超时，请重试');
-
-          if (streamingIndex < this.messages.length) {
-            this.replaceMessageAt(streamingIndex, (msg) => {
-              if (!msg.content || msg.content.length === 0) {
-                msg.content = '[超时] 未收到响应，请检查网络或重试';
-              } else {
-                msg.content += '\n\n[超时] 响应中断';
-              }
-            });
-          }
-        }
-      }, 60000);
-      
-      emitter.once(StreamEventType.COMPLETE, () => {
-        clearTimeout(timeoutId);
-        
-        // 工具继续对话完成：重置UI状态并持久化消息
-        this.isLoading = false;
-        this.isGenerating = false;
-        this.currentAbortController = null;
-        
-        // 异步持久化流式消息到数据库
-        this.persistStreamedMessage(streamingIndex, conversationId)
-          .catch((err: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist message after tool continuation: %{public}s', String(err));
-          });
-      });
-      emitter.once(StreamEventType.ERROR, () => {
-        clearTimeout(timeoutId);
-      });
-
-    } catch (error) {
-      
-      this.isLoading = false;
-      this.isGenerating = false;
-      this.currentAbortController = null;
-      const friendlyError = getFriendlyErrorMessage(error instanceof Error ? error : new Error(String(error)));
-
-      // 关键修复：在消息中追加错误而不是覆盖
-      // 如果已经有搜索结果，应该追加错误而不是完全替换
-      const streamingIndex = assistantMessageIndex;
-      if (streamingIndex < this.messages.length) {
-        this.replaceMessageAt(streamingIndex, (msg) => {
-          if (msg.content.length === 0) {
-            // 如果消息为空，显示错误
-            msg.content = `[错误] ${friendlyError}`;
-          } else {
-            // 如果已有内容，追加错误
-            msg.content += `\n\n[错误] 继续生成失败: ${friendlyError}`;
-          }
-        });
-      }
-
-      this.showToast(friendlyError);
-    }
-  }
 
   // 辅助方法：去除思维链标签
   private cleanThinkingTags(content: string): string {
@@ -2191,10 +1410,10 @@ struct Chat {
 
       hilog.info(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 检查是否启用联网搜索并构建工具数组
-      const tools = this.getSearchTools();
+      // 检查搜索工具（委托给 streamingService）
+      const tools = this.streamingService!.getSearchTools(this.enableWebSearch);
 
-      // 发送流式请求重新生成（使用新的事件驱动架构）
+      // 发送流式请求重新生成
       const emitter = await this.networkManager.sendStreamChatRequestV2(
         this.currentSettings?.apiUrl || '',
         this.currentSettings?.apiKey || '',
@@ -2207,8 +1426,8 @@ struct Chat {
         }
       );
 
-      // 设置重新生成的事件处理
-      this.setupRegenerationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
+      // 设置重新生成的事件处理（委托给 streamingService）
+      this.streamingService!.setupRegenerationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
 
     } catch (error) {
       
@@ -2258,67 +1477,10 @@ struct Chat {
 
   /**
    * 监听 conversations 变化，更新缓存的分组数据
-   * 仅在数据真正变化时重新计算，避免每次渲染都重新计算
    */
   private updateGroupedConversations() {
-    this.cachedGroupedConversations = this.groupConversationsByDate();
+    this.cachedGroupedConversations = groupConversationsByDate(this.conversations);
     this.cachedGroupedKeys = Object.keys(this.cachedGroupedConversations);
-  }
-
-  // 按日期分组对话的工具方法
-  private groupConversationsByDate(): Record<string, Conversation[]> {
-    const groups: Record<string, Conversation[]> = {};
-
-    // 按更新时间倒序排列对话
-    const sortedConversations = [...this.conversations].sort((a, b) =>
-    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
-
-    sortedConversations.forEach(conversation => {
-      const date = new Date(conversation.updatedAt);
-      const dateKey = this.getDateKey(date);
-
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
-      groups[dateKey].push(conversation);
-    });
-
-    return groups;
-  }
-
-  // 生成日期分组的key
-  private getDateKey(date: Date): string {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const conversationDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-    // 计算时间差（天数）
-    const timeDiff = today.getTime() - conversationDate.getTime();
-    const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-
-    if (daysDiff === 0) {
-      return 'today';
-    } else if (daysDiff === 1) {
-      return 'yesterday';
-    } else if (daysDiff >= 2 && daysDiff <= 7) {
-      return 'this_week';
-    } else if (daysDiff >= 8 && daysDiff <= 30) {
-      return 'this_month';
-    } else {
-      // 超过30天的按年月分组
-      const conversationYear = date.getFullYear();
-      const conversationMonth = date.getMonth() + 1;
-      const currentYear = now.getFullYear();
-
-      if (conversationYear === currentYear) {
-        // 今年的显示月份
-        return `${conversationYear}-${conversationMonth.toString().padStart(2, '0')}`;
-      } else {
-        // 往年的显示年月
-        return `${conversationYear}-${conversationMonth.toString().padStart(2, '0')}`;
-      }
-    }
   }
 
   // 显示重命名对话框

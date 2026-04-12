@@ -7,6 +7,9 @@
 
 import { WebBrowserParam } from './WebViewBrowser';
 import { MessageStyle } from '../chat/MessageStyle';
+import { createLogger, LogDomain } from '../../common/Logger';
+
+const logger = createLogger('SearchResultsSheet', LogDomain.UI);
 
 export interface SearchResultItem {
   title: string;
@@ -165,7 +168,7 @@ export struct SearchResultsSheet {
                 this.param.onClose();
               }, 300);
             } catch (error) {
-              console.error('Failed to navigate to browser:', error);
+              logger.error('Failed to navigate to browser: %{public}s', String(error));
             }
           })
         })

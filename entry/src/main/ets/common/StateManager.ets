@@ -9,6 +9,9 @@
  */
 
 import { StorageKeys } from './Constants';
+import { createLogger, LogDomain } from './Logger';
+
+const logger = createLogger('StateManager', LogDomain.APP);
 
 /**
  * 状态变化监听器
@@ -84,7 +87,7 @@ export class StateManager {
         try {
           listener(newValue, oldValue);
         } catch (e) {
-          console.error(`StateManager listener error for key ${key}:`, e);
+          logger.error('StateManager listener error for key %{public}s: %{public}s', key, String(e));
         }
       });
     }
