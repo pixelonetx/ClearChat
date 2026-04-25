@@ -4,7 +4,7 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ChatMessage, AppSettings } from '../services/DataModels';
+import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
@@ -24,6 +24,7 @@ import { ChatViewModel } from '../viewmodels/ChatViewModel';
 import { ChatStreamingService, StreamingCallbacks, ModelInfo, ApiConfig } from '../services/ChatStreamingService';
 import { SettingsReloadService, SettingsReloadCallbacks } from '../services/SettingsReloadService';
 import { groupConversationsByDate } from '../services/ConversationGroupHelper';
+import { PresetProvider, PRESET_PROVIDERS, inferApiFormat } from '../services/PresetProviders';
 
 const DOMAIN = 0x0000;
 const TAG = 'Chat';
@@ -72,6 +73,11 @@ struct Chat {
   @State showControlButton: boolean = true;
   @State showSideBar: boolean = false;
   @State showModelSelectorSheet: boolean = false;
+  // 首次使用引导
+  @State showSetupSheet: boolean = false;
+  @State private setupSelectedPresetType: string = '';
+  @State private setupApiKey: string = '';
+  @State private setupIsFetching: boolean = false;
   // 数据状态
   @State messages: ChatMessage[] = [];
   @State
@@ -478,6 +484,19 @@ struct Chat {
     .width('100%')
     .backgroundColor($r('app.color.common_background'))
     .hideTitleBar(true)
+    .bindSheet(this.showSetupSheet, this.SetupSheetBuilder(), {
+      height: SheetSize.FIT_CONTENT,
+      detents: [SheetSize.FIT_CONTENT],
+      blurStyle: BlurStyle.Thick,
+      showClose: true,
+      preferType: SheetType.BOTTOM,
+      enableOutsideInteractive: false,
+      dragBar: true,
+      onDisappear: () => {
+        this.showSetupSheet = false;
+        this.resetSetupState();
+      }
+    })
     .onReady((context: NavDestinationContext) => {
       this.pathStack = context.pathStack;
     })
@@ -488,14 +507,230 @@ struct Chat {
     autoCancel: true,
   });
 
-  private showToast(message: string, duration: number = 2000) {
+  private showToast(message: string, duration: number = 2000): void {
     const options = new ToastOptions(message, duration);
-
     try {
       Prompt.showToast(options);
     } catch (toastError) {
-      
+      // ignore
     }
+  }
+
+  /**
+   * 首次使用引导：确认配置
+   */
+  private async handleSetupConfirm(): Promise<void> {
+    const preset = PRESET_PROVIDERS.find(p => p.type === this.setupSelectedPresetType);
+    if (!preset) {
+      this.showToast('请选择一个服务商');
+      return;
+    }
+    const apiKey = (this.setupApiKey || '').trim();
+    if (!apiKey) {
+      this.showToast('请输入 API 密钥');
+      return;
+    }
+    if (apiKey.length < 10) {
+      this.showToast('API 密钥似乎过短，请检查');
+      return;
+    }
+
+    this.setupIsFetching = true;
+    try {
+      // 1. 创建provider
+      const provider = preset.createProvider();
+      provider.apiKey = apiKey;
+      provider.isActive = true;
+
+      // 2. 尝试拉取模型
+      try {
+        const models = await this.networkManager.fetchModels(preset.apiUrl, apiKey, preset.apiFormat);
+        if (models.length > 0) {
+          provider.models = models;
+        }
+      } catch (fetchError) {
+        // 兜底使用预设模型
+        hilog.info(DOMAIN, TAG, 'Auto-fetch models failed, using defaults: %{public}s', String(fetchError));
+      }
+
+      // 3. 构建设置并保存
+      const settings = new AppSettings();
+      settings.providers = [provider];
+      settings.activeProviderId = provider.id;
+      settings.activeModelId = provider.models[0]?.id ?? '';
+
+      if (!this.databaseManager.isInitialized()) {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        await this.databaseManager.initDatabase(context);
+      }
+      await this.databaseManager.saveSettings(settings);
+
+      // 4. 通知设置更新
+      const version = Date.now();
+      if (!AppStorage.set('settingsVersion', version)) {
+        AppStorage.setOrCreate('settingsVersion', version);
+      }
+
+      // 5. 关闭引导，重新加载
+      this.showSetupSheet = false;
+      this.resetSetupState();
+      this.showToast('配置完成，开始对话吧！');
+      await this.initializeApp();
+      this.syncStateToViewModel();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to save setup config: %{public}s', String(error));
+      this.showToast('配置保存失败，请重试');
+    } finally {
+      this.setupIsFetching = false;
+    }
+  }
+
+  private getPresetWebsite(): string {
+    const preset = PRESET_PROVIDERS.find(p => p.type === this.setupSelectedPresetType);
+    return preset?.website ?? '';
+  }
+
+  private resetSetupState(): void {
+    this.setupSelectedPresetType = '';
+    this.setupApiKey = '';
+    this.setupIsFetching = false;
+  }
+
+  @Builder
+  SetupSheetBuilder() {
+    Column() {
+      Text('欢迎使用 ClearChat')
+        .fontSize(22)
+        .fontWeight(FontWeight.Bold)
+        .width('100%')
+        .textAlign(TextAlign.Start)
+        .margin({ bottom: 4 })
+
+      Text('选择一个服务商并填入 API 密钥，即可开始使用')
+        .fontSize(14)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+        .width('100%')
+        .textAlign(TextAlign.Start)
+        .margin({ bottom: 20 })
+
+      // 服务商选择
+      Text('选择服务商')
+        .fontSize(13)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+        .width('100%')
+        .textAlign(TextAlign.Start)
+        .margin({ bottom: 8 })
+
+      Grid() {
+        ForEach(PRESET_PROVIDERS, (preset: PresetProvider) => {
+          GridItem() {
+            Column() {
+              Text(preset.displayName)
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.setupSelectedPresetType === preset.type
+                  ? '#4CAF50'
+                  : $r('sys.color.ohos_id_color_text_primary'))
+            }
+            .width('100%')
+            .padding({ top: 12, bottom: 12 })
+            .borderRadius(10)
+            .border({
+              width: this.setupSelectedPresetType === preset.type ? 2 : 1,
+              color: this.setupSelectedPresetType === preset.type
+                ? '#4CAF50'
+                : $r('sys.color.ohos_id_color_text_secondary')
+            })
+            .backgroundColor(this.setupSelectedPresetType === preset.type
+              ? 'rgba(76, 175, 80, 0.06)'
+              : Color.Transparent)
+            .onClick(() => {
+              this.setupSelectedPresetType = preset.type;
+              // 选中后不自动清空已输入的密钥，方便用户切换
+            })
+          }
+        })
+      }
+      .columnsTemplate('1fr 1fr')
+      .columnsGap(10)
+      .rowsGap(10)
+      .width('100%')
+      .margin({ bottom: 18 })
+
+      // API 密钥
+      Column() {
+        Text('API 密钥')
+          .fontSize(13)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+          .alignSelf(ItemAlign.Start)
+          .margin({ bottom: 6 })
+
+        TextInput({ placeholder: '请输入 API 密钥', text: this.setupApiKey })
+          .height(44)
+          .borderRadius(10)
+          .fontSize(15)
+          .type(InputType.Password)
+          .onChange((value: string) => {
+            this.setupApiKey = value;
+          })
+      }
+      .width('100%')
+      .margin({ bottom: 10 })
+
+      // 获取 API Key 提示
+      if (this.setupSelectedPresetType) {
+        Text(`获取密钥: ${this.getPresetWebsite()}`)
+          .fontSize(12)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+          .width('100%')
+          .textAlign(TextAlign.Start)
+          .decoration({ type: TextDecorationType.Underline })
+          .onClick(() => {
+            const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+            const site = this.getPresetWebsite();
+            if (site) {
+              BrowserHelper.openUrl(context, site);
+            }
+          })
+          .margin({ bottom: 16 })
+      }
+
+      // 确定按钮
+      Button() {
+        Row({ space: 6 }) {
+          if (this.setupIsFetching) {
+            LoadingProgress().width(18).height(18).color(Color.White)
+          }
+          Text(this.setupIsFetching ? '正在配置...' : '开始使用')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+        }
+      }
+      .width('100%')
+      .height(48)
+      .borderRadius(24)
+      .backgroundColor('#4CAF50')
+      .fontColor(Color.White)
+      .enabled(!this.setupIsFetching && !!this.setupSelectedPresetType && (this.setupApiKey || '').trim().length > 0)
+      .opacity((!this.setupIsFetching && !!this.setupSelectedPresetType && (this.setupApiKey || '').trim().length > 0) ? 1 : 0.5)
+      .onClick(() => {
+        this.handleSetupConfirm();
+      })
+
+      Blank().height(8)
+
+      // 跳过
+      Text('以后再说')
+        .fontSize(14)
+        .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+        .padding({ top: 8, bottom: 8 })
+        .onClick(() => {
+          this.showSetupSheet = false;
+          this.resetSetupState();
+        })
+    }
+    .width('100%')
+    .padding(24)
   }
 
   async aboutToAppear() {
@@ -701,6 +936,11 @@ struct Chat {
 
       this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
       this.isInitialized = true;
+
+      // 首次使用：无配置时弹引导
+      if (!this.hasSettings) {
+        this.showSetupSheet = true;
+      }
     } catch (error) {
       
       this.showToast('应用初始化失败');

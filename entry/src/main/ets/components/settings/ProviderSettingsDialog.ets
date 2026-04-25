@@ -1,6 +1,8 @@
 import { Prompt } from '@kit.ArkUI';
 import { AIProvider, AIModel } from '../../services/DataModels';
 import { createLogger, LogDomain } from '../../common/Logger';
+import { PresetProvider, PRESET_PROVIDERS, ApiFormat, inferApiFormat } from '../../services/PresetProviders';
+import { NetworkManagerV2 } from '../../services/NetworkManagerV2';
 
 const logger = createLogger('ProviderSettingsDialog', LogDomain.SETTINGS);
 
@@ -10,56 +12,78 @@ export struct ProviderSettingsDialog {
   isEditMode: boolean = false;
   onConfirm: (provider: AIProvider) => void = () => {};
   @State private editableProvider: AIProvider = new AIProvider('', '', '');
-
-  // 预定义的模型列表
-  // model.id, model.name, model.displayName, model.maxTokens, model.temperature, supportsWebSearch
-  private getPredefinedModels(providerType: string): AIModel[] {
-    if (providerType === 'deepseek') {
-      return [
-        new AIModel('deepseek-chat', 'deepseek-chat', 'DeepSeek V3.2', 4000, 0.7, false),
-        new AIModel('deepseek-reasoner', 'deepseek-reasoner', 'DeepSeek V3.2 R', 32000, 0.7, false)
-      ];
-    } else if (providerType === 'qwen' || providerType === 'aliyun') {
-      return [
-        new AIModel('qwen3-max', 'qwen3-max', 'Qwen3-Max', 258048, 0.7, false),
-        new AIModel('qwen-plus', 'qwen-plus', 'Qwen-Plus', 997952, 0.7, false),
-        new AIModel('qwen-flash', 'qwen-flash', 'Qwen-Flash', 997952, 0.7, false),
-      ];
-    } else {
-      return [];
-    }
-  }
+  @State private isFetchingModels: boolean = false;
+  @State private selectedPresetType: string = '';
+  private networkManager = NetworkManagerV2.getInstance();
 
   aboutToAppear() {
     this.editableProvider = this.cloneProvider(this.provider);
-    if (this.editableProvider.id && this.editableProvider.models.length === 0) {
-      // 如果是预定义服务商，加载默认模型
-      const defaultModels = this.getPredefinedModels(this.editableProvider.name);
-      const modelsCopy: AIModel[] = [];
-      for (let i = 0; i < defaultModels.length; i++) {
-        modelsCopy.push(defaultModels[i]);
+    // 如果编辑模式下没有模型，尝试匹配预设
+    if (this.isEditMode && this.editableProvider.models.length === 0) {
+      const matched = PRESET_PROVIDERS.find(p => p.type === this.editableProvider.name || p.type === this.editableProvider.id);
+      if (matched) {
+        this.editableProvider.models = matched.defaultModels.map(m =>
+          new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch));
       }
-      this.editableProvider.models = modelsCopy;
+    }
+  }
+
+  /** 当前编辑中的服务商对应的 ApiFormat */
+  private getCurrentApiFormat(): ApiFormat {
+    const url = this.editableProvider.apiUrl;
+    if (url) return inferApiFormat(url);
+    // fallback: 检查是否匹配某个预设
+    if (this.selectedPresetType) {
+      const preset = PRESET_PROVIDERS.find(p => p.type === this.selectedPresetType);
+      if (preset) return preset.apiFormat;
+    }
+    return 'openai';
+  }
+
+  private async fetchModelsFromApi(): Promise<void> {
+    const url = this.editableProvider.apiUrl.trim();
+    const key = this.editableProvider.apiKey.trim();
+    if (!url || !key) {
+      this.showToast('请先填写 API 地址和密钥');
+      return;
+    }
+    this.isFetchingModels = true;
+    try {
+      const format = this.getCurrentApiFormat();
+      const models = await this.networkManager.fetchModels(url, key, format);
+      if (models.length === 0) {
+        this.showToast('未获取到可用模型，请手动添加');
+        return;
+      }
+      this.editableProvider.models = models;
+      this.showToast(`成功获取 ${models.length} 个模型`);
+    } catch (error) {
+      logger.error('Failed to fetch models: %{public}s', String(error));
+      this.showToast(`获取模型失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.isFetchingModels = false;
     }
   }
 
   build() {
     Column() {
-      // 标题
       Text(this.isEditMode ? '编辑提供方' : '添加提供方')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
-        .margin({ bottom: 24 })
+        .margin({ bottom: 20 })
+        .width('100%')
 
       // 服务商名称
       Column() {
         Text('模型提供方名称')
-          .fontSize(14)
+          .fontSize(13)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
           .alignSelf(ItemAlign.Start)
-          .margin({ bottom: 8 })
-
-        TextInput({ placeholder: '如 DeepSeek 等', text: this.editableProvider.displayName })
-          .height(48)
+          .margin({ bottom: 6 })
+        TextInput({ placeholder: '如 OpenAI', text: this.editableProvider.displayName })
+          .height(44)
+          .borderRadius(10)
+          .fontSize(15)
           .onChange((value: string) => {
             this.editableProvider.displayName = value;
             if (!this.isEditMode) {
@@ -69,75 +93,99 @@ export struct ProviderSettingsDialog {
           })
       }
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ bottom: 16 })
+      .margin({ bottom: 14 })
 
-      // API地址
+      // API 地址
       Column() {
-        Text('API地址')
-          .fontSize(14)
+        Text('API 地址')
+          .fontSize(13)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
           .alignSelf(ItemAlign.Start)
-          .margin({ bottom: 8 })
-
-        TextInput({ placeholder: 'https://api.deepseek.com', text: this.editableProvider.apiUrl })
-          .height(48)
+          .margin({ bottom: 6 })
+        TextInput({ placeholder: 'https://api.openai.com/v1', text: this.editableProvider.apiUrl })
+          .height(44)
+          .borderRadius(10)
+          .fontSize(15)
           .onChange((value: string) => {
             this.editableProvider.apiUrl = value;
           })
       }
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ bottom: 16 })
+      .margin({ bottom: 14 })
 
-      // API密钥
+      // API 密钥
       Column() {
-        Text('API密钥')
-          .fontSize(14)
+        Text('API 密钥')
+          .fontSize(13)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
           .alignSelf(ItemAlign.Start)
-          .margin({ bottom: 8 })
-
-        TextInput({ placeholder: '请输入API密钥', text: this.editableProvider.apiKey })
-          .height(48)
+          .margin({ bottom: 6 })
+        TextInput({ placeholder: '请输入 API 密钥', text: this.editableProvider.apiKey })
+          .height(44)
+          .borderRadius(10)
+          .fontSize(15)
           .type(InputType.Password)
           .onChange((value: string) => {
             this.editableProvider.apiKey = value;
           })
       }
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
       .margin({ bottom: 16 })
 
-      // 预设模板按钮
+      // 预设服务商快速选择
       if (!this.isEditMode) {
         Text('快速配置')
-          .fontSize(14)
+          .fontSize(13)
+          .fontColor($r('sys.color.ohos_id_color_text_secondary'))
           .alignSelf(ItemAlign.Start)
           .margin({ bottom: 8 })
 
-        Row() {
-          Button('Qwen')
-            .fontSize(12)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .borderRadius(16)
-            .margin({ left: 8 })
-            .onClick(() => {
-              this.loadPresetProvider('qwen');
+        Scroll() {
+          Row({ space: 10 }) {
+            ForEach(PRESET_PROVIDERS, (preset: PresetProvider) => {
+              this.PresetChip(preset)
             })
-
-          Button('DeepSeek')
-            .fontSize(12)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .borderRadius(16)
-            .margin({ left: 8 })
-            .onClick(() => {
-              this.loadPresetProvider('deepseek');
-            })
+          }
+          .padding({ left: 2, right: 2 })
         }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
         .width('100%')
-        .margin({ bottom: 24 })
+        .margin({ bottom: 16 })
       }
 
-      // 按钮区域
+      // 获取模型按钮
+      if (this.editableProvider.apiUrl.trim() && this.editableProvider.apiKey.trim()) {
+        Row() {
+          Button() {
+            Row({ space: 6 }) {
+              if (this.isFetchingModels) {
+                LoadingProgress().width(16).height(16)
+              }
+              Text(this.isFetchingModels ? '获取中...' : '从 API 获取模型')
+                .fontSize(14)
+                .fontColor($r('sys.color.ohos_id_color_text_primary'))
+            }
+          }
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor($r('sys.color.ohos_id_color_button_normal'))
+          .enabled(!this.isFetchingModels)
+          .onClick(() => { this.fetchModelsFromApi(); })
+
+          if (this.editableProvider.models.length > 0) {
+            Text(`${this.editableProvider.models.length} 个模型`)
+              .fontSize(12)
+              .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+              .margin({ left: 12 })
+          }
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Start)
+        .margin({ bottom: 16 })
+      }
+
+      // 确认按钮
       Row() {
         Button('确定')
           .layoutWeight(1)
@@ -145,10 +193,7 @@ export struct ProviderSettingsDialog {
           .backgroundColor('#4CAF50')
           .fontColor(Color.White)
           .borderRadius(24)
-          .margin({ left: 12 })
-          .onClick(() => {
-            this.confirmProvider();
-          })
+          .onClick(() => { this.confirmProvider(); })
       }
       .width('100%')
     }
@@ -157,26 +202,41 @@ export struct ProviderSettingsDialog {
     .borderRadius(12)
   }
 
-  private loadPresetProvider(providerType: string) {
-    switch (providerType) {
-      case 'qwen':
-        this.editableProvider.displayName = 'Qwen';
-        this.editableProvider.name = 'qwen';
-        this.editableProvider.apiUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-        this.editableProvider.models = this.getPredefinedModels('qwen');
-        break;
-      case 'deepseek':
-        this.editableProvider.displayName = 'DeepSeek';
-        this.editableProvider.name = 'deepseek';
-        this.editableProvider.apiUrl = 'https://api.deepseek.com/v1';
-        this.editableProvider.models = this.getPredefinedModels('deepseek');
-        break;
+  @Builder
+  PresetChip(preset: PresetProvider) {
+    Column() {
+      Text(preset.displayName)
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.ohos_id_color_text_primary'))
     }
-    this.editableProvider.id = Date.now().toString();
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+    .borderRadius(20)
+    .border({
+      width: this.selectedPresetType === preset.type ? 2 : 1,
+      color: this.selectedPresetType === preset.type
+        ? '#4CAF50'
+        : $r('sys.color.ohos_id_color_text_secondary')
+    })
+    .backgroundColor(this.selectedPresetType === preset.type
+      ? 'rgba(76, 175, 80, 0.08)'
+      : $r('sys.color.ohos_id_color_button_normal'))
+    .onClick(() => {
+      this.applyPreset(preset);
+    })
   }
 
-  private confirmProvider() {
-    // 验证提供方名称
+  private applyPreset(preset: PresetProvider): void {
+    this.selectedPresetType = preset.type;
+    this.editableProvider.displayName = preset.displayName;
+    this.editableProvider.name = preset.name;
+    this.editableProvider.apiUrl = preset.apiUrl;
+    this.editableProvider.id = Date.now().toString() + '_' + preset.type;
+    this.editableProvider.models = preset.defaultModels.map(m =>
+      new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch));
+  }
+
+  private confirmProvider(): void {
     const displayName = this.editableProvider.displayName.trim();
     if (!displayName) {
       this.showToast('请输入提供方名称');
@@ -187,39 +247,33 @@ export struct ProviderSettingsDialog {
       return;
     }
 
-    // 验证API地址
     const apiUrl = this.editableProvider.apiUrl.trim();
     if (!apiUrl) {
-      this.showToast('请输入API地址');
+      this.showToast('请输入 API 地址');
       return;
     }
     if (!this.isValidUrl(apiUrl)) {
-      this.showToast('请输入有效的API地址');
+      this.showToast('请输入有效的 API 地址');
       return;
     }
 
-    // 验证API密钥
     const apiKey = this.editableProvider.apiKey.trim();
     if (!apiKey) {
-      this.showToast('请输入API密钥');
+      this.showToast('请输入 API 密钥');
       return;
     }
     if (apiKey.length < 10 || apiKey.length > 200) {
-      this.showToast('API密钥长度应在10-200个字符之间');
+      this.showToast('API 密钥长度应在 10-200 个字符之间');
       return;
     }
 
-    // 更新编辑的提供方数据
     this.editableProvider.displayName = displayName;
     this.editableProvider.apiUrl = apiUrl;
     this.editableProvider.apiKey = apiKey;
 
-    // 如果 ID 为空（用户手动输入而非预设模板），生成一个新的 ID
     if (!this.editableProvider.id || this.editableProvider.id.trim().length === 0) {
       this.editableProvider.id = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
     }
-
-    // 如果没有 name，使用 displayName 作为 name
     if (!this.editableProvider.name || this.editableProvider.name.trim().length === 0) {
       this.editableProvider.name = displayName;
     }
@@ -228,25 +282,24 @@ export struct ProviderSettingsDialog {
   }
 
   private isValidUrl(url: string): boolean {
-    // 简单的URL格式验证，适用于ArkTS环境
     const urlPattern = /^https?:\/\/([\w\-]+(\.[\w\-]+)*)(:\d+)?(\/.*)?$/i;
     return urlPattern.test(url.trim());
   }
 
   private cloneProvider(source: AIProvider): AIProvider {
-    const clonedProvider = new AIProvider(source.id, source.name, source.displayName, source.apiUrl, source.apiKey);
-    clonedProvider.isActive = source.isActive;
-    clonedProvider.models = source.models.map(model => this.cloneModel(model));
-    return clonedProvider;
+    const cloned = new AIProvider(source.id, source.name, source.displayName, source.apiUrl, source.apiKey);
+    cloned.isActive = source.isActive;
+    cloned.models = source.models.map(m => this.cloneModel(m));
+    return cloned;
   }
 
   private cloneModel(model: AIModel): AIModel {
     return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
   }
 
-  private showToast(message: string) {
+  private showToast(message: string): void {
     try {
-      Prompt.showToast({ message });
+      Prompt.showToast({ message, duration: 2000 });
     } catch (error) {
       logger.error('Failed to show toast: %{public}s', String(error));
     }
