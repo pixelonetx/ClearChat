@@ -40,19 +40,21 @@ import {
   ReasoningContentItem,
   WebSearchTool,
   Citation,
-  ExtendedStreamResponse
+  ExtendedStreamResponse,
+  AIModel
 } from '../services/DataModels';
 import { AbortController } from '../interfaces/AbortController';
 import { NetworkError } from '../common/ErrorHandler';
 import { createLogger, LogDomain } from '../common/Logger';
-import { 
-  StreamEventEmitter, 
-  StreamEventType, 
+import {
+  StreamEventEmitter,
+  StreamEventType,
   StreamEventPromise,
   ProgressData
 } from './StreamEventEmitter';
 import { StreamState } from './StreamState';
 import { StreamProcessor, StreamProcessorOptions } from './StreamProcessor';
+import { ApiFormat } from './PresetProviders';
 
 const logger = createLogger('NetworkManagerV2', LogDomain.NETWORK);
 
@@ -833,8 +835,159 @@ export class NetworkManagerV2 {
   }
 
   /**
+   * 从 API 获取模型列表。
+   * 支持 OpenAI、Anthropic、Gemini 三种 API 格式。
+   */
+  async fetchModels(apiUrl: string, apiKey: string, apiFormat: ApiFormat = 'openai'): Promise<AIModel[]> {
+    const baseUrl = (apiUrl || '').trim().replace(/\/+$/, '');
+    const key = (apiKey || '').trim();
+    if (!baseUrl) throw new Error('API 地址不能为空');
+    if (!key) throw new Error('API 密钥不能为空');
+
+    if (apiFormat === 'gemini') return await this.fetchModelsGemini(baseUrl, key);
+    if (apiFormat === 'anthropic') return await this.fetchModelsAnthropic(baseUrl, key);
+    return await this.fetchModelsOpenAI(baseUrl, key);
+  }
+
+  /** OpenAI 格式: GET {baseUrl}/models, Authorization: Bearer */
+  private async fetchModelsOpenAI(baseUrl: string, apiKey: string): Promise<AIModel[]> {
+    const url = `${baseUrl}/models`;
+    return new Promise<AIModel[]>((resolve, reject) => {
+      const httpRequest = http.createHttp();
+      httpRequest.request(url, {
+        method: http.RequestMethod.GET,
+        header: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json' },
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 15000,
+        readTimeout: 15000
+      }, (err: Error, data: http.HttpResponse) => {
+        if (err) { httpRequest.destroy(); reject(new NetworkError(`获取模型列表失败: ${err.message}`)); return; }
+        try {
+          if (data.responseCode !== 200) {
+            httpRequest.destroy();
+            reject(new NetworkError(`获取模型列表失败 (HTTP ${data.responseCode})`));
+            return;
+          }
+          const body = JSON.parse(data.result as string) as Object;
+          httpRequest.destroy();
+          resolve(this.parseOpenAIModelsResponse(body));
+        } catch (e) {
+          httpRequest.destroy();
+          reject(new NetworkError(`解析模型列表失败: ${e}`));
+        }
+      });
+    });
+  }
+
+  /** Anthropic 格式: GET {baseUrl}/models, x-api-key + anthropic-version */
+  private async fetchModelsAnthropic(baseUrl: string, apiKey: string): Promise<AIModel[]> {
+    const url = `${baseUrl}/models?limit=1000`;
+    return new Promise<AIModel[]>((resolve, reject) => {
+      const httpRequest = http.createHttp();
+      httpRequest.request(url, {
+        method: http.RequestMethod.GET,
+        header: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Accept': 'application/json'
+        },
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 15000,
+        readTimeout: 15000
+      }, (err: Error, data: http.HttpResponse) => {
+        if (err) { httpRequest.destroy(); reject(new NetworkError(`获取模型列表失败: ${err.message}`)); return; }
+        try {
+          if (data.responseCode !== 200) {
+            httpRequest.destroy();
+            reject(new NetworkError(`获取模型列表失败 (HTTP ${data.responseCode})`));
+            return;
+          }
+          const body = JSON.parse(data.result as string) as Object;
+          httpRequest.destroy();
+          resolve(this.parseAnthropicModelsResponse(body));
+        } catch (e) {
+          httpRequest.destroy();
+          reject(new NetworkError(`解析模型列表失败: ${e}`));
+        }
+      });
+    });
+  }
+
+  /** Gemini 格式: GET {baseUrl}/models?key=xxx */
+  private async fetchModelsGemini(baseUrl: string, apiKey: string): Promise<AIModel[]> {
+    const url = `${baseUrl}/models?key=${encodeURIComponent(apiKey)}`;
+    return new Promise<AIModel[]>((resolve, reject) => {
+      const httpRequest = http.createHttp();
+      httpRequest.request(url, {
+        method: http.RequestMethod.GET,
+        header: { 'Accept': 'application/json' },
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 15000,
+        readTimeout: 15000
+      }, (err: Error, data: http.HttpResponse) => {
+        if (err) { httpRequest.destroy(); reject(new NetworkError(`获取模型列表失败: ${err.message}`)); return; }
+        try {
+          if (data.responseCode !== 200) {
+            httpRequest.destroy();
+            reject(new NetworkError(`获取模型列表失败 (HTTP ${data.responseCode})`));
+            return;
+          }
+          const body = JSON.parse(data.result as string) as Object;
+          httpRequest.destroy();
+          resolve(this.parseGeminiModelsResponse(body));
+        } catch (e) {
+          httpRequest.destroy();
+          reject(new NetworkError(`解析模型列表失败: ${e}`));
+        }
+      });
+    });
+  }
+
+  /** 解析 OpenAI /v1/models 响应 */
+  private parseOpenAIModelsResponse(body: Object): AIModel[] {
+    const data = (body as Record<string, Object>)['data'] as Array<Object> | undefined;
+    if (!data || !Array.isArray(data)) throw new Error('模型列表响应格式异常');
+    return data
+      .map((item: Object) => {
+        const id = String((item as Record<string, Object>)['id'] ?? '');
+        return new AIModel(id, id, id, 131072, 0.7, false);
+      })
+      .filter(m => !!m.id);
+  }
+
+  /** 解析 Anthropic /v1/models 响应 */
+  private parseAnthropicModelsResponse(body: Object): AIModel[] {
+    const data = (body as Record<string, Object>)['data'] as Array<Object> | undefined;
+    if (!data || !Array.isArray(data)) throw new Error('模型列表响应格式异常');
+    return data
+      .map((item: Object) => {
+        const id = String((item as Record<string, Object>)['id'] ?? '');
+        const displayName = String((item as Record<string, Object>)['display_name'] ?? id);
+        return new AIModel(id, id, displayName, 128000, 0.7, false);
+      })
+      .filter(m => !!m.id);
+  }
+
+  /** 解析 Gemini /v1beta/models 响应 */
+  private parseGeminiModelsResponse(body: Object): AIModel[] {
+    const models = (body as Record<string, Object>)['models'] as Array<Object> | undefined;
+    if (!models || !Array.isArray(models)) throw new Error('模型列表响应格式异常');
+    return models
+      .filter((item: Object) => {
+        const methods = (item as Record<string, Object>)['supportedGenerationMethods'] as string[] | undefined;
+        return methods && methods.includes('generateContent');
+      })
+      .map((item: Object) => {
+        const fullName = String((item as Record<string, Object>)['name'] ?? '');
+        const displayName = String((item as Record<string, Object>)['displayName'] ?? fullName);
+        return new AIModel(fullName, fullName, displayName, 131072, 0.7, false);
+      })
+      .filter(m => !!m.id);
+  }
+
+  /**
    * 测试API连接
-   * 
+   *
    * @param apiUrl API 基础 URL
    * @param apiKey API 密钥
    * @param modelName 模型名称

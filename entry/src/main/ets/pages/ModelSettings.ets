@@ -8,6 +8,7 @@ import { NativeDialogHelper } from '../components/dialogs/NativeDialogHelper';
 import { ProviderSettingsDialog } from '../components/settings/ProviderSettingsDialog';
 import { ModelSettingsDialog } from '../components/settings/ModelSettingsDialog';
 import { DatabaseError } from '../common/ErrorHandler';
+import { inferApiFormat } from '../services/PresetProviders';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN = 0x0000;
@@ -35,6 +36,7 @@ struct ModelSettings {
   topRectHeight: number = 0;
   @State isLoading: boolean = false;
   @State isTesting: boolean = false;
+  @State isFetchingModels: boolean = false;
   // 多服务商状态
   @State providers: AIProvider[] = [];
   @State currentProviderIndex: number = 0;
@@ -513,6 +515,40 @@ struct ModelSettings {
     }
   }
 
+  // 从 API 获取模型列表
+  private async fetchModelsForProvider(providerIndex: number): Promise<void> {
+    if (providerIndex < 0 || providerIndex >= this.providers.length) {
+      return;
+    }
+    const provider = this.providers[providerIndex];
+    const url = (provider.apiUrl || '').trim();
+    const key = (provider.apiKey || '').trim();
+    if (!url || !key) {
+      this.showToast('请先完善服务商的 API 地址和密钥');
+      return;
+    }
+    this.isFetchingModels = true;
+    try {
+      const format = inferApiFormat(url);
+      const models = await this.networkManager.fetchModels(url, key, format);
+      if (models.length === 0) {
+        this.showToast('未获取到可用模型，请手动添加');
+        return;
+      }
+      const newProviders = [...this.providers];
+      newProviders[providerIndex] = this.cloneProvider(provider);
+      newProviders[providerIndex].models = models;
+      this.providers = newProviders;
+      await this.persistSettingsSilently();
+      this.showToast(`成功获取 ${models.length} 个模型`);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to fetch models: %{public}s', String(error));
+      this.showToast(`获取模型失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.isFetchingModels = false;
+    }
+  }
+
   // 测试服务商连接
   async testProviderConnection(provider: AIProvider) {
     if (!provider.apiUrl || !provider.apiKey || provider.models.length === 0) {
@@ -703,6 +739,28 @@ struct ModelSettings {
             .fontWeight(FontWeight.Bold)
 
           Blank()
+
+          if (provider.apiUrl && provider.apiKey) {
+            Button() {
+              Row({ space: 4 }) {
+                if (this.isFetchingModels) {
+                  LoadingProgress().width(14).height(14)
+                }
+                Text(this.isFetchingModels ? '获取中' : '获取模型')
+                  .fontSize(12)
+              }
+            }
+            .height(28)
+            .fontColor($r('app.color.text_color'))
+            .backgroundColor(Color.Transparent)
+            .borderRadius(14)
+            .padding({ left: 12, right: 12 })
+            .enabled(!this.isFetchingModels)
+            .margin({ right: 8 })
+            .onClick(() => {
+              this.fetchModelsForProvider(providerIndex);
+            })
+          }
 
           Button('添加模型')
             .fontSize(14)
