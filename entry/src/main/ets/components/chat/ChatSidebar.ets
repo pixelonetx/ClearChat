@@ -161,11 +161,11 @@ export struct ChatSidebar {
                 end: () => this.SwipeActions(conversation),
                 edgeEffect: SwipeEdgeEffect.Spring
               })
-            })
+            }, (conversation: Conversation) => conversation.id)
           }
           .width('100%')
           .scrollBar(BarState.Off)
-        })
+        }, (dateKey: string) => dateKey)
       }
       .width('100%')
       .padding({ left: 16, right: 16 })
@@ -267,6 +267,8 @@ export struct ChatSidebar {
       return '一周内';
     } else if (dateKey === 'this_month') {
       return '30天内';
+    } else if (dateKey === 'older') {
+      return '更早';
     } else if (dateKey.includes('-')) {
       const dateParts = dateKey.split('-');
       const year = parseInt(dateParts[0]);

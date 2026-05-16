@@ -80,11 +80,12 @@ export struct MarkdownRenderer {
     }
 
     let changed = false;
+    const shouldExpandNewThinking = this.defaultThinkingExpanded;
     for (const id of thinkingIds) {
       if (!this.seenThinkingIds.has(id)) {
         this.seenThinkingIds.add(id);
         // 仅在配置允许时，自动展开首次出现的思考块
-        if (this.defaultThinkingExpanded && !this.expandedSections.has(id)) {
+        if (shouldExpandNewThinking && !this.expandedSections.has(id)) {
           this.expandedSections.add(id);
           changed = true;
         }
@@ -277,7 +278,7 @@ export struct MarkdownRenderer {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
         // 简化的标题渲染：集中使用 renderTextSegmentSpan
         this.renderTextSegmentSpan(segment, MarkdownStyle.getHeadingSize(block.level || 1))
-      })
+      }, (segment: TextSegment, index: number) => `heading_${index}_${segment.text}`)
     }
     .margin({ top: MarkdownStyle.HEADING_MARGIN_TOP, bottom: MarkdownStyle.HEADING_MARGIN_BOTTOM })
     .lineHeight(MarkdownStyle.HEADING_LINE_HEIGHT)
@@ -317,14 +318,14 @@ export struct MarkdownRenderer {
           Text() {
             ForEach(this.parser.parseTextFormatting(paragraph), (segment: TextSegment, index: number) => {
               this.renderTextSegmentSpan(segment, MarkdownStyle.TEXT_FONT_SIZE)
-            })
+            }, (segment: TextSegment, index: number) => `quote_segment_${paraIndex}_${index}_${segment.text}`)
           }
           .maxLines(MarkdownStyle.MAX_LINES)
           .lineHeight(MarkdownStyle.TEXT_LINE_HEIGHT)
           .textOverflow({ overflow: TextOverflow.None })
           .wordBreak(MarkdownStyle.WORD_BREAK)
           .fontStyle(FontStyle.Italic) // 引用块整体斜体
-        })
+        }, (paragraph: string, paraIndex: number) => `quote_${paraIndex}_${paragraph}`)
       }
       .padding({ left: MarkdownStyle.QUOTE_PADDING_LEFT })
       .alignItems(HorizontalAlign.Start)
@@ -353,14 +354,14 @@ export struct MarkdownRenderer {
             Column() {
               ForEach(this.parser.parse(item.trim()), (nestedBlock: MarkdownBlock, nestedIndex: number) => {
                 this.renderBlock(nestedBlock)
-              })
+              }, (nestedBlock: MarkdownBlock, nestedIndex: number) => `nested_${index}_${nestedIndex}_${nestedBlock.type}`)
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
           }
           .alignItems(VerticalAlign.Top)
           .margin({ bottom: MarkdownStyle.LIST_ITEM_MARGIN_BOTTOM })
-        })
+        }, (item: string, index: number) => `list_${index}_${item}`)
       }
     }
     .margin({ top: MarkdownStyle.LIST_MARGIN_TOP, bottom: MarkdownStyle.LIST_MARGIN_BOTTOM })
@@ -390,7 +391,7 @@ export struct MarkdownRenderer {
       ForEach(this.parser.parseTextFormatting(block.content), (segment: TextSegment, index: number) => {
         // 简化的文本渲染：集中使用 renderTextSegmentSpan，条件判断逻辑已提取
         this.renderTextSegmentSpan(segment, MarkdownStyle.TEXT_FONT_SIZE)
-      })
+      }, (segment: TextSegment, index: number) => `text_${index}_${segment.text}`)
     }
     .maxLines(MarkdownStyle.MAX_LINES)
     .lineHeight(MarkdownStyle.TEXT_LINE_HEIGHT)
@@ -432,7 +433,7 @@ export struct MarkdownRenderer {
                     // 表格单元格使用专用的 renderTableCellSegmentSpan，支持表头加粗
                     ForEach(this.parser.parseTextFormatting(cell.trim()), (segment: TextSegment, segIndex: number) => {
                       this.renderTableCellSegmentSpan(segment, MarkdownStyle.TABLE_CELL_FONT_SIZE, rowIndex === 0)
-                    })
+                    }, (segment: TextSegment, segIndex: number) => `table_segment_${rowIndex}_${cellIndex}_${segIndex}_${segment.text}`)
 
                     // 空内容占位，保证空白单元格有最小高度
                     if (cell.trim().length === 0) {
@@ -457,9 +458,9 @@ export struct MarkdownRenderer {
                 })
                 .alignItems(this.getTableCellAlignment(block, cellIndex))
                 .justifyContent(FlexAlign.Start)
-              })
+              }, (cell: string, cellIndex: number) => `cell_${rowIndex}_${cellIndex}_${cell}`)
             }
-          })
+          }, (row: string[], rowIndex: number) => `row_${rowIndex}_${row.join('|')}`)
         }
         .margin({ top: MarkdownStyle.TABLE_MARGIN_TOP, bottom: MarkdownStyle.TABLE_MARGIN_BOTTOM })
         .border({
@@ -646,9 +647,9 @@ export struct MarkdownRenderer {
       // 展开的思考内容 - 左侧细线 + 次要文字色
       if (this.expandedSections.has(id)) {
         Column() {
-          ForEach(this.parser.parse(content || ''), (block: MarkdownBlock) => {
+          ForEach(this.parser.parse(content || ''), (block: MarkdownBlock, index: number) => {
             this.renderBlock(block)
-          })
+          }, (block: MarkdownBlock, index: number) => `thinking_${id}_${index}_${block.type}`)
         }
         .width('100%')
         .padding({ left: 12, top: 4, bottom: 4 })

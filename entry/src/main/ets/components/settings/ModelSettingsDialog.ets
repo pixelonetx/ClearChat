@@ -166,7 +166,7 @@ export struct ModelSettingsDialog {
                   this.editableModel.thinkingConfig!.effort =
                     level as string;
                 })
-            })
+            }, (level: string) => level)
           }
           .width('100%')
         }

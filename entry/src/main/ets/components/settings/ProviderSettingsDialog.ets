@@ -145,7 +145,7 @@ export struct ProviderSettingsDialog {
           Row({ space: 10 }) {
             ForEach(PRESET_PROVIDERS, (preset: PresetProvider) => {
               this.PresetChip(preset)
-            })
+            }, (preset: PresetProvider) => preset.type)
           }
           .padding({ left: 2, right: 2 })
         }

@@ -301,7 +301,7 @@ export struct MessageItem {
         }
         .width('100%')
         .padding({ top: 4, bottom: 4 })
-      })
+      }, (toolCall: import('../../services/DataModels').ToolCall, index: number) => toolCall.id || `tool_${index}`)
     }
     .width('100%')
     .margin({ bottom: 6 })
@@ -434,7 +434,7 @@ export struct MessageItem {
             .onClick(() => {
               this.openSearchReferencesDialog();
             })
-          }, (c: Citation, i: number) => `${i}`)
+          }, (c: Citation, i: number) => c.url || `citation_${i}`)
 
           // 查看全部按钮
           if (this.message.citations!.length > 3) {

@@ -128,7 +128,7 @@ export function SearchReferencesSheet(references: SearchReference[], query: stri
           }
         }
         .backgroundColor($r('sys.color.ohos_id_color_background'))
-      })
+      }, (ref: SearchReference, idx: number) => ref.url || `reference_${idx}`)
     }
     .width('100%')
     .layoutWeight(1)

@@ -694,7 +694,7 @@ struct ModelSettings {
                 }
               }
               .tabBar(provider.displayName)
-            })
+            }, (provider: AIProvider, index: number) => provider.id || `provider_${index}`)
           }
           .layoutWeight(1)
           .onChange((index: number) => {

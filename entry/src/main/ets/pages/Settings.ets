@@ -198,7 +198,7 @@ struct Settings {
               .color(Color.Gray)
               // .margin({ left: 16, right: 16 })
           }
-        })
+        }, (item: SettingItem, index: number) => item.title || `setting_${index}`)
       }
       .borderRadius(16)
       .clip(true)

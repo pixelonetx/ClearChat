@@ -90,7 +90,7 @@ struct Preference {
               .height(1)
               .color(Color.Gray)
           }
-        })
+        }, (item: PreferenceItem, index: number) => item.title || `preference_${index}`)
       }
       .borderRadius(16)
       .clip(true)

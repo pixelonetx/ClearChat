@@ -14,14 +14,15 @@ import { Conversation } from './ConversationModels';
  */
 export function groupConversationsByDate(conversations: Conversation[]): Record<string, Conversation[]> {
   const groups: Record<string, Conversation[]> = {};
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
   const sortedConversations = [...conversations].sort((a, b) =>
-    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    b.updatedAt - a.updatedAt
   );
 
   sortedConversations.forEach(conversation => {
-    const date = new Date(conversation.updatedAt);
-    const dateKey = getDateKey(date);
+    const dateKey = getDateKey(conversation.updatedAt, todayStart);
 
     if (!groups[dateKey]) {
       groups[dateKey] = [];
@@ -37,25 +38,20 @@ export function groupConversationsByDate(conversations: Conversation[]): Record<
  * @param date 日期
  * @returns 分组标签
  */
-function getDateKey(date: Date): string {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const conversationDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-  const timeDiff = today.getTime() - conversationDate.getTime();
+function getDateKey(updatedAt: number, todayStart: number): string {
+  if (updatedAt >= todayStart) {
+    return 'today';
+  }
+  const timeDiff = todayStart - updatedAt;
   const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
 
   if (daysDiff === 0) {
-    return 'today';
-  } else if (daysDiff === 1) {
     return 'yesterday';
-  } else if (daysDiff >= 2 && daysDiff <= 7) {
+  } else if (daysDiff >= 1 && daysDiff <= 7) {
     return 'this_week';
   } else if (daysDiff >= 8 && daysDiff <= 30) {
     return 'this_month';
   } else {
-    const conversationYear = date.getFullYear();
-    const conversationMonth = date.getMonth() + 1;
-    return `${conversationYear}-${conversationMonth.toString().padStart(2, '0')}`;
+    return 'older';
   }
 }

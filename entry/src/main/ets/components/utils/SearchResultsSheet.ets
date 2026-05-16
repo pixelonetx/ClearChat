@@ -171,7 +171,7 @@ export struct SearchResultsSheet {
               logger.error('Failed to navigate to browser: %{public}s', String(error));
             }
           })
-        })
+        }, (item: SearchResultItem, idx: number) => item.id || item.url || `result_${idx}`)
       }
       .width('100%')
       .layoutWeight(1)

@@ -8,7 +8,7 @@ import { ChatMessage, AppSettings, AIProvider, AIModel, ApiFormat, ThinkingConfi
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
-import { NetworkManagerV2 } from '../services/NetworkManagerV2';
+import { NetworkManagerV2, StreamRequestConfig } from '../services/NetworkManagerV2';
 import { ClipboardManager } from '../components/utils/ClipboardManager';
 import { BrowserHelper } from '../services/BrowserHelper';
 import { NativeDialogHelper } from '../components/dialogs/NativeDialogHelper';
@@ -22,6 +22,7 @@ import { MessageList, MessageListConfig } from '../components/chat/MessageList';
 import { throttle, debounce } from '../common/NetworkUtils';
 import { ChatViewModel } from '../viewmodels/ChatViewModel';
 import { ChatStreamingService, StreamingCallbacks, ModelInfo, ApiConfig } from '../services/ChatStreamingService';
+import { StreamEventEmitter } from '../services/StreamEventEmitter';
 import { SettingsReloadService, SettingsReloadCallbacks } from '../services/SettingsReloadService';
 import { groupConversationsByDate } from '../services/ConversationGroupHelper';
 import { PresetProvider, PRESET_PROVIDERS, inferApiFormat } from '../services/PresetProviders';
@@ -660,7 +661,7 @@ struct Chat {
               // 选中后不自动清空已输入的密钥，方便用户切换
             })
           }
-        })
+        }, (preset: PresetProvider) => preset.type)
       }
       .columnsTemplate('1fr 1fr')
       .columnsGap(10)
@@ -970,6 +971,54 @@ struct Chat {
     this.viewModel.setCurrentConversation(this.currentConversation);
     this.viewModel.setMessages(this.messages);
   }
+
+  private setGenerationState(
+    isLoading: boolean,
+    isGenerating: boolean,
+    controller: AbortController | null = this.currentAbortController
+  ): void {
+    this.isLoading = isLoading;
+    this.isGenerating = isGenerating;
+    this.currentAbortController = controller;
+  }
+
+  private resetGenerationStateAfterFailure(): void {
+    this.setGenerationState(false, false, null);
+  }
+
+  private async createStreamEmitter(
+    messagesForAI: ChatMessage[],
+    abortController: AbortController,
+    requestTimeout: number
+  ): Promise<StreamEventEmitter | null> {
+    const apiConfig = this.resolveActiveApiConfig();
+    if (!apiConfig) {
+      this.showToast('无法获取API配置');
+      this.resetGenerationStateAfterFailure();
+      return null;
+    }
+
+    const tools = this.streamingService!.getSearchTools(this.enableWebSearch, apiConfig.apiFormat);
+    const requestConfig: StreamRequestConfig = {
+      tools: tools.length > 0 ? tools : undefined,
+      abortController: abortController,
+      requestTimeout: requestTimeout,
+      temperature: apiConfig.temperature,
+      maxTokens: apiConfig.maxTokens,
+      thinkingConfig: apiConfig.thinkingConfig,
+      apiFormat: apiConfig.apiFormat,
+      providerType: apiConfig.providerType
+    };
+
+    return await this.networkManager.sendStreamChatRequestV2(
+      apiConfig.apiUrl,
+      apiConfig.apiKey,
+      apiConfig.model,
+      messagesForAI,
+      requestConfig
+    );
+  }
+
   // 加载设置 - 委托给 ViewModel
   async loadSettings(): Promise<void> {
     try {
@@ -1461,9 +1510,8 @@ struct Chat {
       const targetConversationId = this.currentConversation.id;
 
       // 准备状态和消息
-      this.isLoading = true;
-      this.isGenerating = true;
-      this.currentAbortController = createAbortController();
+      const abortController = createAbortController();
+      this.setGenerationState(true, true, abortController);
       this.inputText = '';
 
       // 保存用户消息
@@ -1480,34 +1528,10 @@ struct Chat {
       // 准备AI消息列表（委托给 streamingService）
       const messagesForAI = this.streamingService!.prepareMessagesForAPI(userMessage);
 
-      // 发送流式请求
-      const apiConfig = this.resolveActiveApiConfig();
-      if (!apiConfig) {
-        this.showToast('无法获取API配置');
-        this.isLoading = false;
-        this.isGenerating = false;
+      const emitter = await this.createStreamEmitter(messagesForAI, abortController, 60000);
+      if (!emitter) {
         return;
       }
-
-      // 检查搜索工具（委托给 streamingService）
-      const tools = this.streamingService!.getSearchTools(this.enableWebSearch, apiConfig.apiFormat);
-
-      const emitter = await this.networkManager.sendStreamChatRequestV2(
-        apiConfig.apiUrl,
-        apiConfig.apiKey,
-        apiConfig.model,
-        messagesForAI,
-        {
-          tools: tools.length > 0 ? tools : undefined,
-          abortController: this.currentAbortController,
-          requestTimeout: 60000,
-          temperature: apiConfig.temperature,
-          maxTokens: apiConfig.maxTokens,
-          thinkingConfig: apiConfig.thinkingConfig,
-          apiFormat: apiConfig.apiFormat,
-          providerType: apiConfig.providerType
-        }
-      );
 
       // 设置事件处理（委托给 streamingService）
       this.streamingService!.setupStreamEventHandlers(
@@ -1516,9 +1540,7 @@ struct Chat {
       );
 
     } catch (error) {
-      this.isLoading = false;
-      this.isGenerating = false;
-      this.currentAbortController = null;
+      this.resetGenerationStateAfterFailure();
       const friendlyError = getFriendlyErrorMessage(error instanceof Error ? error : new Error(String(error)));
       this.showToast(friendlyError);
     }
@@ -1691,9 +1713,8 @@ struct Chat {
       hilog.info(DOMAIN, TAG, 'Created regenerated record ID=%{public}s', String(newMessageId));
 
       // 设置为重新生成模式
-      this.isLoading = true;
-      this.isGenerating = true;
-      this.currentAbortController = createAbortController();
+      const abortController = createAbortController();
+      this.setGenerationState(true, true, abortController);
       const targetConversationId = this.currentConversation.id;
       const streamingMessageIndex = messageIndex;
 
@@ -1707,41 +1728,17 @@ struct Chat {
 
       hilog.info(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 发送流式请求重新生成
-      const apiConfig = this.resolveActiveApiConfig();
-      if (!apiConfig) {
-        this.showToast('无法获取API配置');
-        this.isLoading = false;
-        this.isGenerating = false;
+      const emitter = await this.createStreamEmitter(messagesForAI, abortController, 30000);
+      if (!emitter) {
         return;
       }
-
-      // 检查搜索工具（委托给 streamingService）
-      const tools = this.streamingService!.getSearchTools(this.enableWebSearch, apiConfig.apiFormat);
-
-      const emitter = await this.networkManager.sendStreamChatRequestV2(
-        apiConfig.apiUrl,
-        apiConfig.apiKey,
-        apiConfig.model,
-        messagesForAI,
-        {
-          tools: tools.length > 0 ? tools : undefined,
-          abortController: this.currentAbortController,
-          requestTimeout: 30000,
-          temperature: apiConfig.temperature,
-          maxTokens: apiConfig.maxTokens,
-          thinkingConfig: apiConfig.thinkingConfig,
-          apiFormat: apiConfig.apiFormat,
-          providerType: apiConfig.providerType
-        }
-      );
 
       // 设置重新生成的事件处理（委托给 streamingService）
       this.streamingService!.setupRegenerationStreamEventHandlers(emitter, streamingMessageIndex, targetConversationId);
 
     } catch (error) {
       
-      this.isLoading = false;
+      this.resetGenerationStateAfterFailure();
       this.showToast('重新生成失败');
     }
   }

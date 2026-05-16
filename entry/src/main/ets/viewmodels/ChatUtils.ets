@@ -199,9 +199,7 @@ export function shouldGenerateTitle(messages: ChatMessage[], currentTitle: strin
  * @returns 分组名称
  */
 export function formatDateGroup(timestamp: number): string {
-  const now = new Date();
-  const date = new Date(timestamp);
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor((Date.now() - timestamp) / (1000 * 60 * 60 * 24));
   
   if (diffDays === 0) {
     return '今天';
