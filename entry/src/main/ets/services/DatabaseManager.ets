@@ -1,35 +1,41 @@
 /**
- * DatabaseManager - 数据库管理服�?
+ * DatabaseManager - 数据库管理服务
  * 
- * 功能说明�?
- * - 管理应用的关系型数据库操�?
+ * 功能说明：
+ * - 管理应用的关系型数据库操作
  * - 提供对话、消息、设置、AI提供商等数据的CRUD操作
  * - 实现数据库版本管理和迁移
  * - 确保数据一致性和事务安全
  * 
  * 数据表结构：
- * - conversations: 对话记录�?
- * - messages: 消息记录�?
- * - settings: 应用设置�?
+ * - conversations: 对话记录表
+ * - messages: 消息记录表
+ * - settings: 应用设置表
  * - providers: AI提供商配置表
- * - models: AI模型配置�?
+ * - models: AI 模型配置表
  * 
  * 特性：
- * - 单例模式确保数据库连接唯一�?
+ * - 单例模式确保数据库连接唯一
  * - 支持数据库版本升级和结构迁移
  * - 提供完整的错误处理和日志记录
- * - 优化查询性能和内存使�?
+ * - 优化查询性能和内存使用
  */
 
 import { relationalStore } from '@kit.ArkData';
 import { Constants } from '../common/Constants';
-import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel, Citation } from '../services/DataModels';
+import { ChatMessage, AppSettings, ChatMessageMetadataUpdate, AIProvider, AIModel, Citation, ThinkingConfig } from './DataModels';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseError } from '../common/ErrorHandler';
 import { TransactionManager } from '../services/TransactionManager';
 import { createLogger, LogDomain } from '../common/Logger';
 
 const logger = createLogger('DatabaseManager', LogDomain.DATABASE);
+
+interface ThinkingConfigRecord {
+  enabled: boolean;
+  effort?: string;
+  budgetTokens?: number;
+}
 
 interface ProviderModelRecord {
   id?: string;
@@ -38,6 +44,7 @@ interface ProviderModelRecord {
   maxTokens?: number;
   temperature?: number;
   supportsWebSearch?: boolean;
+  thinkingConfig?: ThinkingConfigRecord;
 }
 
 interface ProviderRecord {
@@ -48,6 +55,7 @@ interface ProviderRecord {
   apiKey?: string;
   models?: ProviderModelRecord[];
   isActive?: boolean;
+  apiFormat?: string;
 }
 
 /**
@@ -74,9 +82,9 @@ export class DatabaseManager {
   }
 
   /**
-   * 初始化数据库连接和配�?
-   * @param context 应用上下�?
-   * @throws DatabaseError 数据库初始化失败时抛�?
+   * 初始化数据库连接和配置
+   * @param context 应用上下文
+   * @throws DatabaseError 数据库初始化失败时抛出
    */
   async initDatabase(context: Context): Promise<void> {
     if (this.initialized && this.rdbStore && this.transactionManager) {
@@ -86,7 +94,7 @@ export class DatabaseManager {
     const config: relationalStore.StoreConfig = {
       name: Constants.DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S2, // 提升安全级别
-      encrypt: true // 启用数据库加�?
+      encrypt: true // 启用数据库加密
     };
 
     try {
@@ -108,7 +116,7 @@ export class DatabaseManager {
   }
 
   /**
-   * 创建所有必要的数据�?
+   * 创建所有必要的数据表
    * @private
    * @throws DatabaseError 表创建失败时抛出
    */
@@ -117,7 +125,7 @@ export class DatabaseManager {
       throw new DatabaseError('Database not initialized');
     }
 
-    // 创建聊天消息�?
+    // 创建聊天消息表
     const createChatTable = `
       CREATE TABLE IF NOT EXISTS ${Constants.CHAT_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +143,7 @@ export class DatabaseManager {
       )
     `;
 
-    // 创建对话�?
+    // 创建对话表
     const createConversationTable = `
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
@@ -147,7 +155,7 @@ export class DatabaseManager {
       )
     `;
 
-    // 创建设置�?
+    // 创建设置表
     const createSettingsTable = `
       CREATE TABLE IF NOT EXISTS ${Constants.SETTINGS_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,21 +186,21 @@ export class DatabaseManager {
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
 
-      // 兼容旧版本表结构：补�?messages.citations_json �?
+      // 兼容旧版本表结构：补充 messages.citations_json 列
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN citations_json TEXT`);
       } catch (e) {
-        // 若已存在则忽�?
+        // 若已存在则忽略
       }
 
-      // 兼容旧版本表结构：补�?messages.metadata 列（用于工具调用�?
+      // 兼容旧版本表结构：补充 messages.metadata 列（用于工具调用）
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN metadata TEXT`);
       } catch (e3) {
-        // 若已存在则忽�?
+        // 若已存在则忽略
       }
 
-      // 兼容旧版本设置表结构：补�?settings.enable_web_search �?
+      // 兼容旧版本设置表结构：补充 settings.enable_web_search 列
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.SETTINGS_TABLE} ADD COLUMN enable_web_search INTEGER DEFAULT 0`);
       } catch (e2) {
@@ -329,9 +337,9 @@ export class DatabaseManager {
 
     const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
     predicates.equalTo('conversation_id', conversationId)
-      .notEqualTo('role', 'tool')  // 过滤掉tool消息，不加载到前端显�?
+      .notEqualTo('role', 'tool')  // 过滤掉tool消息，不加载到前端显示
       .orderByAsc('timestamp')
-      .orderByAsc('id')  // 补充：按ID作为次级排序键，确保时间戳相同时按插入顺序排�?
+      .orderByAsc('id')  // 补充：按ID作为次级排序键，确保时间戳相同时按插入顺序排序
       .limitAs(limit);
 
     try {
@@ -483,7 +491,7 @@ export class DatabaseManager {
   // }
 
   /**
-   * 清理所有tool类型的消息（修复历史数据�?
+   * 清理所有tool类型的消息（修复历史数据）
    * 这些消息不应该被保存到数据库，仅在内存中使用
    */
   async cleanupToolMessages(): Promise<number> {
@@ -526,7 +534,7 @@ export class DatabaseManager {
    * 保存应用设置
    */
   async saveSettings(settings: AppSettings): Promise<void> {
-    // 如果数据库未初始化，抛出错误让调用者处�?
+    // 如果数据库未初始化，抛出错误让调用者处理
     if (!this.rdbStore) {
       throw new DatabaseError('Database not initialized. Please call initDatabase() first.');
     }
@@ -542,7 +550,7 @@ export class DatabaseManager {
     };
 
     try {
-      // 检查是否存在记�?
+      // 检查是否存在记录
       const predicates = new relationalStore.RdbPredicates(Constants.SETTINGS_TABLE);
       const resultSet = await this.rdbStore.query(predicates, ['id']);
       const hasExisting = resultSet.rowCount > 0;
@@ -554,7 +562,7 @@ export class DatabaseManager {
         const updated = await this.rdbStore.update(valueBucket, updatePredicates);
         logger.info( 'Settings updated: %{public}d rows affected', updated);
       } else {
-        // 插入新记�?
+        // 插入新记录
         const rowId = await this.rdbStore.insert(Constants.SETTINGS_TABLE, valueBucket);
         logger.info( 'Settings inserted with rowId: %{public}d', rowId);
       }
@@ -636,7 +644,7 @@ export class DatabaseManager {
           resolvedSettings.apiUrl = activeProvider.apiUrl;
           resolvedSettings.apiKey = activeProvider.apiKey;
         } else {
-          // 没有提供商时，清空激活的 ID 和配�?
+          // 没有提供商时，清空激活的 ID 和配置
           resolvedSettings.activeProviderId = '';
           resolvedSettings.activeModelId = '';
           resolvedSettings.apiUrl = '';
@@ -644,7 +652,7 @@ export class DatabaseManager {
           resolvedSettings.modelName = '';
         }
 
-        // 读取 enable_web_search（若缺失则默认为 false�?
+        // 读取 enable_web_search（若缺失则默认为 false）
         if (enableWebSearchIndex >= 0 && !resultSet.isColumnNull(enableWebSearchIndex)) {
           const flag = resultSet.getLong(enableWebSearchIndex);
           resolvedSettings.enableWebSearch = flag === 1;
@@ -707,8 +715,8 @@ export class DatabaseManager {
   }
 
   /**
-   * 删除对话及其所有消�?
-   * 使用事务保证原子�?
+   * 删除对话及其所有消息
+   * 使用事务保证原子性
    */
   async deleteConversation(conversationId: string): Promise<void> {
     if (!this.rdbStore || !this.transactionManager) {
@@ -717,7 +725,7 @@ export class DatabaseManager {
 
     try {
       await this.transactionManager.executeInTransaction(async () => {
-        // 删除所有相关消�?
+        // 删除所有相关消息
         const messagePredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
         messagePredicates.equalTo('conversation_id', conversationId);
         await this.rdbStore!.delete(messagePredicates);
@@ -737,7 +745,7 @@ export class DatabaseManager {
 
   /**
    * 更新对话消息计数
-   * 使用事务保证查询和更新的原子�?
+   * 使用事务保证查询和更新的原子性
    */
   async updateConversationMessageCount(conversationId: string): Promise<void> {
     if (!this.rdbStore || !this.transactionManager) {
@@ -756,7 +764,7 @@ export class DatabaseManager {
         }
         resultSet.close();
 
-        // 更新对话的消息计�?
+        // 更新对话的消息计数
         const valueBucket: relationalStore.ValuesBucket = {
           'message_count': messageCount,
           'updated_at': Date.now()
@@ -776,7 +784,7 @@ export class DatabaseManager {
   }
 
   /**
-   * 创建新对�?
+   * 创建新对话
    */
   async createConversation(title: string): Promise<Conversation> {
     if (!this.rdbStore) {
@@ -900,7 +908,21 @@ export class DatabaseManager {
 
     const supportsWebSearch = Boolean(supportsWebSearchSource);
 
-    return new AIModel(id, name, displayName, maxTokens, temperature, supportsWebSearch);
+    let thinkingConfig: ThinkingConfig | undefined = undefined;
+    const rawTC = raw.thinkingConfig;
+    if (rawTC) {
+      if (rawTC.enabled) {
+        thinkingConfig = {
+          enabled: true,
+          effort: rawTC.effort,
+          budgetTokens: rawTC.budgetTokens
+        };
+      } else {
+        thinkingConfig = { enabled: false };
+      }
+    }
+
+    return new AIModel(id, name, displayName, maxTokens, temperature, supportsWebSearch, thinkingConfig);
   }
 
   private hydrateProvider(raw: ProviderRecord | null | undefined): AIProvider | null {
@@ -924,13 +946,18 @@ export class DatabaseManager {
     const apiUrl = typeof apiUrlSource === 'string' && apiUrlSource.trim().length > 0 ? apiUrlSource : '';
     const apiKey = typeof apiKeySource === 'string' ? apiKeySource : '';
 
-    // 只要�?id �?name 不为空即可，允许不完整的服务商配置（如用户还未填�?apiUrl�?
+    // 只要 id 和 name 不为空即可，允许不完整的服务商配置（如用户还未填写 apiUrl）
     if (!id || !name) {
       return null;
     }
 
     const provider = new AIProvider(id, name, displayName, apiUrl, apiKey);
     provider.isActive = Boolean(isActiveSource);
+
+    const rawApiFormat = raw.apiFormat;
+    if (typeof rawApiFormat === 'string' && (rawApiFormat === 'anthropic' || rawApiFormat === 'gemini')) {
+      provider.apiFormat = rawApiFormat;
+    }
 
     const hydratedModels: AIModel[] = [];
     if (Array.isArray(modelsSource)) {

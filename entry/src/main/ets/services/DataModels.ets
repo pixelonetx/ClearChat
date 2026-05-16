@@ -48,6 +48,20 @@ export interface ChatMessageInit {
 }
 
 /**
+ * API 格式标识
+ */
+export type ApiFormat = 'openai' | 'anthropic' | 'gemini';
+
+/**
+ * 思考/推理配置
+ */
+export interface ThinkingConfig {
+  enabled: boolean;
+  effort?: string;
+  budgetTokens?: number;
+}
+
+/**
  * 聊天消息实体类
  * 表示用户和AI之间的单条消息记录
  */
@@ -145,14 +159,17 @@ export class AIModel {
   temperature: number;
   /** 该模型是否支持联网搜索功能（已废弃，统一使用工具调用） */
   supportsWebSearch: boolean;
+  /** 思考/推理模式配置 */
+  thinkingConfig?: ThinkingConfig;
 
-  constructor(id: string, name: string, displayName: string, maxTokens: number = 4096, temperature: number = 0.7, supportsWebSearch: boolean = false) {
+  constructor(id: string, name: string, displayName: string, maxTokens: number = 4096, temperature: number = 0.7, supportsWebSearch: boolean = false, thinkingConfig?: ThinkingConfig) {
     this.id = id;
     this.name = name;
     this.displayName = displayName;
     this.maxTokens = maxTokens;
     this.temperature = temperature;
     this.supportsWebSearch = supportsWebSearch;
+    this.thinkingConfig = thinkingConfig;
   }
 }
 
@@ -167,6 +184,7 @@ export class AIProvider {
   apiKey: string;
   models: AIModel[];
   isActive: boolean;
+  apiFormat: ApiFormat;
 
   constructor(id: string, name: string, displayName: string, apiUrl: string = '', apiKey: string = '') {
     this.id = id;
@@ -176,6 +194,7 @@ export class AIProvider {
     this.apiKey = apiKey;
     this.models = [];
     this.isActive = false;
+    this.apiFormat = 'openai';
   }
 }
 
@@ -236,6 +255,12 @@ export interface ChatRequestBody {
   enable_search?: boolean;
   // OpenAI 格式的工具定义（支持 function calling）
   tools?: object[];
+  // 思考/推理参数
+  reasoning_effort?: string;
+  thinking?: object;
+  output_config?: object;
+  enable_thinking?: boolean;
+  thinking_budget?: number;
 }
 
 /**

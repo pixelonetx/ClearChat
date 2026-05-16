@@ -1,9 +1,4 @@
-import { AIModel, AIProvider } from './DataModels';
-
-/**
- * API 格式类型
- */
-export type ApiFormat = 'openai' | 'anthropic' | 'gemini';
+import { AIModel, AIProvider, ApiFormat, ThinkingConfig } from './DataModels';
 
 /**
  * 预设服务商配置
@@ -41,8 +36,9 @@ export class PresetProvider {
   /** 创建 AIProvider 实例（不含 API Key） */
   createProvider(): AIProvider {
     const provider = new AIProvider(this.type, this.name, this.displayName, this.apiUrl, '');
+    provider.apiFormat = this.apiFormat;
     provider.models = this.defaultModels.map(m =>
-      new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch));
+      new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch, m.thinkingConfig));
     return provider;
   }
 }
@@ -55,8 +51,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'openai',
     '/v1/models',
     [
-      new AIModel('gpt-5.5', 'gpt-5.5', 'GPT-5.5', 131072, 0.7, false),
-      new AIModel('gpt-5.4-mini', 'gpt-5.4-mini', 'GPT-5.4 Mini', 131072, 0.7, false),
+      new AIModel('gpt-5.5', 'gpt-5.5', 'GPT-5.5', 131072, 0.7, false, { enabled: false, effort: 'medium' }),
+      new AIModel('gpt-5.4-mini', 'gpt-5.4-mini', 'GPT-5.4 Mini', 131072, 0.7, false, { enabled: false, effort: 'medium' }),
     ],
     'https://platform.openai.com'
   ),
@@ -66,8 +62,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'anthropic',
     '/v1/models',
     [
-      new AIModel('claude-opus-4-7', 'claude-opus-4-7', 'Claude Opus 4.7', 128000, 0.7, false),
-      new AIModel('claude-sonnet-4-6', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 64000, 0.7, false),
+      new AIModel('claude-opus-4-7', 'claude-opus-4-7', 'Claude Opus 4.7', 128000, 0.7, false, { enabled: false, effort: 'high' }),
+      new AIModel('claude-sonnet-4-6', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 64000, 0.7, false, { enabled: false, budgetTokens: 16000 }),
     ],
     'https://console.anthropic.com'
   ),
@@ -77,8 +73,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'openai',
     '/v1/models',
     [
-      new AIModel('deepseek-v4-pro', 'deepseek-v4-pro', 'DeepSeek V4 Pro', 65536, 0.7, false),
-      new AIModel('deepseek-v4-flash', 'deepseek-v4-flash', 'DeepSeek V4 Flash', 65536, 0.7, false),
+      new AIModel('deepseek-v4-pro', 'deepseek-v4-pro', 'DeepSeek V4 Pro', 65536, 0.7, false, { enabled: false, effort: 'high' }),
+      new AIModel('deepseek-v4-flash', 'deepseek-v4-flash', 'DeepSeek V4 Flash', 65536, 0.7, false, { enabled: false, effort: 'high' }),
     ],
     'https://platform.deepseek.com'
   ),
@@ -88,8 +84,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'openai',
     '/v1/models',
     [
-      new AIModel('glm-5.1', 'glm-5.1', 'GLM-5.1', 131072, 0.7, false),
-      new AIModel('glm-4.7-flash', 'glm-4.7-flash', 'GLM-4.7 Flash', 131072, 0.7, false),
+      new AIModel('glm-5.1', 'glm-5.1', 'GLM-5.1', 131072, 0.7, false, { enabled: false }),
+      new AIModel('glm-4.7-flash', 'glm-4.7-flash', 'GLM-4.7 Flash', 131072, 0.7, false, { enabled: false }),
     ],
     'https://open.bigmodel.cn'
   ),
@@ -99,8 +95,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'openai',
     '/v1/models',
     [
-      new AIModel('qwen3-max', 'qwen3-max', 'Qwen3 Max', 258048, 0.7, false),
-      new AIModel('qwen-plus', 'qwen-plus', 'Qwen Plus', 131072, 0.7, false),
+      new AIModel('qwen3-max', 'qwen3-max', 'Qwen3 Max', 258048, 0.7, false, { enabled: false, budgetTokens: 8192 }),
+      new AIModel('qwen-plus', 'qwen-plus', 'Qwen Plus', 131072, 0.7, false, { enabled: false, budgetTokens: 4096 }),
     ],
     'https://dashscope.console.aliyun.com'
   ),
@@ -110,8 +106,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'openai',
     '/v1/models',
     [
-      new AIModel('deepseek-ai/DeepSeek-V3.2', 'deepseek-ai/DeepSeek-V3.2', 'DeepSeek V3.2', 65536, 0.7, false),
-      new AIModel('Qwen/Qwen3.5-122B-A10B', 'Qwen/Qwen3.5-122B-A10B', 'Qwen3.5 122B', 65536, 0.7, false),
+      new AIModel('deepseek-ai/DeepSeek-V3.2', 'deepseek-ai/DeepSeek-V3.2', 'DeepSeek V3.2', 65536, 0.7, false, { enabled: false }),
+      new AIModel('Qwen/Qwen3.5-122B-A10B', 'Qwen/Qwen3.5-122B-A10B', 'Qwen3.5 122B', 65536, 0.7, false, { enabled: false, budgetTokens: 4096 }),
     ],
     'https://www.siliconflow.cn'
   ),
@@ -121,8 +117,8 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     'gemini',
     '/v1beta/models',
     [
-      new AIModel('gemini-2.5-pro', 'gemini-2.5-pro', 'Gemini 2.5 Pro', 131072, 0.7, false),
-      new AIModel('gemini-2.5-flash', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 131072, 0.7, false),
+      new AIModel('gemini-2.5-pro', 'gemini-2.5-pro', 'Gemini 2.5 Pro', 131072, 0.7, false, { enabled: false, budgetTokens: -1 }),
+      new AIModel('gemini-2.5-flash', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 131072, 0.7, false, { enabled: false, budgetTokens: 0 }),
     ],
     'https://aistudio.google.com'
   ),

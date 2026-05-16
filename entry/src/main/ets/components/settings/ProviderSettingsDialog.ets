@@ -1,7 +1,8 @@
 import { Prompt } from '@kit.ArkUI';
 import { AIProvider, AIModel } from '../../services/DataModels';
 import { createLogger, LogDomain } from '../../common/Logger';
-import { PresetProvider, PRESET_PROVIDERS, ApiFormat, inferApiFormat } from '../../services/PresetProviders';
+import { PresetProvider, PRESET_PROVIDERS, inferApiFormat } from '../../services/PresetProviders';
+import { ApiFormat } from '../../services/DataModels';
 import { NetworkManagerV2 } from '../../services/NetworkManagerV2';
 
 const logger = createLogger('ProviderSettingsDialog', LogDomain.SETTINGS);
@@ -232,8 +233,12 @@ export struct ProviderSettingsDialog {
     this.editableProvider.name = preset.name;
     this.editableProvider.apiUrl = preset.apiUrl;
     this.editableProvider.id = Date.now().toString() + '_' + preset.type;
-    this.editableProvider.models = preset.defaultModels.map(m =>
-      new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch));
+    this.editableProvider.apiFormat = preset.apiFormat;
+    this.editableProvider.models = preset.defaultModels.map(m => {
+      const tc = m.thinkingConfig;
+      return new AIModel(m.id, m.name, m.displayName, m.maxTokens, m.temperature, m.supportsWebSearch,
+        tc ? { enabled: tc.enabled, effort: tc.effort, budgetTokens: tc.budgetTokens } : undefined);
+    });
   }
 
   private confirmProvider(): void {
@@ -289,12 +294,14 @@ export struct ProviderSettingsDialog {
   private cloneProvider(source: AIProvider): AIProvider {
     const cloned = new AIProvider(source.id, source.name, source.displayName, source.apiUrl, source.apiKey);
     cloned.isActive = source.isActive;
+    cloned.apiFormat = source.apiFormat;
     cloned.models = source.models.map(m => this.cloneModel(m));
     return cloned;
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
+    const tc = model.thinkingConfig;
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch, tc ? { enabled: tc.enabled, effort: tc.effort, budgetTokens: tc.budgetTokens } : undefined);
   }
 
   private showToast(message: string): void {

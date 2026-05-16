@@ -48,14 +48,14 @@ export class TransactionManager {
       logger.info('Starting transaction');
 
       // 开始事务
-      await this.rdbStore.beginTransaction();
+      this.rdbStore.beginTransaction();
       transactionStarted = true;
 
       // 执行用户提供的操作
       const result = await operation();
 
       // 提交事务
-      await this.rdbStore.commit();
+      this.rdbStore.commit();
       logger.info('Transaction committed successfully');
 
       return result;
@@ -63,7 +63,7 @@ export class TransactionManager {
       // 如果事务已开始，执行回滚
       if (transactionStarted) {
         try {
-          await this.rdbStore.rollBack();
+          this.rdbStore.rollBack();
           logger.info('Transaction rolled back successfully');
         } catch (rollbackError) {
           logger.error('Failed to rollback transaction: %{public}s', String(rollbackError));

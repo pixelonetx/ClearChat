@@ -1,5 +1,5 @@
 import { Prompt } from '@kit.ArkUI';
-import { AIModel } from '../../services/DataModels';
+import { AIModel, ThinkingConfig } from '../../services/DataModels';
 import { createLogger, LogDomain } from '../../common/Logger';
 
 const logger = createLogger('ModelSettingsDialog', LogDomain.SETTINGS);
@@ -105,6 +105,101 @@ export struct ModelSettingsDialog {
       .alignItems(HorizontalAlign.Start)
       .margin({ bottom: 24 })
 
+      // 思考/推理模式
+      Column() {
+        Row() {
+          Column() {
+            Text('思考/推理模式')
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .alignSelf(ItemAlign.Start)
+
+            Text('启用后，AI模型会先进行深度推理再输出答案')
+              .fontSize(12)
+              .fontColor('#888888')
+              .alignSelf(ItemAlign.Start)
+              .margin({ top: 4 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Toggle({ type: ToggleType.Switch, isOn: this.editableModel.thinkingConfig?.enabled ?? false })
+            .onChange((isOn: boolean) => {
+              if (!this.editableModel.thinkingConfig) {
+                this.editableModel.thinkingConfig = { enabled: isOn };
+              } else {
+                this.editableModel.thinkingConfig.enabled = isOn;
+              }
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .padding(12)
+      .backgroundColor($r('sys.color.ohos_fa_list_card_bg'))
+      .borderRadius(8)
+      .margin({ bottom: 16 })
+
+      // 推理努力程度（思考启用时显示）
+      if (this.editableModel.thinkingConfig?.enabled) {
+        Column() {
+          Text('推理努力程度')
+            .fontSize(14)
+            .alignSelf(ItemAlign.Start)
+            .margin({ bottom: 8 })
+
+          Row({ space: 6 }) {
+            ForEach(['low', 'medium', 'high', 'max', 'xhigh'], (level: string) => {
+              Text(level)
+                .fontSize(12)
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .backgroundColor(
+                  this.editableModel.thinkingConfig?.effort === level ? '#4CAF50' : '#E0E0E0'
+                )
+                .fontColor(
+                  this.editableModel.thinkingConfig?.effort === level ? Color.White : '#333333'
+                )
+                .borderRadius(14)
+                .onClick(() => {
+                  this.editableModel.thinkingConfig!.effort =
+                    level as string;
+                })
+            })
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .margin({ bottom: 16 })
+
+        // 推理预算（未设置努力程度时显示）
+        if (!this.editableModel.thinkingConfig.effort) {
+          Column() {
+            Text('推理预算 (Token数)')
+              .fontSize(14)
+              .alignSelf(ItemAlign.Start)
+              .margin({ bottom: 8 })
+
+            TextInput({
+              placeholder: '例如: 16000',
+              text: this.editableModel.thinkingConfig?.budgetTokens?.toString() ?? ''
+            })
+              .height(48)
+              .type(InputType.Number)
+              .onChange((value: string) => {
+                const budget = parseInt(value);
+                this.editableModel.thinkingConfig!.budgetTokens =
+                  Number.isFinite(budget) ? budget : undefined;
+              })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .margin({ bottom: 24 })
+        }
+      }
+
       // 支持联网搜索
       Column() {
         Row() {
@@ -178,7 +273,8 @@ export struct ModelSettingsDialog {
   }
 
   private cloneModel(model: AIModel): AIModel {
-    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch);
+    const tc = model.thinkingConfig;
+    return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature, model.supportsWebSearch, tc ? { enabled: tc.enabled, effort: tc.effort, budgetTokens: tc.budgetTokens } : undefined);
   }
 
   private showToast(message: string) {

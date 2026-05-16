@@ -7,7 +7,8 @@
  */
 
 import { createLogger, LogDomain } from '../common/Logger';
-import { ChatMessage, AppSettings, Citation, StreamMetadata, ChatMessageMetadataUpdate } from '../services/DataModels';
+import { ChatMessage, AppSettings, Citation, StreamMetadata, ChatMessageMetadataUpdate, ThinkingConfig, ApiFormat, AIProvider } from '../services/DataModels';
+import { inferApiFormat } from '../services/PresetProviders';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
@@ -538,9 +539,32 @@ export class ChatViewModel {
     const abortController = createAbortController();
     this._currentAbortController = abortController;
 
-    let tools: object[] = [];
+    // 解析活跃模型配置
+    let temperature = 0.7;
+    let maxTokens = 2000;
+    let thinkingConfig: ThinkingConfig | undefined = undefined;
+    let apiFormat: ApiFormat = 'openai';
+    let providerType: string | undefined = undefined;
+    if (this._currentSettings) {
+      const activeProvider = this._currentSettings.providers.find(
+        p => p.id === this._currentSettings!.activeProviderId
+      );
+      if (activeProvider) {
+        providerType = activeProvider.name;
+        apiFormat = activeProvider.apiFormat || inferApiFormat(activeProvider.apiUrl);
+        const activeModel = activeProvider.models.find(
+          m => m.id === this._currentSettings!.activeModelId
+        ) ?? activeProvider.models[0];
+        if (activeModel) {
+          temperature = activeModel.temperature;
+          maxTokens = activeModel.maxTokens;
+          thinkingConfig = activeModel.thinkingConfig;
+        }
+      }
+    }
 
-    if (enableWebSearch) {
+    let tools: object[] = [];
+    if (enableWebSearch && apiFormat === 'openai') {
       const toolDef = this.getSearchToolDefinition();
       if (toolDef) {
         tools = [toolDef];
@@ -555,7 +579,12 @@ export class ChatViewModel {
       {
         tools: tools.length > 0 ? tools : undefined,
         abortController: abortController,
-        requestTimeout: DEFAULT_CHAT_CONFIG.requestTimeout
+        requestTimeout: DEFAULT_CHAT_CONFIG.requestTimeout,
+        temperature: temperature,
+        maxTokens: maxTokens,
+        thinkingConfig: thinkingConfig,
+        apiFormat: apiFormat,
+        providerType: providerType
       }
     );
 

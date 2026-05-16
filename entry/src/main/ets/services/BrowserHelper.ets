@@ -13,7 +13,7 @@ export class BrowserHelper {
 
   /**
    * 启动浏览器打开指定URL
-   * @param context UI能力上下�?
+   * @param context UI 能力上下文
    * @param url 要打开的网址
    * @returns Promise<boolean> 是否成功启动
    */
@@ -34,7 +34,7 @@ export class BrowserHelper {
         return false;
       }
 
-      // 根据HarmonyOS官方文档的推荐方�?
+      // 根据 HarmonyOS 官方文档的推荐方式
       const want: Want = {
         action: 'ohos.want.action.viewData',
         entities: ['entity.system.browsable'],
@@ -49,7 +49,7 @@ export class BrowserHelper {
 
       try {
         Prompt.showToast({
-          message: '正在启动浏览�?..',
+          message: '正在启动浏览器...',
           duration: 1500
         });
       } catch (toastErr) {
@@ -119,7 +119,7 @@ export class BrowserHelper {
 
   /**
    * 从文本中提取URL链接
-   * @param text 包含链接的文�?
+   * @param text 包含链接的文本
    * @returns string[] 提取到的URL数组
    */
   static extractUrls(text: string): string[] {
@@ -127,7 +127,7 @@ export class BrowserHelper {
       return [];
     }
 
-    // URL匹配正则表达�?
+    // URL 匹配正则表达式
     const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*)/gi;
     const matches = text.match(urlRegex);
 

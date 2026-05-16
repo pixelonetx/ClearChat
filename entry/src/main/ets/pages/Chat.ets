@@ -4,7 +4,7 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ChatMessage, AppSettings, AIProvider, AIModel } from '../services/DataModels';
+import { ChatMessage, AppSettings, AIProvider, AIModel, ApiFormat, ThinkingConfig } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
 import { DatabaseManager } from '../services/DatabaseManager';
@@ -42,6 +42,17 @@ class ToastOptions {
 // 明确手势事件类型，避免使用对象字面量类型
 interface PanUpdateEvent {
   offsetX: number;
+}
+
+interface ResolvedApiConfig {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  apiFormat: ApiFormat;
+  providerType: string;
+  temperature: number;
+  maxTokens: number;
+  thinkingConfig: ThinkingConfig | undefined;
 }
 
 // 跳转页面入口函数
@@ -804,15 +815,18 @@ struct Chat {
         this.userAbortedGeneration = value;
       },
       getApiConfig: (): ApiConfig | null => {
-        if (!this.currentSettings) {
-          return null;
-        }
-        const config: ApiConfig = {
-          apiUrl: this.currentSettings.apiUrl,
-          apiKey: this.currentSettings.apiKey,
-          modelName: this.currentSettings.modelName
+        const resolved = this.resolveActiveApiConfig();
+        if (!resolved) return null;
+        return {
+          apiUrl: resolved.apiUrl,
+          apiKey: resolved.apiKey,
+          modelName: resolved.model,
+          temperature: resolved.temperature,
+          maxTokens: resolved.maxTokens,
+          thinkingConfig: resolved.thinkingConfig,
+          apiFormat: resolved.apiFormat,
+          providerType: resolved.providerType
         };
-        return config;
       },
       getCurrentConversationTitle: (): string => {
         return this.currentConversation?.title ?? '';
@@ -1261,6 +1275,33 @@ struct Chat {
   // generateConversationTitle -> 已提取到 ChatStreamingService
 
   // 获取当前活跃的模型和提供商信息
+  /**
+   * 根据当前活跃的服务商和模型，解析完整的 API 请求配置
+   */
+  private resolveActiveApiConfig(): ResolvedApiConfig | null {
+    if (!this.currentSettings) return null;
+    const activeProvider = this.currentSettings.providers.find(
+      p => p.id === this.currentSettings!.activeProviderId
+    );
+    if (!activeProvider) return null;
+    const activeModel = activeProvider.models.find(
+      m => m.id === this.currentSettings!.activeModelId
+    ) ?? activeProvider.models[0];
+    if (!activeModel) return null;
+    const format: ApiFormat = activeProvider.apiFormat || inferApiFormat(activeProvider.apiUrl);
+    const resolved: ResolvedApiConfig = {
+      apiUrl: activeProvider.apiUrl,
+      apiKey: activeProvider.apiKey,
+      model: activeModel.name,
+      apiFormat: format,
+      providerType: activeProvider.name,
+      temperature: activeModel.temperature,
+      maxTokens: activeModel.maxTokens,
+      thinkingConfig: activeModel.thinkingConfig
+    };
+    return resolved;
+  }
+
   getCurrentModelInfo(): ModelInfo {
     if (!this.currentSettings) {
       return { modelName: 'unknown', providerName: 'unknown' };
@@ -1288,7 +1329,10 @@ struct Chat {
 
     return {
       modelName: activeModel.displayName || activeModel.name,
-      providerName: activeProvider.displayName || activeProvider.name
+      providerName: activeProvider.displayName || activeProvider.name,
+      temperature: activeModel.temperature,
+      maxTokens: activeModel.maxTokens,
+      thinkingEnabled: activeModel.thinkingConfig?.enabled ?? false
     };
   }
 
@@ -1436,19 +1480,32 @@ struct Chat {
       // 准备AI消息列表（委托给 streamingService）
       const messagesForAI = this.streamingService!.prepareMessagesForAPI(userMessage);
 
-      // 检查搜索工具（委托给 streamingService）
-      const tools = this.streamingService!.getSearchTools(this.enableWebSearch);
-
       // 发送流式请求
+      const apiConfig = this.resolveActiveApiConfig();
+      if (!apiConfig) {
+        this.showToast('无法获取API配置');
+        this.isLoading = false;
+        this.isGenerating = false;
+        return;
+      }
+
+      // 检查搜索工具（委托给 streamingService）
+      const tools = this.streamingService!.getSearchTools(this.enableWebSearch, apiConfig.apiFormat);
+
       const emitter = await this.networkManager.sendStreamChatRequestV2(
-        this.currentSettings!.apiUrl,
-        this.currentSettings!.apiKey,
-        this.currentSettings!.modelName,
+        apiConfig.apiUrl,
+        apiConfig.apiKey,
+        apiConfig.model,
         messagesForAI,
         {
           tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
-          requestTimeout: 60000
+          requestTimeout: 60000,
+          temperature: apiConfig.temperature,
+          maxTokens: apiConfig.maxTokens,
+          thinkingConfig: apiConfig.thinkingConfig,
+          apiFormat: apiConfig.apiFormat,
+          providerType: apiConfig.providerType
         }
       );
 
@@ -1650,19 +1707,32 @@ struct Chat {
 
       hilog.info(DOMAIN, TAG, 'Regenerating AI message at index=%{public}d', streamingMessageIndex);
 
-      // 检查搜索工具（委托给 streamingService）
-      const tools = this.streamingService!.getSearchTools(this.enableWebSearch);
-
       // 发送流式请求重新生成
+      const apiConfig = this.resolveActiveApiConfig();
+      if (!apiConfig) {
+        this.showToast('无法获取API配置');
+        this.isLoading = false;
+        this.isGenerating = false;
+        return;
+      }
+
+      // 检查搜索工具（委托给 streamingService）
+      const tools = this.streamingService!.getSearchTools(this.enableWebSearch, apiConfig.apiFormat);
+
       const emitter = await this.networkManager.sendStreamChatRequestV2(
-        this.currentSettings?.apiUrl || '',
-        this.currentSettings?.apiKey || '',
-        this.currentSettings?.modelName || '',
+        apiConfig.apiUrl,
+        apiConfig.apiKey,
+        apiConfig.model,
         messagesForAI,
         {
           tools: tools.length > 0 ? tools : undefined,
           abortController: this.currentAbortController,
-          requestTimeout: 30000
+          requestTimeout: 30000,
+          temperature: apiConfig.temperature,
+          maxTokens: apiConfig.maxTokens,
+          thinkingConfig: apiConfig.thinkingConfig,
+          apiFormat: apiConfig.apiFormat,
+          providerType: apiConfig.providerType
         }
       );
 

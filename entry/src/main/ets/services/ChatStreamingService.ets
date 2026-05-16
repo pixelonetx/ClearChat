@@ -10,7 +10,7 @@
  */
 
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ChatMessage, ChatMessageMetadataUpdate, StreamMetadata, Citation } from './DataModels';
+import { ChatMessage, ChatMessageMetadataUpdate, StreamMetadata, Citation, ThinkingConfig, ApiFormat } from './DataModels';
 import { DatabaseManager } from './DatabaseManager';
 import { NetworkManagerV2 } from './NetworkManagerV2';
 import { StreamEventEmitter, StreamEventType, EventPayload, ToolCallData } from './StreamEventEmitter';
@@ -40,6 +40,9 @@ export interface StreamingMessageResult {
 export interface ModelInfo {
   modelName: string;
   providerName: string;
+  temperature?: number;
+  maxTokens?: number;
+  thinkingEnabled?: boolean;
 }
 
 // API 配置接口
@@ -47,6 +50,11 @@ export interface ApiConfig {
   apiUrl: string;
   apiKey: string;
   modelName: string;
+  temperature?: number;
+  maxTokens?: number;
+  thinkingConfig?: ThinkingConfig;
+  apiFormat?: ApiFormat;
+  providerType?: string;
 }
 
 /**
@@ -184,10 +192,14 @@ export class ChatStreamingService {
           message.timestamp = createdTimestamp;
           message.providerCreatedAt = meta.created;
           metadataChanged = true;
-        } else if (message.providerCreatedAt !== meta.created) {
+      } else if (message.providerCreatedAt !== meta.created) {
           message.providerCreatedAt = meta.created;
           metadataChanged = true;
         }
+      }
+      if (meta.citations !== undefined) {
+        message.citations = meta.citations as Citation[];
+        metadataChanged = true;
       }
     });
 
@@ -202,13 +214,8 @@ export class ChatStreamingService {
           modelName: persistedMessage.modelName ?? null,
           providerName: persistedMessage.providerName ?? null
         };
-        if (meta && meta.citations) {
+        if (meta && meta.citations !== undefined) {
           update.citations = meta.citations as Citation[];
-          this.callbacks.replaceMessageAt(streamingMessageIndex, (message: ChatMessage) => {
-            if (update.citations) {
-              message.citations = update.citations as Citation[];
-            }
-          });
         }
         this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
           .catch(() => {});
@@ -422,8 +429,12 @@ export class ChatStreamingService {
   /**
    * 获取联网搜索工具定义数组
    */
-  getSearchTools(enableWebSearch: boolean): object[] {
+  getSearchTools(enableWebSearch: boolean, apiFormat: string = 'openai'): object[] {
     if (!enableWebSearch) {
+      return [];
+    }
+    if (apiFormat !== 'openai') {
+      hilog.info(DOMAIN, TAG, 'Web search tool skipped for unsupported API format: %{public}s', apiFormat);
       return [];
     }
     try {
@@ -646,7 +657,7 @@ export class ChatStreamingService {
           msg.content.length);
       }
 
-      const tools = this.getSearchTools(true);
+      const tools = this.getSearchTools(true, apiConfig.apiFormat);
 
       hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
         apiConfig.apiUrl.substring(0, 30), apiConfig.modelName, messagesForAI.length);
@@ -659,7 +670,12 @@ export class ChatStreamingService {
         {
           tools: tools.length > 0 ? tools : undefined,
           abortController: abortController,
-          requestTimeout: 60000
+          requestTimeout: 60000,
+          temperature: apiConfig.temperature,
+          maxTokens: apiConfig.maxTokens,
+          thinkingConfig: apiConfig.thinkingConfig,
+          apiFormat: apiConfig.apiFormat,
+          providerType: apiConfig.providerType
         }
       );
 

@@ -153,8 +153,9 @@ struct ModelSettings {
   }
 
   private cloneModel(model: AIModel): AIModel {
+    const tc = model.thinkingConfig;
     return new AIModel(model.id, model.name, model.displayName, model.maxTokens, model.temperature,
-      model.supportsWebSearch);
+      model.supportsWebSearch, tc ? { enabled: tc.enabled, effort: tc.effort, budgetTokens: tc.budgetTokens } : undefined);
   }
 
   private cloneProvider(provider: AIProvider): AIProvider {
@@ -882,7 +883,7 @@ struct ModelSettings {
         }
         .width('100%')
 
-        Text(`ID: ${model.name} | 最大Token: ${model.maxTokens} | 温度: ${model.temperature}`)
+        Text(`ID: ${model.name} | 最大Token: ${model.maxTokens} | 温度: ${model.temperature}${model.thinkingConfig?.enabled ? ' | 推理: 开' : ''}`)
           .fontSize(12)
           .margin({ top: 4 })
           .maxLines(1)

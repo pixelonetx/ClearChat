@@ -21,15 +21,15 @@ import { createLogger, LogDomain } from '../../common/Logger';
 const logger = createLogger('SearchServiceFactory', LogDomain.SEARCH);
 
 /**
- * 搜索服务工厂�?
+ * 搜索服务工厂
  */
 export class SearchServiceFactory {
   /**
-   * 根据服务选项获取相应的搜索服务实�?
+   * 根据服务选项获取相应的搜索服务实例
    */
   static getService(options: SearchServiceOptions): SearchService<SearchServiceOptions> {
     try {
-      // 根据服务类型返回相应的搜索服务实�?
+      // 根据服务类型返回相应的搜索服务实例
       switch (options.type) {
         case 'tavily':
           return TavilySearchService.getInstance();
