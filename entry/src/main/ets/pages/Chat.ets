@@ -907,7 +907,7 @@ struct Chat {
   async initializeApp() {
     try {
       // 初始化数据库
-      const context = getContext(this) as common.UIAbilityContext;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       await this.databaseManager.initDatabase(context);
 
       // 清理历史中的tool消息（修复消息顺序问题）
@@ -1760,7 +1760,7 @@ struct Chat {
    * 用于验证链接点击功能是否正常工作
    */
   testBrowserLaunch(url: string = 'https://www.huawei.com') {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     BrowserHelper.openUrl(context, url);
   }
 

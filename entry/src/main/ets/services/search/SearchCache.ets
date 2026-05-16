@@ -164,13 +164,13 @@ export class SearchCache {
    */
   private evictOldest(): void {
     let oldestKey: string | null = null;
-    let oldestTimestamp = Date.now();
+    let oldestTimestamp = 0;
     const keys = Array.from(this.cache.keys());
     
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const entry = this.cache.get(key);
-      if (entry && entry.timestamp < oldestTimestamp) {
+      if (entry && (oldestKey === null || entry.timestamp < oldestTimestamp)) {
         oldestTimestamp = entry.timestamp;
         oldestKey = key;
       }
