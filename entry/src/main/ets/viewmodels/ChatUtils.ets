@@ -152,8 +152,8 @@ export function shouldGenerateTitle(messages: ChatMessage[], currentTitle: strin
     return false;
   }
 
-  // 至少需要4条消息（2轮对话）
-  if (messages.length < 4) {
+  // 至少需要2条消息（1轮对话），让标题尽早出现
+  if (messages.length < 2) {
     return false;
   }
 

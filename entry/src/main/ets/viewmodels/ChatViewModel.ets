@@ -435,11 +435,16 @@ export class ChatViewModel {
     if (!shouldGenerateTitle(this._messages, this._currentConversation.title)) return;
 
     try {
+      const settings = this._currentSettings;
+      const activeProvider = settings.providers.find(p => p.id === settings.activeProviderId)
+        ?? settings.providers[0];
+      const apiFormat = activeProvider?.apiFormat || inferApiFormat(activeProvider?.apiUrl || settings.apiUrl);
       const title = await this.titleGenerationService.generateTitle(
         this._messages,
-        this._currentSettings.apiKey,
-        this._currentSettings.apiUrl,
-        this._currentSettings.modelName
+        settings.apiKey,
+        settings.apiUrl,
+        settings.modelName,
+        apiFormat
       );
 
       if (title && title !== this._currentConversation.title) {

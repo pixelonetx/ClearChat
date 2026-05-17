@@ -47,6 +47,7 @@ import {
 import { AbortController } from '../interfaces/AbortController';
 import { NetworkError } from '../common/ErrorHandler';
 import { createLogger, LogDomain } from '../common/Logger';
+import { inferApiFormat } from './PresetProviders';
 import {
   StreamEventEmitter,
   StreamEventType,
@@ -204,6 +205,13 @@ export class NetworkManagerV2 {
   }
 
   /**
+   * 脱敏 URL 用于日志输出，防止 API Key 泄露（Gemini 等将 key 放在 query string 中）
+   */
+  private sanitizeUrlForLogging(url: string): string {
+    return url.replace(/([?&]key=)[^&]*/i, '$1***');
+  }
+
+  /**
    * 解析聊天完成 URL
    */
   private resolveChatCompletionsUrl(apiUrl: string): string {
@@ -231,13 +239,19 @@ export class NetworkManagerV2 {
   /**
    * 根据 API 格式解析请求 URL
    */
-  private resolveRequestUrl(apiUrl: string, apiFormat: ApiFormat, model: string, apiKey?: string): string {
+  private resolveRequestUrl(
+    apiUrl: string,
+    apiFormat: ApiFormat,
+    model: string,
+    apiKey?: string,
+    streaming: boolean = true
+  ): string {
     const base = (apiUrl || '').trim().replace(/\/+$/, '');
     switch (apiFormat) {
       case 'anthropic':
         return `${base}/messages`;
       case 'gemini': {
-        let url = `${base}/models/${encodeURIComponent(model)}:streamGenerateContent`;
+        let url = `${base}/models/${encodeURIComponent(model)}:${streaming ? 'streamGenerateContent' : 'generateContent'}`;
         if (apiKey) {
           url += `?key=${encodeURIComponent(apiKey)}`;
         }
@@ -281,12 +295,13 @@ export class NetworkManagerV2 {
   private buildOpenAIBody(
     model: string, messages: RequestMessage[], temperature: number, maxTokens: number,
     thinkingConfig: ThinkingConfig | undefined, providerType: string | undefined,
-    enableWebSearch: boolean | undefined, tools: object[] | undefined
+    enableWebSearch: boolean | undefined, tools: object[] | undefined,
+    streaming: boolean = true
   ): object {
     const body: Record<string, Object> = {};
     body['model'] = model;
     body['messages'] = messages;
-    body['stream'] = true;
+    body['stream'] = streaming;
     body['max_tokens'] = maxTokens;
     body['temperature'] = temperature;
     if (enableWebSearch === true) { body['enable_search'] = true; }
@@ -326,7 +341,7 @@ export class NetworkManagerV2 {
    */
   private buildAnthropicBody(
     model: string, messages: RequestMessage[], temperature: number, maxTokens: number,
-    thinkingConfig: ThinkingConfig | undefined
+    thinkingConfig: ThinkingConfig | undefined, streaming: boolean = true
   ): object {
     const anthropicMessages: AnthropicMessageParam[] = [];
     let systemPrompt: string | undefined;
@@ -346,7 +361,7 @@ export class NetworkManagerV2 {
     body['model'] = model;
     body['messages'] = anthropicMessages;
     body['max_tokens'] = maxTokens;
-    body['stream'] = true;
+    body['stream'] = streaming;
     if (systemPrompt) { body['system'] = systemPrompt; }
 
     if (thinkingConfig && thinkingConfig.enabled && thinkingConfig.effort) {
@@ -497,8 +512,13 @@ export class NetworkManagerV2 {
       const effectiveTemperature: number = config.temperature ?? 0.7;
       const thinkingConfig: ThinkingConfig | undefined = config.thinkingConfig;
 
-      const url = this.resolveRequestUrl(sanitizedApiUrl, apiFormat, sanitizedModel,
-        apiFormat === 'gemini' ? sanitizedApiKey : undefined);
+      const url = this.resolveRequestUrl(
+        sanitizedApiUrl,
+        apiFormat,
+        sanitizedModel,
+        apiFormat === 'gemini' ? sanitizedApiKey : undefined,
+        true
+      );
 
       const requestMessages: RequestMessage[] = messages.map((msg: ChatMessage): RequestMessage => {
         const requestMsg: RequestMessage = {
@@ -528,13 +548,13 @@ export class NetworkManagerV2 {
 
       switch (apiFormat) {
         case 'anthropic':
-          requestBody = this.buildAnthropicBody(sanitizedModel, requestMessages, effectiveTemperature, effectiveMaxTokens, thinkingConfig);
+          requestBody = this.buildAnthropicBody(sanitizedModel, requestMessages, effectiveTemperature, effectiveMaxTokens, thinkingConfig, true);
           break;
         case 'gemini':
           requestBody = this.buildGeminiBody(sanitizedModel, requestMessages, effectiveTemperature, effectiveMaxTokens, thinkingConfig);
           break;
         default:
-          requestBody = this.buildOpenAIBody(sanitizedModel, requestMessages, effectiveTemperature, effectiveMaxTokens, thinkingConfig, providerType, config.enableWebSearch, config.tools);
+          requestBody = this.buildOpenAIBody(sanitizedModel, requestMessages, effectiveTemperature, effectiveMaxTokens, thinkingConfig, providerType, config.enableWebSearch, config.tools, true);
           break;
       }
 
@@ -839,7 +859,7 @@ export class NetworkManagerV2 {
       usingProtocol: http.HttpProtocol.HTTP1_1
     };
 
-    logger.info( 'Performing HTTP request to: %{public}s', url);
+    logger.info( 'Performing HTTP request to: %{public}s', this.sanitizeUrlForLogging(url));
 
       return new Promise<number>((resolve, reject) => {
         httpRequest.requestInStream(url, options).then((responseCode: number) => {
@@ -942,7 +962,9 @@ export class NetworkManagerV2 {
     apiUrl: string,
     apiKey: string,
     modelName: string,
-    messages: ChatMessage[]
+    messages: ChatMessage[],
+    apiFormat: ApiFormat = 'openai',
+    requestTimeout: number = 30000
   ): Promise<string> {
     const sanitizedApiUrl = (apiUrl || '').trim();
     const sanitizedModel = this.sanitizeIdentifier(modelName || '');
@@ -953,8 +975,13 @@ export class NetworkManagerV2 {
     // 验证输入
     this.validateRequestInputs(sanitizedApiUrl, sanitizedApiKey, sanitizedModel);
 
-    // 非流式请求默认使用 OpenAI 格式（标题生成、连接测试等场景）
-    const requestUrl = this.resolveRequestUrl(sanitizedApiUrl, 'openai', sanitizedModel, undefined);
+    const requestUrl = this.resolveRequestUrl(
+      sanitizedApiUrl,
+      apiFormat,
+      sanitizedModel,
+      apiFormat === 'gemini' ? sanitizedApiKey : undefined,
+      false
+    );
 
     return new Promise((resolve, reject) => {
       const httpRequest = http.createHttp();
@@ -967,16 +994,28 @@ export class NetworkManagerV2 {
         };
       });
 
-      const requestBody: ChatRequestBody = {
-        model: sanitizedModel,
-        messages: requestMessages,
-        stream: false,
-        max_tokens: 4096,
-        temperature: 0.7
-      };
+      let requestBody: object;
+      switch (apiFormat) {
+        case 'anthropic':
+          requestBody = this.buildAnthropicBody(sanitizedModel, requestMessages, 0.7, 4096, undefined, false);
+          break;
+        case 'gemini':
+          requestBody = this.buildGeminiBody(sanitizedModel, requestMessages, 0.7, 4096, undefined);
+          break;
+        default:
+          const openAiBody: ChatRequestBody = {
+            model: sanitizedModel,
+            messages: requestMessages,
+            stream: false,
+            max_tokens: 4096,
+            temperature: 0.7
+          };
+          requestBody = openAiBody;
+          break;
+      }
 
       // 设置请求选项
-      const requestHeaders: Record<string, string> = this.buildHeaders(sanitizedApiKey, 'openai');
+      const requestHeaders: Record<string, string> = this.buildHeaders(sanitizedApiKey, apiFormat);
       requestHeaders['Accept'] = 'application/json';
 
       const options: http.HttpRequestOptions = {
@@ -984,11 +1023,11 @@ export class NetworkManagerV2 {
         header: requestHeaders,
         extraData: JSON.stringify(requestBody),
         expectDataType: http.HttpDataType.STRING,
-        connectTimeout: 30000,
-        readTimeout: 30000
+        connectTimeout: requestTimeout,
+        readTimeout: requestTimeout
       };
 
-      logger.info( 'Sending non-streaming request to: %{public}s', requestUrl);
+      logger.info( 'Sending non-streaming request to: %{public}s', this.sanitizeUrlForLogging(requestUrl));
 
       // 发送请求
       httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
@@ -1003,17 +1042,9 @@ export class NetworkManagerV2 {
         try {
           if (data.responseCode === 200) {
             const responseData = data.result as string;
-
-            const response: ChatResponse = JSON.parse(responseData);
-
-            if (response.choices && response.choices.length > 0) {
-              const content = response.choices[0].message.content;
-              httpRequest.destroy();
-              resolve(content);
-            } else {
-              httpRequest.destroy();
-              reject(new NetworkError('AI服务返回的响应格式不正确'));
-            }
+            const content = this.extractChatResponseText(apiFormat, responseData);
+            httpRequest.destroy();
+            resolve(content);
           } else {
             let errorMessage = `请求失败，状态码: ${data.responseCode}`;
             
@@ -1038,6 +1069,59 @@ export class NetworkManagerV2 {
         }
       });
     });
+  }
+
+  /**
+   * 解析非流式响应内容
+   */
+  private extractChatResponseText(apiFormat: ApiFormat, responseData: string): string {
+    const body = JSON.parse(responseData) as Record<string, Object>;
+
+    switch (apiFormat) {
+      case 'anthropic': {
+        const content = body['content'] as Array<Object> | undefined;
+        if (!content || !Array.isArray(content)) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        const text = content
+          .map((part: Object) => String((part as Record<string, Object>)['text'] ?? ''))
+          .join('')
+          .trim();
+        if (!text) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        return text;
+      }
+      case 'gemini': {
+        const candidates = body['candidates'] as Array<Object> | undefined;
+        if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        const candidate = candidates[0] as Record<string, Object>;
+        const content = candidate['content'] as Record<string, Object> | undefined;
+        const parts = content ? (content['parts'] as Array<Object> | undefined) : undefined;
+        const text = parts
+          ? parts.map((part: Object) => String((part as Record<string, Object>)['text'] ?? '')).join('').trim()
+          : '';
+        if (!text) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        return text;
+      }
+      default: {
+        const choices = body['choices'] as Array<Object> | undefined;
+        if (!choices || !Array.isArray(choices) || choices.length === 0) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        const choice = choices[0] as Record<string, Object>;
+        const message = choice['message'] as Record<string, Object> | undefined;
+        const text = message ? String(message['content'] ?? '') : '';
+        if (!text) {
+          throw new NetworkError('AI服务返回的响应格式不正确');
+        }
+        return text;
+      }
+    }
   }
 
   /**
@@ -1270,7 +1354,7 @@ export class NetworkManagerV2 {
   async testConnection(apiUrl: string, apiKey: string, modelName: string): Promise<boolean> {
     try {
       const testMessage = new ChatMessage('Hello', 'user');
-      await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage]);
+      await this.sendChatRequest(apiUrl, apiKey, modelName, [testMessage], inferApiFormat(apiUrl));
       return true;
     } catch (error) {
       logger.error( 'Connection test failed: %{public}s', String(error));

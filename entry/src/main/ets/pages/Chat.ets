@@ -78,7 +78,7 @@ struct Chat {
   @StorageProp('bottomRectHeight') bottomRectHeight: number = 0;
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @StorageProp('keyboardHeight') keyboardHeight: number = 0;
-  @StorageProp('settingsVersion') settingsVersion: number = 0;
+  @StorageLink('settingsVersion') settingsVersion: number = 0;
   @StorageLink('conversationsReloadVersion') conversationsReloadVersion: number = 0;
   @StorageLink('currentBreakPoint') currentBreakPoint: string = 'sm';
   // UI 状态
@@ -498,7 +498,7 @@ struct Chat {
     .hideTitleBar(true)
     .bindSheet(this.showSetupSheet, this.SetupSheetBuilder(), {
       height: SheetSize.FIT_CONTENT,
-      detents: [SheetSize.FIT_CONTENT],
+      detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
       blurStyle: BlurStyle.Thick,
       showClose: true,
       preferType: SheetType.BOTTOM,
@@ -608,22 +608,41 @@ struct Chat {
     this.setupIsFetching = false;
   }
 
+  private openProviderSettingsFromSetup(): void {
+    this.showSetupSheet = false;
+    this.resetSetupState();
+    this.pathStack.pushPathByName("ModelSettings", null);
+  }
+
   @Builder
   SetupSheetBuilder() {
-    Column() {
+    Scroll() {
+      Column() {
       Text('欢迎使用 ClearChat')
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .width('100%')
         .textAlign(TextAlign.Start)
-        .margin({ bottom: 4 })
+        .margin({ bottom: 8 })
 
       Text('选择一个服务商并填入 API 密钥，即可开始使用')
         .fontSize(14)
         .fontColor($r('sys.color.ohos_id_color_text_secondary'))
         .width('100%')
         .textAlign(TextAlign.Start)
-        .margin({ bottom: 20 })
+        .margin({ bottom: 24 })
+
+      Button('进入服务商管理')
+        .width('100%')
+        .height(42)
+        .borderRadius(21)
+        .backgroundColor($r('sys.color.button_background_color_transparent'))
+        .fontColor($r('app.color.text_color'))
+        .fontSize(14)
+        .onClick(() => {
+          this.openProviderSettingsFromSetup();
+        })
+        .margin({ bottom: 18 })
 
       // 服务商选择
       Text('选择服务商')
@@ -664,10 +683,10 @@ struct Chat {
         }, (preset: PresetProvider) => preset.type)
       }
       .columnsTemplate('1fr 1fr')
-      .columnsGap(10)
-      .rowsGap(10)
+      .columnsGap(12)
+      .rowsGap(12)
       .width('100%')
-      .margin({ bottom: 18 })
+      .margin({ bottom: 20 })
 
       // API 密钥
       Column() {
@@ -687,7 +706,7 @@ struct Chat {
           })
       }
       .width('100%')
-      .margin({ bottom: 10 })
+      .margin({ bottom: 14 })
 
       // 获取 API Key 提示
       if (this.setupSelectedPresetType) {
@@ -704,7 +723,7 @@ struct Chat {
               BrowserHelper.openUrl(context, site);
             }
           })
-          .margin({ bottom: 16 })
+          .margin({ bottom: 18 })
       }
 
       // 确定按钮
@@ -729,7 +748,7 @@ struct Chat {
         this.handleSetupConfirm();
       })
 
-      Blank().height(8)
+      Blank().height(10)
 
       // 跳过
       Text('以后再说')
@@ -740,8 +759,13 @@ struct Chat {
           this.showSetupSheet = false;
           this.resetSetupState();
         })
+      }
+      .width('100%')
+      .padding({ left: 2, right: 2 })
     }
+    .scrollBar(BarState.Auto)
     .width('100%')
+    .height('100%')
     .padding(24)
   }
 
@@ -1034,18 +1058,38 @@ struct Chat {
 
       hilog.info(DOMAIN, TAG, 'Loaded settings with provider count: %{public}s', String(settings.providers.length));
 
-      const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId);
-      if (!activeProvider) {
-        hilog.warn(DOMAIN, TAG, 'Active provider not found in settings, marking configuration as incomplete.');
+      if (settings.providers.length === 0) {
         this.hasSettings = false;
         return;
       }
 
-      const activeModel = activeProvider.models.find((model) => model.id === settings.activeModelId);
+      const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId)
+        ?? settings.providers[0];
+      const activeModel = activeProvider.models.find((model) => model.id === settings.activeModelId)
+        ?? activeProvider.models[0];
       if (!activeModel) {
-        hilog.warn(DOMAIN, TAG, 'Active model not found for current provider, marking configuration as incomplete.');
+        hilog.warn(DOMAIN, TAG, 'No model available for provider: %{public}s', String(activeProvider.displayName));
         this.hasSettings = false;
         return;
+      }
+
+      const needsNormalization = settings.activeProviderId !== activeProvider.id || settings.activeModelId !== activeModel.id;
+      settings.activeProviderId = activeProvider.id;
+      settings.activeModelId = activeModel.id;
+      settings.apiUrl = activeProvider.apiUrl;
+      settings.apiKey = activeProvider.apiKey;
+      settings.modelName = activeModel.name;
+      if (Array.isArray(settings.providers)) {
+        for (const provider of settings.providers) {
+          provider.isActive = provider.id === activeProvider.id;
+        }
+      }
+      if (needsNormalization) {
+        try {
+          await this.databaseManager.saveSettings(settings);
+        } catch (normalizeError) {
+          hilog.warn(DOMAIN, TAG, 'Failed to normalize active provider/model: %{public}s', String(normalizeError));
+        }
       }
 
       const providerConfigured = activeProvider.apiUrl.trim().length > 0 && activeProvider.apiKey.trim().length > 0;
@@ -1321,8 +1365,6 @@ struct Chat {
     }
   }
 
-  // generateConversationTitle -> 已提取到 ChatStreamingService
-
   // 获取当前活跃的模型和提供商信息
   /**
    * 根据当前活跃的服务商和模型，解析完整的 API 请求配置
@@ -1433,10 +1475,7 @@ struct Chat {
     });
   }
 
-  // initializeStreamingMessage, appendChunkToMessage, handleStreamComplete,
-  // persistStreamedMessage -> 已提取到 ChatStreamingService
-
-  // 控制方法：停止生成与滚动行为，提前声明以便在UI回调中使用
+  // 控制方法：停止生成与滚动行为
   private stopGeneration(): void {
     if (this.currentAbortController && this.isGenerating) {
       hilog.info(DOMAIN, TAG, 'Stopping AI generation...');
@@ -1477,9 +1516,6 @@ struct Chat {
       }
     }
   }
-
-  // setupStreamEventHandlers, setupRegenerationStreamEventHandlers,
-  // handleStreamError, updateStreamingMessageMetadata -> 已提取到 ChatStreamingService
 
   // 主函数 - 仅负责流程控制
   async sendMessage() {
@@ -1559,11 +1595,6 @@ struct Chat {
       throw err;
     }
   }
-
-  // getSearchTools, prepareMessagesForAPI -> 已提取到 ChatStreamingService
-
-  // handleToolCalls, continueConversationWithToolResult -> 已提取到 ChatStreamingService
-
 
   // 辅助方法：去除思维链标签
   private cleanThinkingTags(content: string): string {

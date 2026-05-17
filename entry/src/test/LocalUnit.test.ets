@@ -96,12 +96,14 @@ export default function localUnitTest() {
       expect(containsSuspiciousContent('普通 **Markdown** 文本 https://example.com')).assertFalse();
     });
 
-    it('decides title generation only after enough useful conversation context exists', 0, () => {
+    it('decides title generation after the first meaningful assistant reply', 0, () => {
       const usefulMessages: ChatMessage[] = [
         createMessage('帮我分析 HarmonyOS ArkTS 项目的架构问题', 'user'),
-        createMessage('可以，我会从页面、服务和数据层看起。', 'assistant'),
-        createMessage('重点看发布前风险', 'user'),
-        createMessage('核心风险包括流式状态、数据库事务和 UI 重渲染。', 'assistant')
+        createMessage('可以，我会从页面、服务和数据层看起。', 'assistant')
+      ];
+      const shortConversation: ChatMessage[] = [
+        createMessage('你好', 'user'),
+        createMessage('你好', 'assistant')
       ];
       const shortGreeting: ChatMessage[] = [
         createMessage('你好', 'user'),
@@ -112,7 +114,7 @@ export default function localUnitTest() {
 
       expect(shouldGenerateTitle(usefulMessages, '新对话')).assertTrue();
       expect(shouldGenerateTitle(usefulMessages, '已命名对话')).assertFalse();
-      expect(shouldGenerateTitle(usefulMessages.slice(0, 3), '新对话')).assertFalse();
+      expect(shouldGenerateTitle(shortConversation, '新对话')).assertFalse();
       expect(shouldGenerateTitle(shortGreeting, '新对话')).assertFalse();
     });
 

@@ -54,7 +54,7 @@ struct ModelSettings {
   @State private modelEditIndex: number = -1;
   private hasLoadedSettings: boolean = false;
   private isRefreshingSettings: boolean = false;
-  // 为每个服务商的模型列表建立数据源映射，按 providerId 缓存
+  // 为每个服务商的模型列表建立数据源映射，按 providerId 缓存，供 LazyForEach 使用
   private modelsDataSources: Record<string, ArrayDataSource<AIModel>> = {};
 
   async aboutToAppear() {
@@ -254,15 +254,26 @@ struct ModelSettings {
   private async handleProviderConfirm(provider: AIProvider) {
     const clonedProvider = this.cloneProvider(provider);
     let toastMessage = '服务商已添加并保存';
+    const previousProviderId = this.providerEditIndex >= 0 && this.providerEditIndex < this.providers.length
+      ? this.providers[this.providerEditIndex].id
+      : '';
 
     if (this.providerEditIndex >= 0 && this.providerEditIndex < this.providers.length) {
       const newProviders = [...this.providers];
       newProviders[this.providerEditIndex] = clonedProvider;
       this.providers = newProviders;
       toastMessage = '服务商已修改并保存';
+      if (previousProviderId === this.activeProviderId) {
+        this.activeProviderId = clonedProvider.id;
+      }
     } else {
       this.providers = [...this.providers, clonedProvider];
+      if (!this.activeProviderId || this.providers.length === 1) {
+        this.activeProviderId = clonedProvider.id;
+        this.currentProviderIndex = this.providers.findIndex(item => item.id === clonedProvider.id);
+      }
     }
+    this.ensureActiveSelection();
 
     try {
       await this.persistSettingsSilently();
@@ -298,6 +309,7 @@ struct ModelSettings {
     newProviders[this.modelProviderIndex] = this.cloneProvider(provider);
     newProviders[this.modelProviderIndex].models = models;
     this.providers = newProviders;
+    this.ensureActiveSelection(this.modelProviderIndex);
 
     try {
       await this.persistSettingsSilently();
@@ -307,6 +319,35 @@ struct ModelSettings {
       this.showToast('保存设置失败');
     } finally {
       this.closeSettingsSheet();
+    }
+  }
+
+  private ensureActiveSelection(preferredProviderIndex: number = -1): void {
+    if (this.providers.length === 0) {
+      this.activeProviderId = '';
+      this.activeModelId = '';
+      this.currentProviderIndex = 0;
+      return;
+    }
+
+    let resolvedProviderIndex = this.providers.findIndex(provider => provider.id === this.activeProviderId);
+    if (resolvedProviderIndex === -1) {
+      resolvedProviderIndex = (preferredProviderIndex >= 0 && preferredProviderIndex < this.providers.length)
+        ? preferredProviderIndex
+        : 0;
+      this.activeProviderId = this.providers[resolvedProviderIndex].id;
+    }
+
+    this.currentProviderIndex = resolvedProviderIndex;
+    const activeProvider = this.providers[resolvedProviderIndex];
+    if (!activeProvider || activeProvider.models.length === 0) {
+      this.activeModelId = '';
+      return;
+    }
+
+    const activeModelExists = activeProvider.models.some(model => model.id === this.activeModelId);
+    if (!activeModelExists) {
+      this.activeModelId = activeProvider.models[0].id;
     }
   }
 
@@ -345,6 +386,7 @@ struct ModelSettings {
       this.currentProviderIndex = resolvedIndex;
       this.activeProviderId = resolvedProvider.id;
       this.activeModelId = resolvedModelId;
+      this.ensureActiveSelection(resolvedIndex);
 
 
       return true;
@@ -414,6 +456,7 @@ struct ModelSettings {
       if (this.currentProviderIndex >= this.providers.length) {
         this.currentProviderIndex = this.providers.length - 1;
       }
+      this.ensureActiveSelection(this.currentProviderIndex);
 
       if (savedByActiveSwitch) {
         this.showToast('服务商已删除并保存');
@@ -505,6 +548,7 @@ struct ModelSettings {
       const newProviders = [...this.providers];
       newProviders[providerIndex].models.splice(modelIndex, 1);
       this.providers = newProviders;
+      this.ensureActiveSelection(providerIndex);
 
       try {
         await this.persistSettingsSilently();
@@ -540,6 +584,7 @@ struct ModelSettings {
       newProviders[providerIndex] = this.cloneProvider(provider);
       newProviders[providerIndex].models = models;
       this.providers = newProviders;
+      this.ensureActiveSelection(providerIndex);
       await this.persistSettingsSilently();
       this.showToast(`成功获取 ${models.length} 个模型`);
     } catch (error) {
@@ -586,7 +631,8 @@ struct ModelSettings {
         provider.apiUrl,
         provider.apiKey,
         testModel.name,
-        [testMessage]
+        [testMessage],
+        provider.apiFormat || inferApiFormat(provider.apiUrl)
       );
 
       this.showToast('连接测试成功！');
@@ -731,9 +777,9 @@ struct ModelSettings {
 
   @Builder
   ProviderContent(provider: AIProvider, providerIndex: number) {
-    Flex({ direction: FlexDirection.Column, justifyContent: FlexAlign.SpaceAround }) {
+    Column({ space: 12 }) {
       // 模型列表
-      Column({ space: 16 }) {
+      Column({ space: 12 }) {
         Row() {
           Text('模型列表')
             .fontSize(18)
@@ -782,18 +828,27 @@ struct ModelSettings {
             .width('100%')
             .textAlign(TextAlign.Center)
             .padding(24)
+            .layoutWeight(1)
         } else {
-          LazyForEach(this.getModelsDataSource(provider), (model: AIModel, modelIndex: number) => {
-            this.ModelItem(model, provider.id, providerIndex, modelIndex)
-          }, (model: AIModel) => `${provider.id}_${model.id ?? model.name}`)
+          List({ space: 8 }) {
+            LazyForEach(this.getModelsDataSource(provider), (model: AIModel, modelIndex: number) => {
+              ListItem() {
+                this.ModelItem(model, provider.id, providerIndex, modelIndex);
+              }
+            }, (model: AIModel) => `${provider.id}_${model.id ?? model.name}`)
+          }
+          .edgeEffect(EdgeEffect.Spring)
+          .scrollBar(BarState.Auto)
+          .layoutWeight(1)
+          .width('100%')
         }
       }
       .width('100%')
+      .layoutWeight(1)
       .padding(16)
-      // .backgroundColor($r('app.color.bg_secondary'))
       .borderRadius(12)
 
-      Column() {
+      Column({ space: 10 }) {
         // 测试连接按钮
         if (provider.apiUrl && provider.apiKey && provider.models.length > 0) {
           Button(this.isTesting ? '测试中...' : '测试连接')
@@ -804,15 +859,15 @@ struct ModelSettings {
             .onClick(() => {
               this.testProviderConnection(provider);
             })
-            .margin({ bottom: 12 })
         }
 
         // 操作按钮
-        Column({ space: 12 }) {
+        Row({ space: 8 }) {
           Button('编辑服务商')
             .fontColor($r('app.color.text_color'))
-            .fontSize(16)
+            .fontSize(14)
             .backgroundColor(Color.Transparent)
+            .layoutWeight(1)
             .onClick(() => {
               this.editProvider(providerIndex);
             })
@@ -820,8 +875,9 @@ struct ModelSettings {
           if (this.providers.length > 1) {
             Button('删除服务商')
               .fontColor($r('app.color.text_color'))
-              .fontSize(16)
+              .fontSize(14)
               .backgroundColor(Color.Transparent)
+              .layoutWeight(1)
               .onClick(() => {
                 const targetName = provider.displayName || provider.name || provider.id || '该服务商';
                 NativeDialogHelper.showDeleteConfirmDialog(
@@ -839,18 +895,21 @@ struct ModelSettings {
           }
         }
         .width('100%')
-        .margin({ bottom: 12 })
 
         Button('新建服务商')
           .fontColor($r('app.color.text_color'))
-          .fontSize(16)
+          .fontSize(14)
           .backgroundColor(Color.Transparent)
+          .width('100%')
           .onClick(() => {
             this.addProvider();
           })
       }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 16 })
     }
     .width('100%')
+    .height('100%')
   }
 
   @Builder

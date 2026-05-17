@@ -13,7 +13,7 @@
  * - 提升用户体验，便于对话管理
  */
 
-import { ChatMessage } from '../services/DataModels';
+import { ChatMessage, ApiFormat } from '../services/DataModels';
 import { NetworkManagerV2 } from '../services/NetworkManagerV2';
 import { createLogger, LogDomain } from '../common/Logger';
 
@@ -21,6 +21,7 @@ const logger = createLogger('TitleGenerationService', LogDomain.APP);
 
 export class TitleGenerationService {
   private networkManager: NetworkManagerV2;
+  private static readonly MAX_TITLE_LENGTH: number = 15;
 
   constructor() {
     this.networkManager = NetworkManagerV2.getInstance();
@@ -34,7 +35,13 @@ export class TitleGenerationService {
    * @param model 使用的AI模型
    * @returns Promise<string> 生成的标题
    */
-  async generateTitle(messages: ChatMessage[], apiKey: string, baseUrl: string, model: string): Promise<string> {
+  async generateTitle(
+    messages: ChatMessage[],
+    apiKey: string,
+    baseUrl: string,
+    model: string,
+    apiFormat: ApiFormat = 'openai'
+  ): Promise<string> {
     try {
       if (!messages || messages.length === 0) {
         return this.getFallbackTitle();
@@ -48,22 +55,16 @@ export class TitleGenerationService {
         return this.getFallbackTitle(messages);
       }
 
-      // 获取前几条有意义的消息作为上下文
+      // 获取前几条有意义的消息作为上下文，避免提示词过长导致标题漂移
       const contextMessages: ChatMessage[] = meaningfulMessages.slice(0, 6);
       const conversationText: string = contextMessages
         .map((msg: ChatMessage): string => `${msg.role === 'user' ? '用户' : 'AI'}: ${msg.content}`)
         .join('\n');
 
-      const titlePrompt: string = `
-      请根据以下对话内容，生成一个简洁的标题（不超过15个字）：${conversationText}
-      要求：
-      1. 重点关注用户的核心问题和AI的回复内容
-      2. 标题要准确概括对话主题，不超过15个字
-      3. 不要包含引号或特殊符号
-      4. 避免使用"你好"、"问答"等简单词汇
-      5. 如果用户问题简短但AI回复详细，以问题的核心内容为主
-      6. 直接返回标题，不要其他文字
-      标题：`;
+      const titlePrompt: string =
+        `你是对话标题助手。请根据以下对话生成一个简洁标题（不超过${TitleGenerationService.MAX_TITLE_LENGTH}个字）。` +
+        '只输出标题本身，不要解释，不要引号、emoji、序号、Markdown。\n' +
+        `${conversationText}\n标题：`;
 
       const requestMessages: ChatMessage[] = [
         new ChatMessage(titlePrompt, 'user', {
@@ -75,13 +76,15 @@ export class TitleGenerationService {
         baseUrl,
         apiKey,
         model,
-        requestMessages
+        requestMessages,
+        apiFormat,
+        8000
       );
 
-      const title: string = response.trim();
+      const title: string = this.normalizeTitle(response);
 
       // 验证标题长度和内容
-      if (title && title.length <= 15 && !title.includes('"') && !title.includes("'") &&
+      if (title && title.length <= TitleGenerationService.MAX_TITLE_LENGTH &&
         !this.isGenericTitle(title)) {
         return title;
       } else {
@@ -150,6 +153,30 @@ export class TitleGenerationService {
     return genericTitles.some((generic: string): boolean =>
     title.toLowerCase().includes(generic.toLowerCase())
     );
+  }
+
+  private normalizeTitle(rawTitle: string): string {
+    if (!rawTitle) {
+      return '';
+    }
+
+    let title = rawTitle.trim();
+    // 多行响应只取第一行
+    const firstLine = title.split('\n')[0];
+    title = (firstLine ?? '').trim();
+    // 移除常见包装符号和前缀
+    title = title
+      .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
+      .replace(/^标题[:：]\s*/i, '')
+      .replace(/^title[:：]\s*/i, '')
+      .replace(/^\d+[.)、]\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim();
+
+    if (title.length > TitleGenerationService.MAX_TITLE_LENGTH) {
+      title = title.substring(0, TitleGenerationService.MAX_TITLE_LENGTH).trim();
+    }
+    return title;
   }
 
   /**

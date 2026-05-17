@@ -304,6 +304,23 @@ export class ChatStreamingService {
       streamingMessageIndex, String(isToolContinuation));
 
     let toolCallHandled = false;
+    const timeoutId = setTimeout(() => {
+      if (this.callbacks.getCurrentConversationId() !== conversationId) {
+        return;
+      }
+      const messages = this.callbacks.getMessages();
+      if (streamingMessageIndex < messages.length) {
+        this.callbacks.replaceMessageAt(streamingMessageIndex, (msg) => {
+          if (!msg.content || msg.content.length === 0) {
+            msg.content = '[超时] 未收到模型响应，请重试';
+          }
+        });
+      }
+      this.callbacks.setLoadingState(false, false);
+      this.callbacks.setAbortController(null);
+      this.callbacks.setUserAborted(false);
+      this.callbacks.showToast('请求超时，请重试');
+    }, 65000);
 
     emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
       const chunk = payload as string;
@@ -316,6 +333,7 @@ export class ChatStreamingService {
     });
 
     emitter.once(StreamEventType.COMPLETE, () => {
+      clearTimeout(timeoutId);
       hilog.info(DOMAIN, TAG, 'Received COMPLETE event for message index: %{public}d, toolCallHandled=%{public}s',
         streamingMessageIndex, String(toolCallHandled));
 
@@ -327,6 +345,7 @@ export class ChatStreamingService {
     });
 
     emitter.on(StreamEventType.ERROR, (payload: EventPayload) => {
+      clearTimeout(timeoutId);
       const error = payload as Error;
       hilog.error(DOMAIN, TAG, 'Received ERROR event: %{public}s', String(error));
       this.handleStreamError(streamingMessageIndex, error, isToolContinuation);
@@ -335,6 +354,7 @@ export class ChatStreamingService {
     emitter.on(StreamEventType.WARNING, () => {});
 
     emitter.once(StreamEventType.TOOL_CALL, (payload: EventPayload) => {
+      clearTimeout(timeoutId);
       const toolCalls = payload as ToolCallData[];
       toolCallHandled = true;
 
@@ -679,48 +699,11 @@ export class ChatStreamingService {
         }
       );
 
-      // 设置事件处理器
+      // 设置事件处理器（内部已含超时保护和 COMPLETE/ERROR 处理）
       this.setupStreamEventHandlers(
         emitter, streamingIndex, conversationId,
         this.callbacks.getCurrentConversationTitle(), true
       );
-
-      // 超时保护
-      const timeoutId = setTimeout(() => {
-        if (true) { // 检查是否仍在加载 — 通过回调判断
-          hilog.error(DOMAIN, TAG, 'Stream timeout after 60s, forcing state reset');
-          this.callbacks.setLoadingState(false, false);
-          this.callbacks.setAbortController(null);
-          this.callbacks.showToast('请求超时，请重试');
-
-          if (streamingIndex < this.callbacks.getMessages().length) {
-            this.callbacks.replaceMessageAt(streamingIndex, (msg) => {
-              if (!msg.content || msg.content.length === 0) {
-                msg.content = '[超时] 未收到响应，请检查网络或重试';
-              } else {
-                msg.content += '\n\n[超时] 响应中断';
-              }
-            });
-          }
-        }
-      }, 60000);
-
-      emitter.once(StreamEventType.COMPLETE, () => {
-        clearTimeout(timeoutId);
-
-        this.callbacks.setLoadingState(false, false);
-        this.callbacks.setAbortController(null);
-
-        this.persistStreamedMessage(
-          streamingIndex, conversationId, this.callbacks.getCurrentConversationTitle()
-        ).catch((err: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist message after tool continuation: %{public}s', String(err));
-          });
-      });
-
-      emitter.once(StreamEventType.ERROR, () => {
-        clearTimeout(timeoutId);
-      });
 
     } catch (error) {
       this.callbacks.setLoadingState(false, false);
@@ -754,7 +737,7 @@ export class ChatStreamingService {
     try {
       const messages = this.callbacks.getMessages();
       const title: string = await this.titleGenerationService.generateTitle(
-        messages, apiConfig.apiKey, apiConfig.apiUrl, apiConfig.modelName
+        messages, apiConfig.apiKey, apiConfig.apiUrl, apiConfig.modelName, apiConfig.apiFormat ?? 'openai'
       );
       if (title) {
         await this.callbacks.onTitleGenerated(title);
