@@ -245,6 +245,12 @@ export class ChatViewModel {
     return this._logicalTimestamp;
   }
 
+  syncLogicalTimestamp(maxTs: number): void {
+    if (maxTs > this._logicalTimestamp) {
+      this._logicalTimestamp = maxTs;
+    }
+  }
+
   /**
    * 获取当前模型信息
    */

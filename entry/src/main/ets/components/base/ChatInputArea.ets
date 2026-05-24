@@ -83,6 +83,7 @@ export struct ChatInputArea {
             this.onWebSearchChange?.(on);
           })
           .margin({ left: 12 })
+          .accessibilityText('联网搜索')
         }
 
         Blank()
@@ -109,6 +110,7 @@ export struct ChatInputArea {
         .size({ width: 40, height: 40 })
         .margin({ right: 12 })
         .enabled(this.isGenerating || (this.inputText.trim() !== '' && !this.isLoading))
+        .accessibilityText(this.isGenerating ? '停止生成' : '发送消息')
         .onClick(() => {
           if (this.isGenerating) {
             this.onStop?.();

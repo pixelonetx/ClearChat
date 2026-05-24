@@ -31,6 +31,12 @@ import { createLogger, LogDomain } from '../common/Logger';
 
 const logger = createLogger('DatabaseManager', LogDomain.DATABASE);
 
+interface SearchConfigRecord {
+  id: string;
+  type: string;
+  configJson: string;
+}
+
 interface ThinkingConfigRecord {
   enabled: boolean;
   effort?: string;
@@ -169,6 +175,17 @@ export class DatabaseManager {
       )
     `;
 
+    // 创建搜索配置表（存储 API 密钥等敏感数据）
+    const createSearchConfigsTable = `
+      CREATE TABLE IF NOT EXISTS search_configs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `;
+
     // 创建索引以优化查询性能
     const createChatIndexes = [
       `CREATE INDEX IF NOT EXISTS idx_messages_conv_ts ON ${Constants.CHAT_TABLE}(conversation_id, timestamp)`,
@@ -185,6 +202,7 @@ export class DatabaseManager {
       await this.rdbStore.executeSql(createChatTable);
       await this.rdbStore.executeSql(createConversationTable);
       await this.rdbStore.executeSql(createSettingsTable);
+      await this.rdbStore.executeSql(createSearchConfigsTable);
 
       // 兼容旧版本表结构：补充 messages.citations_json 列
       try {
@@ -528,6 +546,72 @@ export class DatabaseManager {
       logger.error( 'Failed to delete message: %{public}s', String(error));
       throw new DatabaseError(`Failed to delete message: ${error}`);
     }
+  }
+
+  /**
+   * 在事务中批量插入消息
+   */
+  async insertMessagesInTransaction(messages: ChatMessage[]): Promise<number[]> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    return await this.transactionManager!.executeInTransaction(async () => {
+      const ids: number[] = [];
+      for (const msg of messages) {
+        const valueBucket: relationalStore.ValuesBucket = {
+          'content': msg.content,
+          'role': msg.role,
+          'timestamp': msg.timestamp,
+          'conversation_id': msg.conversationId || 'default',
+          'model_name': msg.modelName || '',
+          'provider_name': msg.providerName || '',
+        };
+        const rowId = await this.rdbStore!.insert(Constants.CHAT_TABLE, valueBucket);
+        ids.push(rowId);
+      }
+      return ids;
+    });
+  }
+
+  /**
+   * 在事务中原子替换消息（删除旧消息 + 插入新消息）
+   * 用于 regenerateMessage，防止删除和插入之间的数据丢失窗口
+   */
+  async replaceMessageInTransaction(oldMessageId: number, newMessage: ChatMessage): Promise<number> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    return await this.transactionManager!.executeInTransaction(async () => {
+      const delPredicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
+      delPredicates.equalTo('id', oldMessageId);
+      await this.rdbStore!.delete(delPredicates);
+
+      const valueBucket: relationalStore.ValuesBucket = {
+        'content': newMessage.content,
+        'role': newMessage.role,
+        'timestamp': newMessage.timestamp,
+        'conversation_id': newMessage.conversationId || 'default',
+        'model_name': newMessage.modelName || '',
+        'provider_name': newMessage.providerName || '',
+      };
+      return await this.rdbStore!.insert(Constants.CHAT_TABLE, valueBucket);
+    });
+  }
+
+  /**
+   * 在事务中批量删除消息
+   */
+  async deleteMessagesInTransaction(messageIds: number[]): Promise<void> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    await this.transactionManager!.executeInTransaction(async () => {
+      for (const id of messageIds) {
+        const predicates = new relationalStore.RdbPredicates(Constants.CHAT_TABLE);
+        predicates.equalTo('id', id);
+        await this.rdbStore!.delete(predicates);
+      }
+    });
   }
 
   /**
@@ -972,5 +1056,113 @@ export class DatabaseManager {
     provider.models = hydratedModels;
 
     return provider;
+  }
+
+  // ==================== 搜索配置 CRUD ====================
+
+  private createSearchConfigRecord(id: string, t: string, json: string): SearchConfigRecord {
+    const record: SearchConfigRecord = { id: id, type: t, configJson: json };
+    return record;
+  }
+
+  async saveSearchServiceConfig(id: string, type: string, configJson: string): Promise<void> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    const now = Date.now();
+    const valueBucket: relationalStore.ValuesBucket = {
+      'id': id,
+      'type': type,
+      'config_json': configJson,
+      'created_at': now,
+      'updated_at': now
+    };
+    try {
+      // 使用 INSERT OR REPLACE 实现 upsert
+      const predicates = new relationalStore.RdbPredicates('search_configs');
+      predicates.equalTo('id', id);
+      const existing = await this.rdbStore.query(predicates);
+      if (existing.rowCount > 0) {
+        existing.close();
+        const updateBucket: relationalStore.ValuesBucket = {
+          'type': type,
+          'config_json': configJson,
+          'updated_at': now
+        };
+        await this.rdbStore.update(updateBucket, predicates);
+      } else {
+        existing.close();
+        await this.rdbStore.insert('search_configs', valueBucket);
+      }
+    } catch (error) {
+      throw new DatabaseError(`Failed to save search config: ${error}`);
+    }
+  }
+
+  async getSearchServiceConfig(id: string): Promise<SearchConfigRecord | null> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    const predicates = new relationalStore.RdbPredicates('search_configs');
+    predicates.equalTo('id', id);
+    try {
+      const resultSet = await this.rdbStore.query(predicates);
+      if (resultSet.rowCount === 0) {
+        resultSet.close();
+        return null;
+      }
+      resultSet.goToFirstRow();
+      const result = this.createSearchConfigRecord(
+        resultSet.getString(resultSet.getColumnIndex('id')),
+        resultSet.getString(resultSet.getColumnIndex('type')),
+        resultSet.getString(resultSet.getColumnIndex('config_json'))
+      );
+      resultSet.close();
+      return result;
+    } catch (error) {
+      throw new DatabaseError(`Failed to get search config: ${error}`);
+    }
+  }
+
+  async getAllSearchServiceConfigs(): Promise<SearchConfigRecord[]> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    const predicates = new relationalStore.RdbPredicates('search_configs');
+    try {
+      const resultSet = await this.rdbStore.query(predicates);
+      const results: SearchConfigRecord[] = [];
+      if (resultSet.rowCount === 0) {
+        resultSet.close();
+        return results;
+      }
+      const idIdx = resultSet.getColumnIndex('id');
+      const typeIdx = resultSet.getColumnIndex('type');
+      const jsonIdx = resultSet.getColumnIndex('config_json');
+      while (resultSet.goToNextRow()) {
+        results.push(this.createSearchConfigRecord(
+          resultSet.getString(idIdx),
+          resultSet.getString(typeIdx),
+          resultSet.getString(jsonIdx)
+        ));
+      }
+      resultSet.close();
+      return results;
+    } catch (error) {
+      throw new DatabaseError(`Failed to get all search configs: ${error}`);
+    }
+  }
+
+  async deleteSearchServiceConfig(id: string): Promise<void> {
+    if (!this.rdbStore) {
+      throw new DatabaseError('Database not initialized');
+    }
+    const predicates = new relationalStore.RdbPredicates('search_configs');
+    predicates.equalTo('id', id);
+    try {
+      await this.rdbStore.delete(predicates);
+    } catch (error) {
+      throw new DatabaseError(`Failed to delete search config: ${error}`);
+    }
   }
 }

@@ -61,6 +61,7 @@ export struct MessageList {
       Text('有什么可以帮忙的？')
         .fontSize(22)
         .margin({ top: 16 })
+        .accessibilityText('聊天列表为空，有什么可以帮忙的？')
 
       if (!this.config.hasSettings) {
         Button('配置API设置')
@@ -75,6 +76,7 @@ export struct MessageList {
     .width('100%')
     .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
+    .accessibilityGroup(true)
   }
 
   @Builder
@@ -192,6 +194,7 @@ export struct MessageList {
       })
       .margin({ bottom: 16 })
       .zIndex(5)
+      .accessibilityText('滚动到底部')
   }
 
   /**

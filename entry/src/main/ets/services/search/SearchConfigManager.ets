@@ -12,6 +12,7 @@ import {
   SearchCommonOptions, SearchServiceOptions
 } from './SearchModels';
 import { SearchServiceFactory } from './SearchServiceFactory';
+import { DatabaseManager } from '../DatabaseManager';
 
 const DOMAIN = 0x0009;
 const TAG = 'SearchConfigManager';
@@ -39,6 +40,7 @@ export interface SearchConfig {
 export class SearchConfigManager {
   private static instance: SearchConfigManager;
   private context: Context | null = null;
+  private databaseManager: DatabaseManager | null = null;
   private preferencesProxy: preferences.Preferences | null = null;
   private config: SearchConfig = {
     enabledServices: [],
@@ -56,6 +58,7 @@ export class SearchConfigManager {
   private readonly KEY_SELECTED_INDEX = 'search_selected_index';
   private readonly KEY_COMMON_OPTIONS = 'search_common_options';
   private readonly KEY_WEB_SEARCH_ENABLED = 'search_web_search_enabled';
+  private readonly KEY_MIGRATED = 'search_migrated_to_db';
 
   private constructor() {
   }
@@ -70,21 +73,60 @@ export class SearchConfigManager {
   /**
    * 初始化配置管理器
    */
-  async init(context: Context): Promise<void> {
+  async init(context: Context, databaseManager?: DatabaseManager): Promise<void> {
     this.context = context;
+    this.databaseManager = databaseManager ?? DatabaseManager.getInstance();
 
     // 先初始化默认配置
     this.initializeDefaultConfig();
 
     try {
       this.preferencesProxy = await preferences.getPreferences(context, this.PREFERENCES_NAME);
+      // 从旧格式迁移 API 密钥到加密数据库（一次性操作）
+      await this.migrateApiKeysToDb();
       await this.loadConfig();
-      
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager preferences: %{public}s', err.message);
+      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{public}s', err.message);
       // 不抛出错误，使用默认配置继续运行
-      
+    }
+  }
+
+  /**
+   * 将旧的 Preferences 中存储的 API 密钥迁移到加密数据库（一次性操作）
+   */
+  private async migrateApiKeysToDb(): Promise<void> {
+    if (!this.preferencesProxy || !this.databaseManager) {
+      return;
+    }
+    try {
+      const migrated = this.preferencesProxy.getSync(this.KEY_MIGRATED, false) as boolean;
+      if (migrated) {
+        return;
+      }
+      const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
+      if (enabledServicesJson === '[]') {
+        this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
+        await this.preferencesProxy.flush();
+        return;
+      }
+      const servicesData = JSON.parse(enabledServicesJson) as Object[];
+      for (const data of servicesData) {
+        const jsonObj = data as Record<string, Object | string | number | boolean | null>;
+        if (jsonObj['id'] && jsonObj['type']) {
+          // 存储完整配置（含 API 密钥）到加密数据库
+          await this.databaseManager.saveSearchServiceConfig(
+            jsonObj['id'] as string,
+            jsonObj['type'] as string,
+            JSON.stringify(data)
+          );
+        }
+      }
+      this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
+      await this.preferencesProxy.flush();
+      hilog.info(DOMAIN, TAG, 'Migrated %{public}d search configs to encrypted DB', servicesData.length);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'Search config migration skipped: %{public}s', String(error));
     }
   }
 
@@ -94,26 +136,41 @@ export class SearchConfigManager {
   private async loadConfig(): Promise<void> {
     try {
       if (!this.preferencesProxy) {
-        
         return;
       }
 
       const selectedIndex = this.preferencesProxy.getSync(this.KEY_SELECTED_INDEX, 0) as number;
-      const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
       const commonOptionsJson = this.preferencesProxy.getSync(this.KEY_COMMON_OPTIONS, '{}') as string;
       const webSearchEnabled = this.preferencesProxy.getSync(this.KEY_WEB_SEARCH_ENABLED, false) as boolean;
 
       this.config.selectedServiceIndex = selectedIndex;
 
-      try {
-        const servicesData = JSON.parse(enabledServicesJson) as Object[];
-        this.config.enabledServices = servicesData.map((data: Object) => {
-          return SearchServiceOptions.fromJson(data);
-        });
-        
-      } catch (error) {
-        hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services: %{public}s', String(error));
-        this.config.enabledServices = [];
+      // 优先从加密数据库加载服务配置（含 API 密钥）
+      if (this.databaseManager) {
+        try {
+          const dbConfigs = await this.databaseManager.getAllSearchServiceConfigs();
+          if (dbConfigs.length > 0) {
+            this.config.enabledServices = dbConfigs.map((c) => {
+              return SearchServiceOptions.fromJson(JSON.parse(c.configJson) as Object);
+            });
+          }
+        } catch (dbError) {
+          hilog.warn(DOMAIN, TAG, 'Failed to load search configs from DB: %{public}s', String(dbError));
+        }
+      }
+
+      // 回退：如果 DB 中无数据，从 Preferences 加载（用于迁移前或 DB 故障时）
+      if (this.config.enabledServices.length === 0) {
+        const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
+        try {
+          const servicesData = JSON.parse(enabledServicesJson) as Object[];
+          this.config.enabledServices = servicesData.map((data: Object) => {
+            return SearchServiceOptions.fromJson(data);
+          });
+        } catch (error) {
+          hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services from prefs: %{public}s', String(error));
+          this.config.enabledServices = [];
+        }
       }
 
       try {
@@ -126,7 +183,6 @@ export class SearchConfigManager {
         this.config.commonOptions = commonOpts;
       } catch (error) {
         hilog.warn(DOMAIN, TAG, 'Failed to parse common options: %{public}s', String(error));
-        // 保持默认配置
       }
 
       this.config.enableWebSearch = webSearchEnabled;
@@ -136,7 +192,6 @@ export class SearchConfigManager {
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to load config: %{public}s', err.message);
-      // 不抛出错误，保持默认配置
     }
   }
 
@@ -165,17 +220,37 @@ export class SearchConfigManager {
         return;
       }
 
-      const enabledServicesJson = JSON.stringify(
-        this.config.enabledServices.map(s => s.toJson())
-      );
-
+      // 非敏感数据存入 Preferences
       this.preferencesProxy.putSync(this.KEY_SELECTED_INDEX, this.config.selectedServiceIndex);
-      this.preferencesProxy.putSync(this.KEY_ENABLED_SERVICES, enabledServicesJson);
       this.preferencesProxy.putSync(this.KEY_COMMON_OPTIONS, JSON.stringify(this.config.commonOptions));
       this.preferencesProxy.putSync(this.KEY_WEB_SEARCH_ENABLED, this.config.enableWebSearch);
-
+      // 向后兼容：同时保存一份到 Preferences（不含 API 密钥）
+      const sanitizedServices = this.config.enabledServices.map(s => {
+        const json = s.toJson();
+        const record = json as Record<string, Object | string | number | boolean | null>;
+        const sanitized: Record<string, Object | string | number | boolean | null> = {};
+        const keys = Object.keys(record);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          if (k !== 'apiKey' && k !== 'password') {
+            sanitized[k] = record[k];
+          }
+        }
+        return sanitized;
+      });
+      this.preferencesProxy.putSync(this.KEY_ENABLED_SERVICES, JSON.stringify(sanitizedServices));
       await this.preferencesProxy.flush();
-      
+
+      // 敏感数据（含 API 密钥）存入加密数据库
+      if (this.databaseManager) {
+        for (const service of this.config.enabledServices) {
+          await this.databaseManager.saveSearchServiceConfig(
+            service.id,
+            service.type,
+            JSON.stringify(service.toJson())
+          );
+        }
+      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to save config: %{public}s', err.message);
@@ -330,9 +405,18 @@ export class SearchConfigManager {
       if (!this.preferencesProxy) {
         return;
       }
+      // 清除加密数据库中的搜索配置
+      if (this.databaseManager) {
+        for (const service of this.config.enabledServices) {
+          try {
+            await this.databaseManager.deleteSearchServiceConfig(service.id);
+          } catch (e) {
+            // 继续清除其他配置
+          }
+        }
+      }
       await this.preferencesProxy.clear();
       this.initializeDefaultConfig();
-      
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       hilog.error(DOMAIN, TAG, 'Failed to clear config: %{public}s', err.message);

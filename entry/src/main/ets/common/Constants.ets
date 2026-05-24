@@ -159,11 +159,11 @@ export class ColorResources {
 export class IconResources {
   static readonly SEND = $r('app.media.send_plane_line');
   static readonly STOP = $r('app.media.rectangle_on_rectangle');
-  static readonly ADD = $r('app.media.send_plane_line');
+  static readonly ADD = $r('app.media.chat_new_line');
   static readonly DELETE = $r('app.media.trash');
-  static readonly SETTINGS = $r('app.media.send_plane_line');
-  static readonly SEARCH = $r('app.media.send_plane_line');
-  static readonly COPY = $r('app.media.arrow_go_back_line');
+  static readonly SETTINGS = $r('app.media.dot_grid_2x2');
+  static readonly SEARCH = $r('app.media.global_line');
+  static readonly COPY = $r('app.media.rectangle_on_rectangle');
   static readonly REGENERATE = $r('app.media.restart_line');
   static readonly CHEVRON_DOWN = $r('app.media.chevron_down');
   static readonly CHEVRON_RIGHT = $r('app.media.chevron_right');
@@ -174,7 +174,7 @@ export class IconResources {
  * @deprecated 请使用 AppConfig 类中的常量
  */
 export class Constants {
-  static readonly DB_NAME = 'ChatDatabase.db';
+  static readonly DB_NAME = 'ClearChat.db'; // 与 AppConfig.DB_NAME 保持一致，请优先使用 AppConfig
   static readonly DB_VERSION = 2;
   static readonly CHAT_TABLE = 'chat_messages';
   static readonly SETTINGS_TABLE = 'app_settings';

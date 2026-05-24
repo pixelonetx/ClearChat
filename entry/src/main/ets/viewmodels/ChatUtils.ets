@@ -6,11 +6,12 @@
  */
 
 import { ChatMessage } from '../services/DataModels';
-import { 
-  MaybeStringifiable, 
-  ExtendedError, 
+import { ErrorHandler, ErrorCode } from '../common/ErrorHandler';
+import {
+  MaybeStringifiable,
+  ExtendedError,
   ERROR_MESSAGES,
-  GREETINGS 
+  GREETINGS
 } from './ChatTypes';
 
 /**
@@ -49,6 +50,19 @@ export function cloneChatMessage(message: ChatMessage): ChatMessage {
 export function getFriendlyErrorMessage(error: Error | null | undefined): string {
   if (!error) {
     return ERROR_MESSAGES['default'];
+  }
+
+  // 优先使用统一错误处理器进行智能分类
+  try {
+    const handler = ErrorHandler.getInstance();
+    const appError = handler.parseError(error);
+    const userMessage = appError.getUserMessage();
+    // 如果成功分类（非 UNKNOWN），直接返回
+    if (appError.code !== ErrorCode.UNKNOWN) {
+      return userMessage;
+    }
+  } catch {
+    // 解析失败，回退到字符串匹配方式
   }
 
   let rawMessage = (error.message ?? '').trim();

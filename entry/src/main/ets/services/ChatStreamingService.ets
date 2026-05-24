@@ -33,7 +33,7 @@ interface SearchToolArgs {
 // 流式消息初始化结果
 export interface StreamingMessageResult {
   index: number;
-  id: number;
+  message: ChatMessage;
 }
 
 // 模型信息接口
@@ -121,7 +121,7 @@ export class ChatStreamingService {
   }
 
   /**
-   * 初始化流式 AI 消息并保存到数据库
+   * 初始化流式 AI 消息对象（不持久化，由调用方在事务中插入）
    */
   async initializeStreamingMessage(
     userMessage: ChatMessage,
@@ -136,28 +136,24 @@ export class ChatStreamingService {
     });
 
     const index = this.callbacks.appendMessage(streamingMessage);
-    const id = await this.databaseManager.insertChatMessage(streamingMessage);
-
-    this.callbacks.replaceMessageAt(index, (msg) => {
-      msg.id = id;
-    });
-
-    return { index, id };
+    return { index, message: streamingMessage };
   }
 
   /**
    * 将流式数据块追加到消息中
    */
-  appendChunkToMessage(messageIndex: number, chunk: string, conversationId: string): void {
-    if (this.callbacks.getCurrentConversationId() !== conversationId) {
+  appendChunkToMessage(messageIndex: number, chunk: string, targetConversationId: string): void {
+    const messages = this.callbacks.getMessages();
+    if (messageIndex >= messages.length) {
       return;
     }
-    const messages = this.callbacks.getMessages();
-    if (messageIndex < messages.length) {
-      this.callbacks.replaceMessageAt(messageIndex, (msg) => {
-        msg.content += chunk;
-      });
-    }
+    this.callbacks.replaceMessageAt(messageIndex, (msg) => {
+      // 在状态更新回调内再次验证，防止 TOCTOU 竞态条件
+      if (this.callbacks.getCurrentConversationId() !== targetConversationId) {
+        return;
+      }
+      msg.content += chunk;
+    });
   }
 
   /**
@@ -218,7 +214,9 @@ export class ChatStreamingService {
           update.citations = meta.citations as Citation[];
         }
         this.databaseManager.updateChatMessageMetadata(persistedMessage.id, update)
-          .catch(() => {});
+          .catch((err: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist metadata: %{public}s', String(err));
+          });
       }
     }
   }
@@ -304,6 +302,30 @@ export class ChatStreamingService {
       streamingMessageIndex, String(isToolContinuation));
 
     let toolCallHandled = false;
+
+    // 增量持久化状态：定期将流式内容 checkpoint 到数据库，防止崩溃丢失
+    let checkpointChunks = 0;
+    let lastCheckpointTime = Date.now();
+    const CHECKPOINT_INTERVAL_MS = 3000;
+    const CHECKPOINT_CHUNK_COUNT = 30;
+    const doCheckpoint = async (): Promise<void> => {
+      const messages = this.callbacks.getMessages();
+      if (streamingMessageIndex >= messages.length) {
+        return;
+      }
+      const msg = messages[streamingMessageIndex];
+      if (!msg.id || !msg.content) {
+        return;
+      }
+      try {
+        await this.databaseManager.updateChatMessage(msg.id, msg.content);
+        checkpointChunks = 0;
+        lastCheckpointTime = Date.now();
+      } catch (err) {
+        // checkpoint 失败不阻塞流式处理
+      }
+    };
+
     const timeoutId = setTimeout(() => {
       if (this.callbacks.getCurrentConversationId() !== conversationId) {
         return;
@@ -325,6 +347,12 @@ export class ChatStreamingService {
     emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
       const chunk = payload as string;
       this.appendChunkToMessage(streamingMessageIndex, chunk, conversationId);
+      // 增量持久化：每 N 个 chunk 或每 T 秒将内容 checkpoint 到数据库
+      checkpointChunks++;
+      if (checkpointChunks >= CHECKPOINT_CHUNK_COUNT ||
+          (Date.now() - lastCheckpointTime) >= CHECKPOINT_INTERVAL_MS) {
+        doCheckpoint();
+      }
     });
 
     emitter.on(StreamEventType.METADATA, (payload: EventPayload) => {
@@ -340,7 +368,9 @@ export class ChatStreamingService {
       if (!toolCallHandled) {
         this.handleStreamComplete();
         this.persistStreamedMessage(streamingMessageIndex, conversationId, currentConversationTitle)
-          .catch(() => {});
+          .catch((err: Error) => {
+            hilog.error(DOMAIN, TAG, 'Failed to persist message on complete: %{public}s', String(err));
+          });
       }
     });
 
@@ -373,6 +403,12 @@ export class ChatStreamingService {
     streamingMessageIndex: number,
     conversationId: string
   ): void {
+    // 增量持久化状态：定期将重新生成内容 checkpoint 到数据库
+    let regenCheckpointChunks = 0;
+    let regenLastCheckpointTime = Date.now();
+    const REGEN_CHECKPOINT_CHUNKS = 30;
+    const REGEN_CHECKPOINT_MS = 3000;
+
     emitter.on(StreamEventType.DATA, (payload: EventPayload) => {
       const chunk = payload as string;
       if (this.callbacks.getCurrentConversationId() !== conversationId) {
@@ -386,6 +422,17 @@ export class ChatStreamingService {
       this.callbacks.replaceMessageAt(streamingMessageIndex, (regeneratedMessage: ChatMessage) => {
         regeneratedMessage.content += chunk;
       });
+
+      // 增量持久化：定期将内容 checkpoint 到数据库，防止崩溃丢失
+      regenCheckpointChunks++;
+      const now = Date.now();
+      const msg = this.callbacks.getMessages()[streamingMessageIndex];
+      if (msg && msg.id && (regenCheckpointChunks >= REGEN_CHECKPOINT_CHUNKS ||
+          (now - regenLastCheckpointTime) >= REGEN_CHECKPOINT_MS)) {
+        this.databaseManager.updateChatMessage(msg.id, msg.content).catch(() => {});
+        regenCheckpointChunks = 0;
+        regenLastCheckpointTime = now;
+      }
 
       hilog.debug(DOMAIN, TAG, 'Regenerated content length=%{public}d',
         this.callbacks.getMessages()[streamingMessageIndex].content.length);

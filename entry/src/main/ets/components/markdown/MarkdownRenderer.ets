@@ -599,6 +599,20 @@ export struct MarkdownRenderer {
   private showLinkActionSheet(url: string | undefined) {
     if (!url) return;
 
+    // 安全检查：阻止可疑 URL
+    const lowerUrl = url.toLowerCase();
+    if (lowerUrl.startsWith('javascript:') || lowerUrl.startsWith('data:') ||
+        lowerUrl.startsWith('vbscript:')) {
+      const promptAction = this.getUIContext().getPromptAction();
+      promptAction.showToast({ message: '无法打开此类型的链接', duration: 2000 });
+      return;
+    }
+    if (/(\<script\b|on\w+\s*=)/i.test(url)) {
+      const promptAction = this.getUIContext().getPromptAction();
+      promptAction.showToast({ message: '该链接包含不安全内容，已阻止打开', duration: 2000 });
+      return;
+    }
+
     // 优先内置浏览器：通过 NavPathStack 跳转到内置 WebView 页面
     if (this.preferInternalBrowser && this.pathStack) {
       try {

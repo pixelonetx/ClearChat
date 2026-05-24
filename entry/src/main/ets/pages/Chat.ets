@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { connection } from '@kit.NetworkKit';
 import { ChatMessage, AppSettings, AIProvider, AIModel, ApiFormat, ThinkingConfig } from '../services/DataModels';
 import { ArrayDataSource } from '../utils/ArrayDataSource';
 import { Conversation } from '../services/ConversationModels';
@@ -16,7 +17,7 @@ import { RenameConversationDialog } from '../components/dialogs/RenameConversati
 import { ModelSelectorSheet } from '../components/dialogs/ModelSelectorDialog';
 import { AbortController, createAbortController } from '../interfaces/AbortController';
 import { SearchConfigManager } from '../services/search/SearchConfigManager';
-import { cloneChatMessage, getFriendlyErrorMessage, containsSuspiciousContent } from '../viewmodels/ChatUtils';
+import { cloneChatMessage, getFriendlyErrorMessage } from '../viewmodels/ChatUtils';
 import { ChatSidebar, ChatSidebarConfig } from '../components/chat/ChatSidebar';
 import { MessageList, MessageListConfig } from '../components/chat/MessageList';
 import { throttle, debounce } from '../common/NetworkUtils';
@@ -100,12 +101,11 @@ struct Chat {
   // 缓存已分组的对话数据，避免重复计算
   @State private cachedGroupedConversations: Record<string, Conversation[]> = {};
   @State private cachedGroupedKeys: string[] = [];
-  // 逻辑时间戳：确保消息顺序正确，即使系统时间不准确
-  private logicalTimestamp: number = Date.now();
   // 应用状态
   @State isLoading: boolean = false;
   @State isGenerating: boolean = false; // 跟踪是否正在生成内容
   @State isInitialized: boolean = false;
+  @State initializationFailed: boolean = false;
   @State hasSettings: boolean = false;
   @State enableWebSearch: boolean = false; // 联网搜索开关（统一控制）
   private ctrlFlag: boolean = false; // Ctrl键状态，用于Ctrl+Enter换行
@@ -133,22 +133,6 @@ struct Chat {
   private notifyMessagesUpdated(): void {
     // 更新数据源引用与刷新（数组引用经常被替换）
     this.messageDataSource.setDataRef(this.messages);
-  }
-
-  /**
-   * 生成递增的逻辑时间戳，确保消息顺序正确
-   * 即使系统时间不准确或时间戳相同，也能保证消息按照发送顺序排列
-   */
-  private getNextTimestamp(): number {
-    const now = Date.now();
-    // 如果当前时间大于逻辑时间戳，更新逻辑时间戳
-    if (now > this.logicalTimestamp) {
-      this.logicalTimestamp = now;
-    } else {
-      // 否则，递增逻辑时间戳（每次增加1毫秒）
-      this.logicalTimestamp += 1;
-    }
-    return this.logicalTimestamp;
   }
 
   private replaceMessageAt(index: number, updater: (message: ChatMessage) => void): void {
@@ -285,9 +269,22 @@ struct Chat {
               if (!this.isInitialized) {
                 // 加载界面
                 Column() {
-                  LoadingProgress()
-                    .width(24)
-                    .height(24)
+                  if (this.initializationFailed) {
+                    Text('初始化失败，请检查设备状态')
+                      .fontSize(14)
+                      .fontColor($r('sys.color.ohos_id_color_text_secondary'))
+                      .margin({ bottom: 16 })
+                    Button('重试')
+                      .buttonStyle(ButtonStyleMode.NORMAL)
+                      .padding({ left: 20, right: 20 })
+                      .onClick(() => {
+                        this.initializeApp();
+                      })
+                  } else {
+                    LoadingProgress()
+                      .width(24)
+                      .height(24)
+                  }
                 }
                 .width('100%')
                 .height('100%')
@@ -423,7 +420,7 @@ struct Chat {
                 .height('100%')
                 .position({ x: 0, y: 0 })
                 .zIndex(10)
-                .backgroundColor('rgba(0, 0, 0, 0.3)') // 仅半透明阴影，无模糊
+                .backgroundColor($r('sys.color.ohos_id_color_text_field_sub_bg')) // 系统遮罩色，自适应暗色/亮色/高对比度
                 .onAppear(() => {
                   hilog.debug(DOMAIN, TAG,
                     '[OVERLAY] Rendering overlay - showSideBar=%{public}s, currentBreakPoint=%{public}s',
@@ -815,10 +812,10 @@ struct Chat {
         return this.currentConversation?.id;
       },
       getCurrentModelInfo: (): ModelInfo => {
-        return this.getCurrentModelInfo();
+        return this.viewModel.getCurrentModelInfo();
       },
       getNextTimestamp: (): number => {
-        return this.getNextTimestamp();
+        return this.viewModel.getNextTimestamp();
       },
       showToast: (message: string, duration?: number): void => {
         this.showToast(message, duration);
@@ -899,6 +896,19 @@ struct Chat {
     };
 
     this.settingsReloadService = new SettingsReloadService(reloadCallbacks);
+
+    // 绑定 ViewModel 回调，使 ViewModel 能够触发 UI 反馈
+    this.viewModel.setCallbacks({
+      onStateChange: (): void => {
+        this.syncStateToViewModel();
+      },
+      onError: (message: string): void => {
+        this.showToast(message);
+      },
+      onToast: (message: string, duration?: number): void => {
+        this.showToast(message, duration);
+      }
+    });
   }
 
   async onPageShow() {
@@ -929,60 +939,54 @@ struct Chat {
   }
 
   async initializeApp() {
+    this.initializationFailed = false;
     try {
-      // 初始化数据库
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      await this.databaseManager.initDatabase(context);
-
-      // 清理历史中的tool消息（修复消息顺序问题）
-      try {
-        const cleanedCount = await this.databaseManager.cleanupToolMessages();
-        if (cleanedCount > 0) {
-          
-        }
-      } catch (cleanupError) {
-        hilog.warn(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(cleanupError));
-        // 不阻塞应用启动，忽略清理失败
-      }
-
-      // 初始化搜索配置管理器
-      try {
-        await this.searchConfigManager.init(context);
-        hilog.info(DOMAIN, TAG, 'SearchConfigManager initialized successfully');
-      } catch (searchConfigError) {
-        hilog.warn(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{public}s', String(searchConfigError));
-        // 不阻塞应用启动,searchConfigManager 会使用默认配置
-      }
-
-      // 补充 AppStorage 默认值
-      const storedReloadVersion: number | undefined =
-        AppStorage.get('conversationsReloadVersion') as (number | undefined);
-      if (typeof storedReloadVersion !== 'number' || Number.isNaN(storedReloadVersion)) {
-        AppStorage.setOrCreate('conversationsReloadVersion', 0);
-      }
-
-      // 加载设置
-      await this.loadSettings();
-
-      // 加载对话列表
-      await this.loadConversations();
-
-      // 恢复最后使用的对话
-      await this.restoreLastConversation();
-
-      // 加载聊天记录
-      await this.loadChatHistory();
-
-      this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
+      // 30 秒超时保护，避免无限加载
+      const initPromise = this.doInitialize();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('应用初始化超时')), 30000);
+      });
+      await Promise.race([initPromise, timeoutPromise]);
       this.isInitialized = true;
-
-      // 首次使用：无配置时弹引导
-      if (!this.hasSettings) {
-        this.showSetupSheet = true;
-      }
     } catch (error) {
-      
-      this.showToast('应用初始化失败');
+      hilog.error(DOMAIN, TAG, 'Initialize failed: %{public}s', String(error));
+      this.initializationFailed = true;
+    }
+  }
+
+  private async doInitialize(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    await this.databaseManager.initDatabase(context);
+
+    // 清理历史中的tool消息（修复消息顺序问题）
+    try {
+      await this.databaseManager.cleanupToolMessages();
+    } catch (cleanupError) {
+      hilog.warn(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(cleanupError));
+    }
+
+    // 初始化搜索配置管理器
+    try {
+      await this.searchConfigManager.init(context);
+    } catch (searchConfigError) {
+      hilog.warn(DOMAIN, TAG, 'Failed to init SearchConfigManager: %{public}s', String(searchConfigError));
+    }
+
+    const storedReloadVersion: number | undefined =
+      AppStorage.get('conversationsReloadVersion') as (number | undefined);
+    if (typeof storedReloadVersion !== 'number' || Number.isNaN(storedReloadVersion)) {
+      AppStorage.setOrCreate('conversationsReloadVersion', 0);
+    }
+
+    await this.loadSettings();
+    await this.loadConversations();
+    await this.restoreLastConversation();
+    await this.loadChatHistory();
+
+    this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
+
+    if (!this.hasSettings) {
+      this.showSetupSheet = true;
     }
   }
 
@@ -1126,13 +1130,8 @@ struct Chat {
 
       // 同步逻辑时间戳：从已加载的消息中找出最大时间戳
       if (this.messages.length > 0) {
-        let maxTimestamp = 0;
-        for (let i = 0; i < this.messages.length; i++) {
-          if (this.messages[i].timestamp > maxTimestamp) {
-            maxTimestamp = this.messages[i].timestamp;
-          }
-        }
-        this.logicalTimestamp = maxTimestamp;
+        const maxTimestamp = Math.max(...this.messages.map(m => m.timestamp));
+        this.viewModel.syncLogicalTimestamp(maxTimestamp);
       }
 
       // 重置自动滚动状态并滚动到底部
@@ -1253,9 +1252,7 @@ struct Chat {
       // 同步逻辑时间戳
       if (this.messages.length > 0) {
         const maxTimestamp = Math.max(...this.messages.map(m => m.timestamp));
-        if (maxTimestamp > this.logicalTimestamp) {
-          this.logicalTimestamp = maxTimestamp;
-        }
+        this.viewModel.syncLogicalTimestamp(maxTimestamp);
       }
       
       this.hideSidebar();
@@ -1393,45 +1390,6 @@ struct Chat {
     return resolved;
   }
 
-  getCurrentModelInfo(): ModelInfo {
-    if (!this.currentSettings) {
-      return { modelName: 'unknown', providerName: 'unknown' };
-    }
-
-    if (this.currentSettings.providers.length === 0 || !this.currentSettings.activeProviderId) {
-      return { modelName: 'unknown', providerName: 'unknown' };
-    }
-
-    const activeProvider =
-      this.currentSettings.providers.find(provider => provider.id === this.currentSettings!.activeProviderId);
-    if (!activeProvider) {
-      return { modelName: 'unknown', providerName: 'unknown' };
-    }
-
-    if (activeProvider.models.length === 0) {
-      return {
-        modelName: '未配置模型',
-        providerName: activeProvider.displayName || activeProvider.name
-      };
-    }
-
-    const activeModel = activeProvider.models.find(model => model.id === this.currentSettings!.activeModelId)
-      ?? activeProvider.models[0];
-
-    return {
-      modelName: activeModel.displayName || activeModel.name,
-      providerName: activeProvider.displayName || activeProvider.name,
-      temperature: activeModel.temperature,
-      maxTokens: activeModel.maxTokens,
-      thinkingEnabled: activeModel.thinkingConfig?.enabled ?? false
-    };
-  }
-
-
-  // 兼容“快速配置”中使用中文展示名、未设置 activeProviderId、或仅依赖 apiUrl 的场景
-
-
-
 
   // 分离职责 - 消息验证和初始化
   /**
@@ -1440,26 +1398,14 @@ struct Chat {
    * @returns 准备好的消息对象，或null表示验证失败
    */
   private validateAndPrepareMessage(text: string): ChatMessage | null {
-    const trimmedInput = text.trim();
+    // 委托 ViewModel 进行通用验证（空内容、长度、可疑内容、设置检查）
+    const trimmedInput = this.viewModel.validateMessageInput(text);
     if (!trimmedInput) {
-      return null;
+      return null; // ViewModel 已通过 toast 提示失败原因
     }
 
-    // 输入验证
-    if (trimmedInput.length > 10000) {
-      this.showToast('消息内容不能超过10000个字符');
-      return null;
-    }
-
-    // 检查是否包含潜在的恶意内容
-    if (containsSuspiciousContent(trimmedInput)) {
-      this.showToast('消息内容包含不当内容，请修改后重试');
-      return null;
-    }
-
-    // 检查设置
+    // UI 层特有逻辑：导航到设置页
     if (!this.hasSettings) {
-      this.showToast('请先配置API设置');
       this.pathStack.pushPathByName("Settings", null, false);
       return null;
     }
@@ -1471,7 +1417,7 @@ struct Chat {
 
     return new ChatMessage(trimmedInput, 'user', {
       conversationId: this.currentConversation?.id || 'default',
-      timestamp: this.getNextTimestamp()  // 使用逻辑时间戳确保顺序
+      timestamp: this.viewModel.getNextTimestamp()  // 使用逻辑时间戳确保顺序
     });
   }
 
@@ -1526,6 +1472,12 @@ struct Chat {
         return;
       }
 
+      // 网络连接检查（预先检测，避免等待超时才提示）
+      if (!await this.checkNetworkConnectivity()) {
+        this.showToast('网络未连接，请检查网络设置');
+        return;
+      }
+
       // 前置检查和准备
       await this.waitForLatestSettings('sendMessage');
       this.hideKeyboard();
@@ -1550,16 +1502,21 @@ struct Chat {
       this.setGenerationState(true, true, abortController);
       this.inputText = '';
 
-      // 保存用户消息
+      // 保存用户消息到 UI
       const userMessageIndex = this.appendMessage(userMessage);
-      const userMessageId = await this.databaseManager.insertChatMessage(userMessage);
-      this.replaceMessageAt(userMessageIndex, (msg) => {
-        msg.id = userMessageId;
-      });
 
-      // 初始化流式消息（委托给 streamingService）
+      // 初始化流式消息对象（不插入数据库，由事务统一处理）
       const streamingResult = await this.streamingService!.initializeStreamingMessage(userMessage, targetConversationId);
       const streamingIndex = streamingResult.index;
+
+      // 在事务中同时插入用户消息和 AI 消息，确保原子性
+      const messageIds = await this.databaseManager.insertMessagesInTransaction([userMessage, streamingResult.message]);
+      const userMessageId = messageIds[0];
+      const aiMessageId = messageIds[1];
+
+      // 回填数据库 ID 到 UI
+      this.replaceMessageAt(userMessageIndex, (msg) => { msg.id = userMessageId; });
+      this.replaceMessageAt(streamingIndex, (msg) => { msg.id = aiMessageId; });
 
       // 准备AI消息列表（委托给 streamingService）
       const messagesForAI = this.streamingService!.prepareMessagesForAPI(userMessage);
@@ -1583,12 +1540,23 @@ struct Chat {
   }
 
   // 辅助方法 - 创建新对话
+  // 检查网络连接状态
+  private async checkNetworkConnectivity(): Promise<boolean> {
+    try {
+      const netHandle = await connection.getDefaultNet();
+      const netCapabilities = await connection.getNetCapabilities(netHandle);
+      return netCapabilities.bearerTypes.length > 0;
+    } catch {
+      // 网络 API 可能不可用，默认允许继续
+      return true;
+    }
+  }
+
   private async createNewConversationForMessage(): Promise<void> {
     try {
       const newConversation = await this.databaseManager.createConversation('新对话');
       this.currentConversation = newConversation;
       await this.loadConversations();
-      await new Promise<void>(resolve => setTimeout(resolve, 100));
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to create conversation for message: %{public}s', String(error));
       const err = error instanceof Error ? error : new Error(String(error));
@@ -1637,11 +1605,10 @@ struct Chat {
         // 删除这条消息及其后的所有消息（包括对应的AI回复）
         const messagesToDelete = this.messages.slice(messageIndex);
 
-        // 从数据库删除这些消息
-        for (const msg of messagesToDelete) {
-          if (msg.id !== undefined) {
-            await this.databaseManager.deleteMessage(msg.id);
-          }
+        // 在事务中批量删除这些消息
+        const idsToDelete = messagesToDelete.filter(msg => msg.id !== undefined).map(msg => msg.id!);
+        if (idsToDelete.length > 0) {
+          await this.databaseManager.deleteMessagesInTransaction(idsToDelete);
         }
 
         // 从UI中移除这些消息
@@ -1719,25 +1686,22 @@ struct Chat {
       this.notifyMessagesUpdated();
 
       // 清空当前AI消息的内容，保留消息结构用于重新生成，并更新模型信息
-      const modelInfo = this.getCurrentModelInfo();
+      const modelInfo = this.viewModel.getCurrentModelInfo();
       this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
         regeneratingMessage.content = '';
         regeneratingMessage.modelName = modelInfo.modelName;
         regeneratingMessage.providerName = modelInfo.providerName;
       });
 
-      // 从数据库删除旧的AI消息内容
+      // 原子替换数据库记录（删除旧消息 + 插入新消息在同一个事务中）
+      let newMessageId: number;
       if (message.id !== undefined) {
-        await this.databaseManager.deleteMessage(message.id);
-        // 清除 ID，因为消息将被重新生成并重新保存
-        this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
-          regeneratingMessage.id = undefined;
-        });
+        const regeneratedMessageRecord = this.messages[messageIndex];
+        newMessageId = await this.databaseManager.replaceMessageInTransaction(message.id, regeneratedMessageRecord);
+      } else {
+        const regeneratedMessageRecord = this.messages[messageIndex];
+        newMessageId = await this.databaseManager.insertChatMessage(regeneratedMessageRecord);
       }
-
-      // 立即为重新生成的消息创建新的数据库记录
-      const regeneratedMessageRecord = this.messages[messageIndex];
-      const newMessageId = await this.databaseManager.insertChatMessage(regeneratedMessageRecord);
       this.replaceMessageAt(messageIndex, (regeneratingMessage: ChatMessage) => {
         regeneratingMessage.id = newMessageId;
       });

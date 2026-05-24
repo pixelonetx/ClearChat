@@ -238,6 +238,11 @@ export class NetworkManagerV2 {
 
   /**
    * 根据 API 格式解析请求 URL
+   *
+   * 注意：Gemini 格式的 API 密钥通过查询参数 (?key=) 传递，
+   * 因为 Google Generative Language API 不支持 header 认证。
+   * 这是 Google API 的限制，不是代码问题。
+   * sanitizeUrlForLogging() 已在日志中对密钥进行脱敏处理。
    */
   private resolveRequestUrl(
     apiUrl: string,
@@ -275,6 +280,8 @@ export class NetworkManagerV2 {
           'Accept': 'text/event-stream, application/json'
         };
       case 'gemini':
+        // Gemini API 不使用 Authorization header，密钥通过 URL 查询参数传递
+        // 参见 resolveRequestUrl()
         return {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream, application/json'

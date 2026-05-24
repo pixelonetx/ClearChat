@@ -137,7 +137,7 @@ export struct WebViewBrowser {
           .zoomAccess(true)
           .domStorageAccess(true)
           .imageAccess(true)
-          .mixedMode(MixedMode.All)
+          .mixedMode(MixedMode.Compatible)
           .cacheMode(CacheMode.Default)
           .onTitleReceive((event) => {
             const t: string = (event as TitleEvent).title;

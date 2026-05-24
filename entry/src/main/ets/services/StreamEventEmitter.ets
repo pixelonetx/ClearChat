@@ -69,7 +69,11 @@ export interface SearchArguments {
   resultSize?: number;
 }
 
-// 统一的事件载荷类型
+// 统一的事件载荷类型（ArkTS 限制：不支持索引访问类型，使用联合类型）
+// 各事件对应的载荷：
+//   DATA → string, METADATA → StreamMetadata, ERROR → Error,
+//   WARNING → string, COMPLETE → void, STATE_CHANGED → StreamStateSnapshot,
+//   PROGRESS → ProgressData, TOOL_CALL → ToolCallData[]
 export type EventPayload = string | import('../services/DataModels').StreamMetadata | Error | StreamStateSnapshot
   | ProgressData | ToolCallData[] | void;
 

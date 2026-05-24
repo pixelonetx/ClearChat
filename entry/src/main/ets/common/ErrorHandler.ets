@@ -155,12 +155,14 @@ export class ErrorHandler {
    * 将原始错误转换为 AppError
    */
   parseError(error: Error | string | AppError): AppError {
-    // 已经是 AppError
+    // 已经是 AppError，直接返回
     if (error instanceof AppError) {
       return error;
     }
 
-    // Error 实例
+    // Error 实例（包括 DatabaseError、NetworkError 等子类）
+    // ArkTS 限制：instanceof 仅作用于联合类型中的类型，
+    // DatabaseError/NetworkError 会进入此分支，由 inferErrorCode 推断具体错误码
     if (error instanceof Error) {
       const code = this.inferErrorCode(error);
       return new AppError(code, error.message, error);
@@ -199,6 +201,19 @@ export class ErrorHandler {
     }
     if (normalized.includes('ssl') || normalized.includes('certificate')) {
       return ErrorCode.SSL_ERROR;
+    }
+
+    // 数据库错误
+    if (normalized.includes('database') || normalized.includes('db_') ||
+        message.includes('数据库') || normalized.includes('not initialized')) {
+      return ErrorCode.DB_CONNECTION_ERROR;
+    }
+    if (normalized.includes('insert') || normalized.includes('update') ||
+        normalized.includes('delete') || normalized.includes('save')) {
+      return ErrorCode.DB_WRITE_ERROR;
+    }
+    if (normalized.includes('query') || normalized.includes('select')) {
+      return ErrorCode.DB_QUERY_ERROR;
     }
 
     // API错误
