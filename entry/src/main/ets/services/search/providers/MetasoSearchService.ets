@@ -95,7 +95,7 @@ export class MetasoSearchService extends SearchService<MetasoOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('Metaso search failed: %{public}s', error.message);
+        logger.error('Metaso search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

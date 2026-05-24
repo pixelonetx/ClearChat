@@ -5,6 +5,9 @@
 import { ChatMessage } from '../../services/DataModels';
 import { ArrayDataSource } from '../../utils/ArrayDataSource';
 import { MessageItem } from './MessageItem';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const TAG = 'MessageList';
 
 /**
  * MessageList 配置接口
@@ -102,11 +105,11 @@ export struct MessageList {
               }
             })
           }, (message: ChatMessage, index: number): string => {
-            // 稳定的 key 生成策略，减少重建和提升滚动性能
+            // 稳定的 key 生成策略：已持久化消息使用唯一 ID，临时消息使用不变属性
             if (message.id !== undefined) {
-              return `saved_${message.id}_${message.content.length}`;
+              return `msg_${message.id}`;
             } else {
-              return `temp_${index}_${message.role}_${message.content.length}_${message.timestamp % 10000}`;
+              return `temp_${index}_${message.role}_${message.timestamp}`;
             }
           })
         }
@@ -143,7 +146,7 @@ export struct MessageList {
             this.showScrollToBottomButton = true;
           }
         } catch (_e) {
-          // isAtEnd() 不可用时忽略，依赖 onScrollEdge 兜底
+          hilog.debug(0x0000, TAG, 'isAtEnd() unavailable, relying on onScrollEdge fallback');
         }
       })
       .onTouch((event: TouchEvent): void => {
@@ -177,14 +180,10 @@ export struct MessageList {
       .fontSize(16)
       .fontColor($r('app.color.text_color'))
       .type(ButtonType.Circle)
-      .backgroundColor(Color.Transparent)
+      .backgroundColor($r('app.color.bg_secondary'))
       .size({ height: 40, width: 40 })
       .padding({ left: 6, right: 6 })
-      .backgroundBlurStyle(BlurStyle.Thin, {
-        colorMode: ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.DEFAULT,
-        scale: 1.0
-      })
+      .opacity(0.9)
       .onClick((): void => {
         if (this.scroller) {
           this.scroller.scrollEdge(Edge.Bottom);
@@ -212,7 +211,7 @@ export struct MessageList {
             this.scroller.scrollTo({ xOffset: 0, yOffset: (currentOffset.yOffset || 0) + 1000 });
           }
         } catch (scrollError) {
-          // ignore
+          hilog.debug(0x0000, TAG, 'scrollTo fallback also failed');
         }
       }
     }

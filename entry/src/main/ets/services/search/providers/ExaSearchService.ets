@@ -94,7 +94,7 @@ export class ExaSearchService extends SearchService<ExaOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('Exa search failed: %{public}s', error.message);
+        logger.error('Exa search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

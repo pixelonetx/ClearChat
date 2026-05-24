@@ -107,7 +107,7 @@ export class SearXNGSearchService extends SearchService<SearXNGOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('SearXNG search failed: %{public}s', error.message);
+        logger.error('SearXNG search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

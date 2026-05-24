@@ -21,6 +21,10 @@ interface PageBeginEvent {
   url: string;
 }
 
+interface LoadInterceptEvent {
+  data: string;
+}
+
 // Web控制器扩展接口
 interface WebControllerExtensions {
   accessBackward: () => boolean;
@@ -137,7 +141,8 @@ export struct WebViewBrowser {
           .zoomAccess(true)
           .domStorageAccess(true)
           .imageAccess(true)
-          .mixedMode(MixedMode.Compatible)
+          .mixedMode(MixedMode.All)
+          .fileAccess(false)
           .cacheMode(CacheMode.Default)
           .onTitleReceive((event) => {
             const t: string = (event as TitleEvent).title;
@@ -159,8 +164,14 @@ export struct WebViewBrowser {
               this.finishLoading();
             }
           })
-          .onLoadIntercept((_event) => {
-            // 返回 false 表示不拦截，交由 WebView 默认处理
+          .onLoadIntercept((event) => {
+            const url: string = (event as LoadInterceptEvent).data || '';
+            // 拦截危险协议：javascript、data、file
+            if (url.startsWith('javascript:') || url.startsWith('data:') ||
+                url.startsWith('file:') || url.startsWith('vbscript:')) {
+              logger.warn('Blocked dangerous URL scheme: %{private}s', url.substring(0, 80));
+              return true;
+            }
             return false;
           })
           .onPageEnd((_event) => {

@@ -43,13 +43,13 @@ export class MarkdownStyle {
   /** 表格单元格文本字体大小 */
   static readonly TABLE_CELL_FONT_SIZE: number = 14;
 
-  // ============ 颜色配置 ============
+  // ============ 颜色配置（使用 $r 资源引用，自动适配暗色模式）============
   /** 链接颜色 */
-  static readonly LINK_COLOR: string = '#1A73E8';
+  static readonly LINK_COLOR: Resource = $r('app.color.markdown_link_color');
   /** 代码块（行内代码）颜色 */
-  static readonly CODE_COLOR: string = '#C678DD';
+  static readonly CODE_COLOR: Resource = $r('app.color.markdown_code_color');
   /** 普通文本颜色 */
-  static readonly TEXT_COLOR: string = '#1F1F1F';
+  static readonly TEXT_COLOR: Resource = $r('app.color.text_color');
 
   // ============ 字体配置 ============
   /** 等宽字体（用于代码块） */
@@ -58,8 +58,8 @@ export class MarkdownStyle {
   static readonly FONT_FAMILY_DEFAULT: string = 'default';
 
   // ============ 装饰效果 ============
-  /** 链接下划线颜色 */
-  static readonly LINK_UNDERLINE_COLOR: string = '#1A73E8';
+  /** 链接下划线颜色（与链接颜色一致） */
+  static readonly LINK_UNDERLINE_COLOR: Resource = $r('app.color.markdown_link_color');
 
   // ============ 间距配置 ============
   /** 标题上下间距 - 上边距 */

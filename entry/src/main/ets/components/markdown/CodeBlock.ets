@@ -49,7 +49,7 @@ export struct CodeBlock {
           }
           .backgroundColor($r('app.color.bg_secondary'))
           .type(ButtonType.Normal)
-          .border({ width: 1, color: '#E0E0E0', radius: 4 })
+          .border({ width: 1, color: $r('app.color.border_primary'), radius: 4 })
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .onClick(() => {
             this.copyToClipboard();

@@ -91,7 +91,7 @@ export class BraveSearchService extends SearchService<BraveOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('Brave search failed: %{public}s', error.message);
+        logger.error('Brave search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

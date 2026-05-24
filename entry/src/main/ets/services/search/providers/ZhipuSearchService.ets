@@ -92,7 +92,7 @@ export class ZhipuSearchService extends SearchService<ZhipuOptions> {
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('Zhipu search failed: %{public}s', error.message);
+        logger.error('Zhipu search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

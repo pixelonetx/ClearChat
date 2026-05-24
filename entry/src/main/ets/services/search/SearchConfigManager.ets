@@ -87,46 +87,84 @@ export class SearchConfigManager {
       await this.loadConfig();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{public}s', err.message);
+      hilog.error(DOMAIN, TAG, 'Failed to initialize SearchConfigManager: %{private}s', err.message);
       // 不抛出错误，使用默认配置继续运行
     }
   }
 
   /**
    * 将旧的 Preferences 中存储的 API 密钥迁移到加密数据库（一次性操作）
+   * 最多重试 3 次，失败后清除 Preferences 中的明文密钥
    */
   private async migrateApiKeysToDb(): Promise<void> {
     if (!this.preferencesProxy || !this.databaseManager) {
       return;
     }
-    try {
-      const migrated = this.preferencesProxy.getSync(this.KEY_MIGRATED, false) as boolean;
-      if (migrated) {
-        return;
-      }
-      const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
-      if (enabledServicesJson === '[]') {
-        this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
-        await this.preferencesProxy.flush();
-        return;
-      }
-      const servicesData = JSON.parse(enabledServicesJson) as Object[];
-      for (const data of servicesData) {
-        const jsonObj = data as Record<string, Object | string | number | boolean | null>;
-        if (jsonObj['id'] && jsonObj['type']) {
-          // 存储完整配置（含 API 密钥）到加密数据库
-          await this.databaseManager.saveSearchServiceConfig(
-            jsonObj['id'] as string,
-            jsonObj['type'] as string,
-            JSON.stringify(data)
-          );
-        }
-      }
+    const migrated = this.preferencesProxy.getSync(this.KEY_MIGRATED, false) as boolean;
+    if (migrated) {
+      return;
+    }
+    const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
+    if (enabledServicesJson === '[]') {
       this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
       await this.preferencesProxy.flush();
-      hilog.info(DOMAIN, TAG, 'Migrated %{public}d search configs to encrypted DB', servicesData.length);
-    } catch (error) {
-      hilog.warn(DOMAIN, TAG, 'Search config migration skipped: %{public}s', String(error));
+      return;
+    }
+
+    const MAX_RETRIES = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const servicesData = JSON.parse(enabledServicesJson) as Object[];
+        for (const data of servicesData) {
+          const jsonObj = data as Record<string, Object | string | number | boolean | null>;
+          if (jsonObj['id'] && jsonObj['type']) {
+            await this.databaseManager!.saveSearchServiceConfig(
+              jsonObj['id'] as string,
+              jsonObj['type'] as string,
+              JSON.stringify(data)
+            );
+          }
+        }
+        this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
+        await this.preferencesProxy.flush();
+        hilog.info(DOMAIN, TAG, 'Migrated %{public}d search configs to encrypted DB', servicesData.length);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        hilog.warn(DOMAIN, TAG, 'Search config migration attempt %{public}d failed: %{private}s',
+          attempt, lastError.message);
+        if (attempt < MAX_RETRIES) {
+          // 等待后重试
+          await new Promise<void>((r) => setTimeout(() => r(), 500 * attempt));
+        }
+      }
+    }
+
+    // 所有重试均失败：清除 Preferences 中的明文 API 密钥，防止泄露
+    hilog.error(DOMAIN, TAG, 'Search config migration failed after %{public}d attempts, sanitizing preferences',
+      MAX_RETRIES);
+    try {
+      const servicesData = JSON.parse(enabledServicesJson) as Object[];
+      const sanitized = servicesData.map((data: Object) => {
+        const record = data as Record<string, Object | string | number | boolean | null>;
+        const cleaned: Record<string, Object | string | number | boolean | null> = {};
+        const keys = Object.keys(record);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          if (k !== 'apiKey' && k !== 'password') {
+            cleaned[k] = record[k];
+          }
+        }
+        return cleaned;
+      });
+      this.preferencesProxy.putSync(this.KEY_ENABLED_SERVICES, JSON.stringify(sanitized));
+      this.preferencesProxy.putSync(this.KEY_MIGRATED, true);
+      await this.preferencesProxy.flush();
+    } catch (sanitizeErr) {
+      hilog.error(DOMAIN, TAG, 'Failed to sanitize preferences after migration failure: %{private}s',
+        String(sanitizeErr));
     }
   }
 
@@ -155,20 +193,33 @@ export class SearchConfigManager {
             });
           }
         } catch (dbError) {
-          hilog.warn(DOMAIN, TAG, 'Failed to load search configs from DB: %{public}s', String(dbError));
+          hilog.warn(DOMAIN, TAG, 'Failed to load search configs from DB: %{private}s', String(dbError));
         }
       }
 
       // 回退：如果 DB 中无数据，从 Preferences 加载（用于迁移前或 DB 故障时）
+      // 注意：此路径的数据可能不含 apiKey/password（迁移失败后已清除），
+      // 也可能含有（迁移前）。为安全起见，过滤掉敏感字段。
       if (this.config.enabledServices.length === 0) {
         const enabledServicesJson = this.preferencesProxy.getSync(this.KEY_ENABLED_SERVICES, '[]') as string;
         try {
           const servicesData = JSON.parse(enabledServicesJson) as Object[];
-          this.config.enabledServices = servicesData.map((data: Object) => {
-            return SearchServiceOptions.fromJson(data);
-          });
+          this.config.enabledServices = servicesData
+            .map((data: Object) => {
+              // 过滤 apiKey 和 password 字段
+              const record = data as Record<string, Object | string | number | boolean | null>;
+              const filtered: Record<string, Object | string | number | boolean | null> = {};
+              const keys = Object.keys(record);
+              for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                if (k !== 'apiKey' && k !== 'password') {
+                  filtered[k] = record[k];
+                }
+              }
+              return SearchServiceOptions.fromJson(filtered);
+            });
         } catch (error) {
-          hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services from prefs: %{public}s', String(error));
+          hilog.warn(DOMAIN, TAG, 'Failed to parse enabled services from prefs: %{private}s', String(error));
           this.config.enabledServices = [];
         }
       }
@@ -191,7 +242,7 @@ export class SearchConfigManager {
         String(this.config.enableWebSearch), this.config.enabledServices.length);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to load config: %{public}s', err.message);
+      hilog.error(DOMAIN, TAG, 'Failed to load config: %{private}s', err.message);
     }
   }
 
@@ -253,7 +304,7 @@ export class SearchConfigManager {
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to save config: %{public}s', err.message);
+      hilog.error(DOMAIN, TAG, 'Failed to save config: %{private}s', err.message);
       throw err;
     }
   }
@@ -376,7 +427,7 @@ export class SearchConfigManager {
       return success;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Connection test error for %{public}s: %{public}s', serviceId, err.message);
+      hilog.error(DOMAIN, TAG, 'Connection test error for %{public}s: %{private}s', serviceId, err.message);
       this.setConnectionStatus(serviceId, false);
       return false;
     }
@@ -419,7 +470,7 @@ export class SearchConfigManager {
       this.initializeDefaultConfig();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      hilog.error(DOMAIN, TAG, 'Failed to clear config: %{public}s', err.message);
+      hilog.error(DOMAIN, TAG, 'Failed to clear config: %{private}s', err.message);
       throw err;
     }
   }

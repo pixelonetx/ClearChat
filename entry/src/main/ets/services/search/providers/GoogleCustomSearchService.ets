@@ -90,7 +90,7 @@ export class GoogleCustomSearchService extends SearchService<GoogleCustomSearchO
       return result;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error('Google Custom Search failed: %{public}s', error.message);
+        logger.error('Google Custom Search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

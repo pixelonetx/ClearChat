@@ -306,9 +306,10 @@ export class ChatStreamingService {
     // 增量持久化状态：定期将流式内容 checkpoint 到数据库，防止崩溃丢失
     let checkpointChunks = 0;
     let lastCheckpointTime = Date.now();
+    let pendingCheckpoint: Promise<void> | null = null;
     const CHECKPOINT_INTERVAL_MS = 3000;
     const CHECKPOINT_CHUNK_COUNT = 30;
-    const doCheckpoint = async (): Promise<void> => {
+    const doCheckpoint = (): void => {
       const messages = this.callbacks.getMessages();
       if (streamingMessageIndex >= messages.length) {
         return;
@@ -317,13 +318,24 @@ export class ChatStreamingService {
       if (!msg.id || !msg.content) {
         return;
       }
-      try {
-        await this.databaseManager.updateChatMessage(msg.id, msg.content);
-        checkpointChunks = 0;
-        lastCheckpointTime = Date.now();
-      } catch (err) {
-        // checkpoint 失败不阻塞流式处理
-      }
+      // 串行化 checkpoint：等待上一个完成后再执行新的，避免并发写同一行
+      const prev = pendingCheckpoint ?? Promise.resolve();
+      pendingCheckpoint = prev.then(async () => {
+        // 再次验证，防止在等待期间消息被移除
+        const currentMessages = this.callbacks.getMessages();
+        if (streamingMessageIndex >= currentMessages.length) return;
+        const currentMsg = currentMessages[streamingMessageIndex];
+        if (!currentMsg.id || !currentMsg.content) return;
+        try {
+          await this.databaseManager.updateChatMessage(currentMsg.id, currentMsg.content);
+          checkpointChunks = 0;
+          lastCheckpointTime = Date.now();
+        } catch (err) {
+          hilog.debug(DOMAIN, TAG, 'Checkpoint failed (non-blocking): %{public}s', String(err));
+        }
+      }).catch((err: Error) => {
+        hilog.debug(DOMAIN, TAG, 'Checkpoint chain rejection: %{public}s', String(err));
+      });
     };
 
     const timeoutId = setTimeout(() => {
@@ -367,10 +379,20 @@ export class ChatStreamingService {
 
       if (!toolCallHandled) {
         this.handleStreamComplete();
-        this.persistStreamedMessage(streamingMessageIndex, conversationId, currentConversationTitle)
-          .catch((err: Error) => {
-            hilog.error(DOMAIN, TAG, 'Failed to persist message on complete: %{public}s', String(err));
-          });
+        // 等待进行中的 checkpoint 完成后再做 final persist，避免行级竞态
+        const finalize = async (): Promise<void> => {
+          if (pendingCheckpoint) {
+            try {
+              await pendingCheckpoint;
+            } catch (_err) {
+              // checkpoint 失败不阻塞 final persist
+            }
+          }
+          await this.persistStreamedMessage(streamingMessageIndex, conversationId, currentConversationTitle);
+        };
+        finalize().catch((err: Error) => {
+          hilog.error(DOMAIN, TAG, 'Failed to persist message on complete: %{public}s', String(err));
+        });
       }
     });
 
@@ -429,7 +451,9 @@ export class ChatStreamingService {
       const msg = this.callbacks.getMessages()[streamingMessageIndex];
       if (msg && msg.id && (regenCheckpointChunks >= REGEN_CHECKPOINT_CHUNKS ||
           (now - regenLastCheckpointTime) >= REGEN_CHECKPOINT_MS)) {
-        this.databaseManager.updateChatMessage(msg.id, msg.content).catch(() => {});
+        this.databaseManager.updateChatMessage(msg.id, msg.content).catch((err: Error) => {
+          hilog.debug(DOMAIN, TAG, 'Regen checkpoint failed (non-blocking): %{public}s', String(err));
+        });
         regenCheckpointChunks = 0;
         regenLastCheckpointTime = now;
       }
@@ -726,7 +750,7 @@ export class ChatStreamingService {
 
       const tools = this.getSearchTools(true, apiConfig.apiFormat);
 
-      hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{public}s, model=%{public}s, messageCount=%{public}d',
+      hilog.info(DOMAIN, TAG, 'Request params: apiUrl=%{private}s, model=%{public}s, messageCount=%{public}d',
         apiConfig.apiUrl.substring(0, 30), apiConfig.modelName, messagesForAI.length);
 
       const emitter = await this.networkManager.sendStreamChatRequestV2(

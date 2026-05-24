@@ -94,7 +94,7 @@ export class TavilySearchService extends SearchService<TavilyOptions> {
       return resultObj;
     } catch (error) {
       if (error instanceof Error) {
-        logger.error( 'Tavily search failed: %{public}s', error.message);
+        logger.error( 'Tavily search failed: %{private}s', error.message);
         throw error;
       }
       throw new Error('Unknown error occurred');

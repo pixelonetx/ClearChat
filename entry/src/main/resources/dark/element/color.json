@@ -51,6 +51,14 @@
     {
       "name": "error_color",
       "value": "#FF453A"
+    },
+    {
+      "name": "markdown_code_color",
+      "value": "#D4A0E8"
+    },
+    {
+      "name": "markdown_link_color",
+      "value": "#4DA3FF"
     }
   ]
 }

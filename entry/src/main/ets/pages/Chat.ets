@@ -109,6 +109,7 @@ struct Chat {
   @State hasSettings: boolean = false;
   @State enableWebSearch: boolean = false; // 联网搜索开关（统一控制）
   private ctrlFlag: boolean = false; // Ctrl键状态，用于Ctrl+Enter换行
+  private initCancelled: boolean = false; // 初始化取消令牌
   // 滚动按钮相关状态
   @State showScrollToBottomButton: boolean = false; // 是否显示"滚动到底部"按钮
   @State shouldAutoScroll: boolean = true; // 是否自动跟随滚动到底部
@@ -353,7 +354,8 @@ struct Chat {
                         // bump settingsVersion 以通知其他页面
                         const ver = (this.settingsVersion ?? 0) + 1;
                         AppStorage.setOrCreate('settingsVersion', ver);
-                      }).catch(() => {
+                      }).catch((err: Error) => {
+                        hilog.debug(DOMAIN, TAG, 'Save web search setting version failed: %{public}s', String(err));
                       });
                     }
                   })
@@ -940,14 +942,20 @@ struct Chat {
 
   async initializeApp() {
     this.initializationFailed = false;
+    this.initCancelled = false;
     try {
-      // 30 秒超时保护，避免无限加载
+      // 30 秒超时保护，超时后取消初始化并清理后台任务
       const initPromise = this.doInitialize();
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('应用初始化超时')), 30000);
+        setTimeout(() => {
+          this.initCancelled = true; // 通知 doInitialize 停止
+          reject(new Error('应用初始化超时'));
+        }, 30000);
       });
       await Promise.race([initPromise, timeoutPromise]);
-      this.isInitialized = true;
+      if (!this.initCancelled) {
+        this.isInitialized = true;
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Initialize failed: %{public}s', String(error));
       this.initializationFailed = true;
@@ -957,6 +965,7 @@ struct Chat {
   private async doInitialize(): Promise<void> {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     await this.databaseManager.initDatabase(context);
+    if (this.initCancelled) return;
 
     // 清理历史中的tool消息（修复消息顺序问题）
     try {
@@ -964,6 +973,7 @@ struct Chat {
     } catch (cleanupError) {
       hilog.warn(DOMAIN, TAG, 'Failed to cleanup tool messages: %{public}s', String(cleanupError));
     }
+    if (this.initCancelled) return;
 
     // 初始化搜索配置管理器
     try {
@@ -971,6 +981,7 @@ struct Chat {
     } catch (searchConfigError) {
       hilog.warn(DOMAIN, TAG, 'Failed to init SearchConfigManager: %{public}s', String(searchConfigError));
     }
+    if (this.initCancelled) return;
 
     const storedReloadVersion: number | undefined =
       AppStorage.get('conversationsReloadVersion') as (number | undefined);
@@ -979,13 +990,16 @@ struct Chat {
     }
 
     await this.loadSettings();
+    if (this.initCancelled) return;
     await this.loadConversations();
+    if (this.initCancelled) return;
     await this.restoreLastConversation();
+    if (this.initCancelled) return;
     await this.loadChatHistory();
 
     this.handledReloadVersion = this.conversationsReloadVersion ?? 0;
 
-    if (!this.hasSettings) {
+    if (!this.hasSettings && !this.initCancelled) {
       this.showSetupSheet = true;
     }
   }
@@ -1546,9 +1560,15 @@ struct Chat {
       const netHandle = await connection.getDefaultNet();
       const netCapabilities = await connection.getNetCapabilities(netHandle);
       return netCapabilities.bearerTypes.length > 0;
-    } catch {
-      // 网络 API 可能不可用，默认允许继续
-      return true;
+    } catch (err) {
+      // 权限不足或网络 API 不可用时，提示用户手动确认网络状态
+      hilog.warn(DOMAIN, TAG, 'Network check failed: %{public}s', String(err));
+      try {
+        Prompt.showToast({ message: '无法检测网络状态，请确认网络连接后重试', duration: 2000 });
+      } catch (_toastErr) {
+        // Toast 显示失败不影响流程
+      }
+      return false;
     }
   }
 

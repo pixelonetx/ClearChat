@@ -208,21 +208,21 @@ export class DatabaseManager {
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN citations_json TEXT`);
       } catch (e) {
-        // 若已存在则忽略
+        logger.debug('ALTER TABLE citations_json skipped (likely exists): %{public}s', String(e));
       }
 
       // 兼容旧版本表结构：补充 messages.metadata 列（用于工具调用）
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.CHAT_TABLE} ADD COLUMN metadata TEXT`);
       } catch (e3) {
-        // 若已存在则忽略
+        logger.debug('ALTER TABLE metadata skipped (likely exists): %{public}s', String(e3));
       }
 
       // 兼容旧版本设置表结构：补充 settings.enable_web_search 列
       try {
         await this.rdbStore.executeSql(`ALTER TABLE ${Constants.SETTINGS_TABLE} ADD COLUMN enable_web_search INTEGER DEFAULT 0`);
       } catch (e2) {
-        // Column may already exist
+        logger.debug('ALTER TABLE enable_web_search skipped (likely exists): %{public}s', String(e2));
       }
 
       // 创建索引

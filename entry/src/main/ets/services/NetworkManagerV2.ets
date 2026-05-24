@@ -646,7 +646,7 @@ export class NetworkManagerV2 {
 
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      logger.error( 'Stream request failed: %{public}s', err.message);
+      logger.error( 'Stream request failed: %{private}s', err.message);
       
       if (!state.isErrorDispatched() && !state.isUserAborted()) {
         emitter.emit(StreamEventType.ERROR, err);
@@ -866,13 +866,13 @@ export class NetworkManagerV2 {
       usingProtocol: http.HttpProtocol.HTTP1_1
     };
 
-    logger.info( 'Performing HTTP request to: %{public}s', this.sanitizeUrlForLogging(url));
+    logger.info( 'Performing HTTP request to: %{private}s', this.sanitizeUrlForLogging(url));
 
       return new Promise<number>((resolve, reject) => {
         httpRequest.requestInStream(url, options).then((responseCode: number) => {
           resolve(responseCode);
         }).catch((err: Error) => {
-        logger.error( 'HTTP request error: %{public}s', String(err));
+        logger.error( 'HTTP request error: %{private}s', String(err));
         reject(err);
       });
     });
@@ -1034,12 +1034,12 @@ export class NetworkManagerV2 {
         readTimeout: requestTimeout
       };
 
-      logger.info( 'Sending non-streaming request to: %{public}s', this.sanitizeUrlForLogging(requestUrl));
+      logger.info( 'Sending non-streaming request to: %{private}s', this.sanitizeUrlForLogging(requestUrl));
 
       // 发送请求
       httpRequest.request(requestUrl, options, (err: Error, data: http.HttpResponse) => {
         if (err) {
-          logger.error( 'HTTP request failed: %{public}s', String(err));
+          logger.error( 'HTTP request failed: %{private}s', String(err));
           httpRequest.destroy();
           const errorMessage = this.getNetworkErrorMessage(err);
           reject(new NetworkError(errorMessage));
@@ -1056,7 +1056,7 @@ export class NetworkManagerV2 {
             let errorMessage = `请求失败，状态码: ${data.responseCode}`;
             
             try {
-              logger.error( 'HTTP error response body: %{public}s', data.result as string);
+              logger.error( 'HTTP error response status: %{public}d', data.responseCode);
               const errorData: ErrorResponse = JSON.parse(data.result as string);
               if (errorData.error && errorData.error.message) {
                 errorMessage = this.getApiErrorMessage(errorData.error.message, data.responseCode);
